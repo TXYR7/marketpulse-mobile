@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0e1417" />
+    <meta name="description" content="MarketPulse 手机版 · A股情绪与连板行情" />
+    <title>MarketPulse 手机版</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-row">
+        <div class="brand"><span class="dot"></span> MarketPulse <span class="phase-badge" id="phaseBadge">连接中</span></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="date" id="dateLabel">--</span>
+          <button class="refresh-btn" id="refreshBtn" title="刷新" aria-label="刷新">↻</button>
+        </div>
+      </div>
+      <div class="status-strip" id="statusStrip"></div>
+    </header>
+
+    <div class="ptr" id="ptr"><span class="spin">↻</span> 正在刷新…</div>
+
+    <main>
+      <!-- 盘中 -->
+      <section class="view active" id="view-intraday">
+        <div class="banner hide" id="intradayBanner"></div>
+        <div class="sec-title"><h2>涨停池</h2><span class="hint" id="ztHint">--</span></div>
+        <div class="toolbar">
+          <label class="search"><span aria-hidden="true">⌕</span><input id="ztSearch" type="search" placeholder="搜索名称 / 代码" autocomplete="off" /></label>
+          <div class="seg" id="ztSort">
+            <button data-sort="boards" class="on">连板</button>
+            <button data-sort="seal">封单</button>
+            <button data-sort="pct">涨幅</button>
+          </div>
+        </div>
+        <div class="list" id="ztList"></div>
+
+        <details class="fold" id="dtFold">
+          <summary>跌停池 <span id="dtCount" class="hint">0</span></summary>
+          <div class="body"><div class="list" id="dtList"></div></div>
+        </details>
+        <details class="fold" id="zbFold">
+          <summary>炸板池 <span id="zbCount" class="hint">0</span></summary>
+          <div class="body"><div class="list" id="zbList"></div></div>
+        </details>
+      </section>
+
+      <!-- 梯队 -->
+      <section class="view" id="view-ladder">
+        <div class="sec-title"><h2>连板梯队</h2><span class="hint" id="ladderHint">--</span></div>
+        <div id="ladderWrap"></div>
+      </section>
+
+      <!-- 题材 -->
+      <section class="view" id="view-theme">
+        <div class="sec-title"><h2>题材 / 行业强度</h2><span class="hint">按涨停家数</span></div>
+        <div class="list" id="themeList"></div>
+      </section>
+
+      <!-- 自选 -->
+      <section class="view" id="view-watch">
+        <div class="sec-title"><h2>自选观察</h2><span class="hint">本地存储</span></div>
+        <div class="toolbar">
+          <label class="search"><span aria-hidden="true">＋</span><input id="watchInput" type="search" placeholder="输入代码加入自选，如 600519" inputmode="numeric" autocomplete="off" /></label>
+        </div>
+        <div class="list" id="watchList"></div>
+        <div class="empty hide" id="watchEmpty">还没有自选，输入代码添加。数据存于本机浏览器。</div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="view" id="view-settings">
+        <div class="sec-title"><h2>设置</h2></div>
+        <div class="set-row">
+          <label for="setTheme">主题</label>
+          <select id="setTheme"><option value="dark">深色</option><option value="light">浅色</option></select>
+        </div>
+        <div class="set-row">
+          <label for="setRefresh">自动刷新</label>
+          <select id="setRefresh">
+            <option value="0">关闭</option>
+            <option value="8000">8 秒</option>
+            <option value="15000">15 秒</option>
+            <option value="30000">30 秒</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label for="setDate">行情日期 (YYYYMMDD)</label>
+          <input id="setDate" type="number" inputmode="numeric" placeholder="留空=今日" />
+        </div>
+        <div class="set-row">
+          <label>清空本地数据</label>
+          <button class="btn" id="clearBtn" style="flex:0 0 auto;padding:0 14px;height:36px">清空自选</button>
+        </div>
+        <div class="about">
+          MarketPulse 手机版 · 数据来自东方财富公开接口，由手机浏览器直接获取，无后端服务器。<br />
+          行情有延迟，仅供信息展示，不构成投资建议。<br />
+          封单/成交额/市值单位为元；涨停池价格为厘(÷1000)。非交易时段显示最近交易日快照。
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottomnav">
+      <button class="on" data-view="intraday"><span class="ic">📈</span>盘中</button>
+      <button data-view="ladder"><span class="ic">🪜</span>梯队</button>
+      <button data-view="theme"><span class="ic">🧩</span>题材</button>
+      <button data-view="watch"><span class="ic">⭐</span>自选</button>
+      <button data-view="settings"><span class="ic">⚙️</span>设置</button>
+    </nav>
+
+    <div class="scrim" id="scrim"></div>
+    <div class="sheet" id="sheet">
+      <div class="grip"></div>
+      <div id="sheetBody"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

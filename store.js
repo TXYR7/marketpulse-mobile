@@ -1,7 +1,7 @@
-// store.js — 自选与设置的本地持久化（IndexedDB，仅存本机）
+// store.js — 本地持久化（IndexedDB，仅存本机）：自选 / 设置 / 交易流水 / 复盘日记 / 历史涨停池缓存
 
 const DB = 'mp-mobile';
-const VER = 1;
+const VER = 2;
 let _db = null;
 
 function open() {
@@ -12,12 +12,16 @@ function open() {
       const db = req.result;
       if (!db.objectStoreNames.contains('watch')) db.createObjectStore('watch', { keyPath: 'code' });
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('trades')) db.createObjectStore('trades', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('reviews')) db.createObjectStore('reviews', { keyPath: 'date' });
+      if (!db.objectStoreNames.contains('history')) db.createObjectStore('history'); // key = YYYYMMDD -> {date, stocks:[{code,boards,industry,name}]}
     };
     req.onsuccess = () => { _db = req.result; res(_db); };
     req.onerror = () => rej(req.error);
   });
 }
 
+/* ---------- 自选 ---------- */
 export async function getWatch() {
   const db = await open();
   return new Promise((res, rej) => {
@@ -27,7 +31,6 @@ export async function getWatch() {
     r.onerror = () => rej(r.error);
   });
 }
-
 export async function putWatch(item) {
   const db = await open();
   return new Promise((res, rej) => {
@@ -37,7 +40,6 @@ export async function putWatch(item) {
     tx.onerror = () => rej(tx.error);
   });
 }
-
 export async function delWatch(code) {
   const db = await open();
   return new Promise((res, rej) => {
@@ -48,6 +50,7 @@ export async function delWatch(code) {
   });
 }
 
+/* ---------- 设置 KV ---------- */
 export async function getKV(k, def) {
   const db = await open();
   return new Promise((res, rej) => {
@@ -57,7 +60,6 @@ export async function getKV(k, def) {
     r.onerror = () => rej(r.error);
   });
 }
-
 export async function setKV(k, v) {
   const db = await open();
   return new Promise((res, rej) => {
@@ -65,5 +67,92 @@ export async function setKV(k, v) {
     tx.objectStore('kv').put(v, k);
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
+  });
+}
+
+/* ---------- 交易流水 ---------- */
+export async function getTrades() {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('trades', 'readonly');
+    const r = tx.objectStore('trades').getAll();
+    r.onsuccess = () => res((r.result || []).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
+    r.onerror = () => rej(r.error);
+  });
+}
+export async function putTrade(item) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('trades', 'readwrite');
+    tx.objectStore('trades').put(item);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+export async function delTrade(id) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('trades', 'readwrite');
+    tx.objectStore('trades').delete(id);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+/* ---------- 复盘日记 ---------- */
+export async function getReviews() {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('reviews', 'readonly');
+    const r = tx.objectStore('reviews').getAll();
+    r.onsuccess = () => res((r.result || []).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
+    r.onerror = () => rej(r.error);
+  });
+}
+export async function putReview(item) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    tx.objectStore('reviews').put(item);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+export async function delReview(date) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('reviews', 'readwrite');
+    tx.objectStore('reviews').delete(date);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+/* ---------- 历史涨停池缓存（晋级率 / 模式监控 / 相似行情） ---------- */
+export async function getHistory(date) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('history', 'readonly');
+    const r = tx.objectStore('history').get(date);
+    r.onsuccess = () => res(r.result ?? null);
+    r.onerror = () => rej(r.error);
+  });
+}
+export async function putHistory(item) {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('history', 'readwrite');
+    tx.objectStore('history').put(item, item.date);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+export async function getAllHistory() {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('history', 'readonly');
+    const r = tx.objectStore('history').getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
   });
 }

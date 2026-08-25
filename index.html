@@ -14,7 +14,10 @@
   <body>
     <header class="topbar">
       <div class="topbar-row">
-        <div class="brand"><span class="dot"></span> MarketPulse <span class="phase-badge" id="phaseBadge">连接中</span></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="hamburger" id="menuBtn" aria-label="菜单">☰</button>
+          <div class="brand"><span class="dot"></span> MarketPulse <span class="phase-badge" id="phaseBadge">连接中</span></div>
+        </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="date" id="dateLabel">--</span>
           <button class="refresh-btn" id="refreshBtn" title="刷新" aria-label="刷新">↻</button>
@@ -24,6 +27,16 @@
     </header>
 
     <div class="ptr" id="ptr"><span class="spin">↻</span> 正在刷新…</div>
+
+    <div class="menu-scrim" id="menuScrim"></div>
+    <nav class="menu-panel" id="menuPanel">
+      <h3>行情工作台</h3>
+      <div class="menu-item" data-view="market"><span class="ic">🔭</span> 全市场</div>
+      <div class="menu-item" data-view="trades"><span class="ic">💼</span> 交易与持仓</div>
+      <div class="menu-item" data-view="review"><span class="ic">📝</span> 每日复盘</div>
+      <div class="menu-item" data-view="ai"><span class="ic">🤖</span> 决策助手</div>
+      <div class="menu-item" data-view="settings"><span class="ic">⚙️</span> 设置</div>
+    </nav>
 
     <main>
       <!-- 盘中 -->
@@ -36,7 +49,15 @@
             <button data-sort="boards" class="on">连板</button>
             <button data-sort="seal">封单</button>
             <button data-sort="pct">涨幅</button>
+            <button data-sort="tier">评级</button>
           </div>
+        </div>
+        <div class="subtab" id="ztFilter">
+          <button data-f="all" class="on">全部</button>
+          <button data-f="playable">可打</button>
+          <button data-f="S">S级</button>
+          <button data-f="A">A级</button>
+          <button data-f="B">B级</button>
         </div>
         <div class="list" id="ztList"></div>
 
@@ -48,18 +69,29 @@
           <summary>炸板池 <span id="zbCount" class="hint">0</span></summary>
           <div class="body"><div class="list" id="zbList"></div></div>
         </details>
+
+        <div class="sec-title"><h2>昨日涨停 · 今日开盘预期差</h2><span class="hint" id="gapSummary">--</span></div>
+        <div class="list" id="gapRows"></div>
+
+        <div class="sec-title"><h2>风险雷达</h2></div>
+        <div id="radar"></div>
+      </section>
+
+      <!-- 机会 -->
+      <section class="view" id="view-opportunity">
+        <div class="sec-title"><h2>机会池 · S/A/B 评级</h2><span class="hint" id="oppHint">--</span></div>
+        <div id="opp"></div>
       </section>
 
       <!-- 梯队 -->
       <section class="view" id="view-ladder">
         <div class="sec-title"><h2>连板梯队</h2><span class="hint" id="ladderHint">--</span></div>
-        <div id="ladderWrap"></div>
+        <div id="ladderFull"></div>
       </section>
 
-      <!-- 题材 -->
-      <section class="view" id="view-theme">
-        <div class="sec-title"><h2>题材 / 行业强度</h2><span class="hint">按涨停家数</span></div>
-        <div class="list" id="themeList"></div>
+      <!-- 结构 -->
+      <section class="view" id="view-structure">
+        <div id="structure"></div>
       </section>
 
       <!-- 自选 -->
@@ -72,7 +104,38 @@
         <div class="empty hide" id="watchEmpty">还没有自选，输入代码添加。数据存于本机浏览器。</div>
       </section>
 
-      <!-- 设置 -->
+      <!-- 全市场（侧滑菜单） -->
+      <section class="view" id="view-market">
+        <div class="sec-title"><h2>全市场</h2><span class="hint" id="marketTotal">--</span></div>
+        <div class="toolbar">
+          <label class="search"><span aria-hidden="true">⌕</span><input id="marketSearch" type="search" placeholder="搜索代码 / 名称" autocomplete="off" /></label>
+          <select id="marketMarket" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:13px">
+            <option value="">全部</option>
+            <option value="sh">沪市</option>
+            <option value="sz">深市</option>
+            <option value="bj">北交所</option>
+          </select>
+        </div>
+        <div class="list" id="marketList"></div>
+        <div class="pager" id="marketPager"></div>
+      </section>
+
+      <!-- 交易（侧滑菜单） -->
+      <section class="view" id="view-trades">
+        <div id="tradesView"></div>
+      </section>
+
+      <!-- 复盘（侧滑菜单） -->
+      <section class="view" id="view-review">
+        <div id="reviewView"></div>
+      </section>
+
+      <!-- 决策助手（侧滑菜单） -->
+      <section class="view" id="view-ai">
+        <div id="aiView"></div>
+      </section>
+
+      <!-- 设置（侧滑菜单） -->
       <section class="view" id="view-settings">
         <div class="sec-title"><h2>设置</h2></div>
         <div class="set-row">
@@ -106,10 +169,10 @@
 
     <nav class="bottomnav">
       <button class="on" data-view="intraday"><span class="ic">📈</span>盘中</button>
+      <button data-view="opportunity"><span class="ic">🎯</span>机会</button>
       <button data-view="ladder"><span class="ic">🪜</span>梯队</button>
-      <button data-view="theme"><span class="ic">🧩</span>题材</button>
+      <button data-view="structure"><span class="ic">🧠</span>结构</button>
       <button data-view="watch"><span class="ic">⭐</span>自选</button>
-      <button data-view="settings"><span class="ic">⚙️</span>设置</button>
     </nav>
 
     <div class="scrim" id="scrim"></div>

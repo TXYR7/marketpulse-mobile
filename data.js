@@ -1,5 +1,5 @@
-// data.js — 东方财富公开接口客户端封装（零后端，CORS * 已验证）
-// 复用 D:\codex\server.js 的接口参数与字段口径；改为手机浏览器直连。
+// data.js — 东方财富公开接口客户端封装（零后端，手机浏览器直连）
+// 复用 D:\codex\server.js 的接口参数与字段口径；改为手机端直连 + 前端计算。
 
 const EMA = {
   token: '7eea3edcaed734bea9cbfc24409ed989',
@@ -12,6 +12,10 @@ const EMA = {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
     return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66`;
   },
+  kline(code, market) {
+    const secid = marketPrefix(code) + code;
+    return `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=120`;
+  }
 };
 
 function marketPrefix(code) {
@@ -46,21 +50,34 @@ async function getJSON(url, tries = 3) {
   throw lastErr;
 }
 
+// 涨停/跌停/炸板池字段映射：同时暴露「移动端旧字段」与「桌面 analytics 期望字段」，便于评分逻辑直连。
 function mapPool(row) {
+  const boards = row.lbc ?? 1;
+  const zdp = row.zdp;
+  const fund = row.fund ?? null;
+  const hs = row.hs;
+  const zbc = row.zbc ?? 0;
+  const ltsz = row.ltsz ?? null;
   return {
     code: String(row.c),
     market: row.m,
     name: row.n,
     price: (row.p || 0) / 1000, // 池价格单位为厘，÷1000 得元
-    changePct: row.zdp,
-    boards: row.lbc ?? 1,
+    changePct: zdp,
+    changePercent: zdp,
+    boards,
     firstSeal: row.fbt,
+    firstSealTime: row.fbt,
     lastSeal: row.lbt,
-    breaks: row.zbc ?? 0,
-    turnover: row.hs,
-    seal: row.fund ?? null, // 封单资金(元)
+    breaks: zbc,
+    breakCount: zbc,
+    turnover: hs,
+    turnoverRate: hs,
+    seal: fund,
+    sealAmount: fund, // 封单资金(元)
     amount: row.amount ?? null, // 成交额(元)
-    circ: row.ltsz ?? null, // 流通市值
+    circ: ltsz,
+    circulatingValue: ltsz, // 流通市值(元)
     total: row.tshare ?? null,
     industry: row.hybk || '—',
     zttj: row.zttj || null,
@@ -105,7 +122,52 @@ export async function fetchQuotes(codes) {
   return out;
 }
 
-// 轻量情绪/风险（简化启发式，仅用于排序与状态展示，非预测）
+// 全市场：clist 分页。market: '' | 'sh' | 'sz' | 'bj'
+const FS_ALL = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
+const FS_MAP = { '': FS_ALL, sh: 'm:1+t:2,m:1+t:23', sz: 'm:0+t:80,m:0+t:6', bj: 'm:0+t:81+s:2048' };
+export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sort = 'f6', order = 'desc' } = {}) {
+  const fs = FS_MAP[market] || FS_ALL;
+  const po = order === 'desc' ? 0 : 1; // 0=降序 1=升序
+  const url = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=${pageSize}&po=${po}&np=1&fltt=2&invt=2&fid=${sort}&fs=${encodeURIComponent(fs)}&fields=f12,f13,f14,f2,f3,f5,f6,f100,f124&ut=${EMA.token}`;
+  const data = await getJSON(url);
+  const total = data?.data?.total ?? 0;
+  const rows = (data?.data?.diff || []).map((row) => ({
+    code: String(row.f12),
+    market: row.f13,
+    name: row.f14,
+    price: row.f2,
+    changePct: row.f3,
+    volume: row.f5, // 手
+    amount: row.f6, // 元
+    industry: row.f100 || '—',
+    update: row.f124,
+  }));
+  return { total, page, pageSize, rows, market };
+}
+
+// 按名称/代码搜索（轻量；用于全市场搜索框）
+export async function searchStock(q) {
+  const url = `https://push2.eastmoney.com/api/qt/search/get?fltt=2&key=${encodeURIComponent(q)}&fields=f12,f13,f14&ut=${EMA.token}`;
+  const data = await getJSON(url);
+  return (data?.data?.diff || []).map((row) => ({
+    code: String(row.f12),
+    market: row.f13,
+    name: row.f14,
+  }));
+}
+
+// 日线（qfq），用于历史补录/预期差兜底
+export async function fetchKline(code) {
+  const url = EMA.kline(code);
+  const data = await getJSON(url);
+  const klines = data?.data?.klines || [];
+  return klines.map((line) => {
+    const [date, open, close, high, low, volume, amount] = line.split(',');
+    return { date, open: +open, close: +close, high: +high, low: +low, volume: +volume, amount: +amount };
+  });
+}
+
+// 轻量情绪/风险（简化启发式，仅用于状态条快速展示；结构视图使用 analytics.calculateEmotionState）
 export function computeSentiment({ upCount, downCount, brokenCount, maxBoard }) {
   const total = upCount + downCount;
   const breakRate = total ? (brokenCount / Math.max(total, 1)) * 100 : 0;

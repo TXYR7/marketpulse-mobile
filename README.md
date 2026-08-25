@@ -23,27 +23,24 @@ python -m http.server 8099
 ```
 浏览器打开 http://127.0.0.1:8099/ （必须走 http，不能双击 file:// 打开，否则 ES 模块不加载）。
 
-## 发布到手机（任选一个免费静态托管）
-app 外壳只需托管在任意静态站点，**数据不走这里**。以下均免费：
+## 发布到手机（已定：GitHub Pages）
 
-### A. GitHub Pages（推荐，常驻可用）
-1. 在 github.com 新建一个仓库（如 `marketpulse-mobile`）。
-2. 把本目录所有文件推上去：
-   ```
-   cd D:\codex-mobile
-   git init
-   git add -A
-   git commit -m "MarketPulse 手机版"
-   git branch -M main
-   git remote add origin https://github.com/你的用户名/marketpulse-mobile.git
-   git push -u origin main
-   ```
-3. 仓库 Settings → Pages → Source 选 `main` / `/root`，保存。
-4. 几分钟后访问 `https://你的用户名.github.io/marketpulse-mobile/`。
+仓库：`https://github.com/TXYR7/marketpulse-mobile`
+线上地址：`https://txyr7.github.io/marketpulse-mobile/`
 
-### B. surge（一行命令，免仓库）
+### 一键发布
+双击本目录的 **`发布到手机.cmd`** 即可（git add → commit → push，Pages 一两分钟内自动生效）。
+
+- 首次推送若弹出 GitHub 登录窗口，完成一次浏览器授权即可，之后永久免密。
+- **每次发新版必须把 `sw.js` 里的 `CACHE` 版本号 +1**（如 `mp-mobile-v2` → `v3`），否则手机端 cache-first 会一直读旧缓存、看不到新功能。
+- 手机更新方式：重新打开 app；若画面没变，下拉刷新两次（新 Service Worker 接管后即恢复）。
+
+### 手动命令行（等价于脚本）
 ```
-npx surge .   # 按提示填邮箱/域名，得到一个 *.surge.sh 地址
+cd D:\codex-mobile
+git add -A
+git commit -m "mobile update"
+git push origin main
 ```
 
 ## 在 Android 上安装为 app

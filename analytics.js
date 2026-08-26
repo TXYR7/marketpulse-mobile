@@ -823,6 +823,9 @@ const COPILOT_QUESTIONS = [
   { key: 'phase', label: '今天市场处于什么阶段？' },
   { key: 'mainline', label: '今天主线是什么？' },
   { key: 'playable', label: '现在有什么机会和风险？' },
+  { key: 'promotion', label: '今天的票能晋级吗？（体系检查表）' },
+  { key: 'position', label: '现在该上多少仓位？' },
+  { key: 'recede', label: '当前阶段的心法口诀' },
   { key: 'tomorrow', label: '明天重点是什么？' },
   { key: 'health', label: '当前数据可信吗？' }
 ];
@@ -877,8 +880,281 @@ function buildCopilotAnswer(key, payload) {
     const h = payload.health;
     if (!h) answer = '<p class="copilot-verdict">健康数据缺失。</p>';
     else answer = `<p class="copilot-verdict">整体 ${h.ok ? '🟢 正常' : `🔴 ${h.message || '异常'}`}${h.latencyMs != null ? ` · 延迟 ${h.latencyMs}ms` : ''}。</p>${copilotSection('数据源', Object.entries(h.sources || {}).map(([name, s]) => `${name} ${s.ok ? '🟢' : '🔴'}`))}`;
+  } else if (key === 'promotion') {
+    // 晋级评估汇总（交易体系规则引擎）
+    const stocks = (payload.stocks || []).filter((s) => s.promo && s.promo.available !== false);
+    const groups = { 可接力: [], 观望: [], 规避: [] };
+    for (const s of stocks) (groups[s.promo.verdict] || groups.规避).push(s);
+    const lineOf = (list) => list.length ? `${list.slice(0, 4).map((s) => `${s.name}(${s.boards || 1}板·${s.promo.score}分)`).join('、')}${list.length > 4 ? ' 等' : ''}` : '暂无——宁缺毋滥';
+    const pa = payload.positionAdvice;
+    answer = `<p class="copilot-verdict">体系检查表结论：<b>可接力 ${groups['可接力'].length}</b> / 观望 ${groups['观望'].length} / 规避 ${groups['规避'].length}。</p>` +
+      copilotSection('可接力', [lineOf(groups['可接力'])]) +
+      copilotSection('周期容错', [pa && pa.faultTolerance != null ? `${pa.cycle || '--'}周期约 ${Math.round(pa.faultTolerance * 100)}%（退潮期放弃高位接力）` : '阶段未知']);
+  } else if (key === 'position') {
+    const pa = payload.positionAdvice;
+    if (!pa || pa.label === '--') answer = '<p class="copilot-verdict">情绪指数不足，无法估算赢面。</p>';
+    else answer = `<p class="copilot-verdict">情绪指数 ${payload.status?.emotionIndex ?? '--'} → 赢面映射建议：<b>${esc(pa.label)}</b>${pa.ratio != null ? `（约 ${Math.round(pa.ratio * 100)}% 仓）` : ''}。</p>${copilotSection('依据', [pa.note, '永远把最高市值当作你的成本；把控制回撤当成重中之重。'])}`;
+  } else if (key === 'recede') {
+    const notes = payload.mentalNotes || [];
+    answer = notes.length
+      ? `<p class="copilot-verdict">当前「<b>${esc(payload.status?.phase || '--')}</b>」阶段的体系心法：</p>${copilotSection('心法', notes.map((n) => `【${n.topic}】${n.text}`))}`
+      : '<div class="all-empty">等待实时行情后可用</div>';
   } else answer = '<p class="copilot-verdict">暂不支持该问题。</p>';
   return `<div class="report-card copilot-card"><div class="report-head"><strong>🤖 ${esc(title)}</strong><span>系统基于 ${esc(payload.tradeDate || '--')} 实时数据</span></div>${answer}</div>`;
+}
+
+/* ==================== 交易体系规则引擎（个人交易心得融入 · 2026-08） ====================
+   纯函数无副作用；数据不足的维度诚实标 'na'，不猜。
+   ⚠ 平行副本同步义务：本段与 D:\codex\analytics.js 的同名段落函数体保持一致，
+   任何改动必须双向同步（桌面 CommonJS / 手机 ESM 仅外壳不同）。 */
+
+const PROMO_RULES = {
+  // 周期容错率（连板晋级体系）：主升>80% / 震荡修复≈50% / 退潮冰点<20%
+  cycleFaultTolerance: { '主升': 0.8, '修复': 0.5, '退潮': 0.15 },
+  // 封板时间分级（秒）：9:35 前秒板=顶级 / 10:30 前=优质 / 14:30 后=尾盘偷袭
+  sealTopBefore: parseSealTime('093500'),
+  sealGoodBefore: parseSealTime('103000'),
+  sealWeakAfter: parseSealTime('143000'),
+  // 竞价高开合格区间（%）：二板 +1~+3.5 / 三板及以上 +2~+5；避雷线：低开 / <+0.5 / >+7
+  openBandBoard2: [1, 3.5],
+  openBandBoard3Plus: [2, 5],
+  openMicroHigh: 0.5,
+  openSuperHigh: 7,
+  // 封板质量：炸板 0=完美 / ≤2 合格 / ≥3 反复炸板淘汰
+  breakPerfect: 0,
+  breakOkMax: 2,
+  breakFailMin: 3,
+  // 各阶量能（% vs 昨量）：首→二放量 30~80 / 二→三缩量 20~40
+  volUpStage12: [30, 80],
+  volDownStage23: [-40, -20],
+  // 高位门槛：七板以上才算高位/市场龙头，<7 板不存在高切低/补涨龙玩法
+  highBoardThreshold: 7,
+};
+
+// 情绪阶段 → 三大周期（连板晋级体系的周期天花板）
+function cycleOf(phase) {
+  const p = String(phase || '');
+  if (p === '主升期' || p === '高潮') return '主升';
+  if (p === '分歧期' || p === '高潮转分歧' || p === '修复') return '修复';
+  if (p === '退潮初期' || p === '退潮' || p === '冰点') return '退潮';
+  return null;
+}
+
+// 竞价判定（高开区间 + 弱转强）：openPct=今开/昨收%
+function auctionVerdict(stock, ctx = {}) {
+  const boards = Math.max(1, finiteNumber(stock.boards) || 1);
+  const openPct = Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null;
+  if (openPct === null) return { tag: null, note: '竞价数据不足' };
+  const [lo, hi] = boards >= 3 ? PROMO_RULES.openBandBoard3Plus : PROMO_RULES.openBandBoard2;
+  const prev = ctx.prevDay || null;
+  const prevRotten = !!(prev && ((Number(prev.breakCount) || 0) >= 2 || (Number(prev.turnoverRate) || 0) >= 50));
+  const volChg = Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null;
+  if (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh) {
+    return { tag: '竞价避雷', note: openPct <= 0 ? '低开=隔夜分歧严重，无人接力' : '超级高开=情绪透支，防高开低走炸板兑现' };
+  }
+  if (prevRotten && openPct > 0 && (volChg === null || volChg > 0)) {
+    return { tag: '弱转强', note: `昨日烂板${volChg !== null ? '且今日放量' : ''}高开——筹码换手确认，弱转强成立` };
+  }
+  if (openPct >= lo && openPct <= hi) return { tag: '竞价合格', note: `温和高开 ${openPct}%（${boards}板合格区间 ${lo}~${hi}%）` };
+  if (openPct < PROMO_RULES.openMicroHigh) return { tag: '竞价避雷', note: '微高开≈平开，隔夜承接弱' };
+  return { tag: null, note: `高开 ${openPct}%，偏离 ${boards}板合格区间 ${lo}~${hi}%` };
+}
+
+// K线特征（近端日线升序 bars：{date,open,close,high,low,volume}）
+function klineFeatures(bars = []) {
+  const rows = (bars || []).filter((b) => b && Number.isFinite(Number(b.close)) && Number(b.close) > 0);
+  if (!rows.length) return { available: false };
+  const last = rows[rows.length - 1];
+  const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
+  const closes = rows.map((b) => Number(b.close));
+  const ma = (n) => (closes.length >= n ? Number((closes.slice(-n).reduce((s, c) => s + c, 0) / n).toFixed(2)) : null);
+  let volChg1d = null;
+  if (prev && Number(prev.volume) > 0 && Number(last.volume) > 0) volChg1d = Math.round((Number(last.volume) / Number(prev.volume) - 1) * 100);
+  // 跳空缺口：今日最低价仍高于昨日最高价 → 缺口未回补（成本保护价成立）
+  const gapUnfilled = prev ? Number(last.low) > Number(prev.high) : null;
+  // 回踩后首板确认（N 字简化）：近 10 根内先有涨停级大阳 → 连续 ≥2 根回落 → 今日再涨停级大阳
+  let pullbackFirstBoard = false;
+  const isBigUp = (b, refClose) => refClose > 0 && Number(b.close) >= refClose * 1.095;
+  const todayBigUp = rows.length >= 2 && isBigUp(last, Number(rows[rows.length - 2].close));
+  if (todayBigUp) {
+    // 从昨日往回找最近的涨停级大阳（今日确认板本身不参与候选）
+    for (let i = rows.length - 2; i >= 1 && i >= rows.length - 11; i -= 1) {
+      if (!isBigUp(rows[i], Number(rows[i - 1].close))) continue;
+      let downRun = 0;
+      for (let j = i + 1; j <= rows.length - 2; j += 1) {
+        if (Number(rows[j].close) < Number(rows[j - 1].close)) downRun += 1; else break;
+      }
+      if (downRun >= 2) pullbackFirstBoard = true;
+      break; // 只看最近一次大阳信号
+    }
+  }
+  return { available: true, volChg1d, gapUnfilled, ma5: ma(5), ma10: ma(10), ma20: ma(20), pullbackFirstBoard };
+}
+
+// 晋级评估器：八维检查表 + 结论。ctx 可缺维度（对应项标 na 并按可得权重归一化）
+function assessPromotion(stock, ctx = {}) {
+  const boards = Math.max(1, finiteNumber(stock.boards) || 1);
+  const cycle = cycleOf(ctx.phase);
+  const fault = cycle ? PROMO_RULES.cycleFaultTolerance[cycle] : null;
+  const checklist = [];
+  const push = (dim, label, status, note) => checklist.push({ dim, label, status, note });
+  let earned = 0;
+  let possible = 0;
+  const scoreDim = (weight, status, ratio) => { possible += weight; earned += weight * ratio; };
+
+  // ① 周期容错（25）
+  if (fault === null) push('cycle', '周期容错', 'na', `情绪阶段「${ctx.phase || '未知'}」无法定周期`);
+  else {
+    scoreDim(25, undefined, fault);
+    push('cycle', '周期容错', cycle === '主升' ? 'pass' : cycle === '修复' ? 'warn' : 'fail',
+      `${cycle}周期 · 晋级容错≈${Math.round(fault * 100)}%${cycle === '退潮' ? '（放弃高位接力，试错只做首板）' : cycle === '修复' ? '（择优晋级，只做核心）' : '（容错极高，可拿晋级）'}`);
+  }
+
+  // ② 封板时间（20）
+  const sealSec = parseSealTime(stock.firstSealTime);
+  if (sealSec === null) push('seal', '封板时间', 'na', '首封时间缺失');
+  else if (sealSec <= PROMO_RULES.sealTopBefore) { scoreDim(20, undefined, 1); push('seal', '封板时间', 'pass', `${stock.firstSealTime} 秒板级——做多意愿极致坚决`); }
+  else if (sealSec <= PROMO_RULES.sealGoodBefore) { scoreDim(20, undefined, 0.75); push('seal', '封板时间', 'pass', `${stock.firstSealTime} 早盘硬板（10:30 前），主力意图明确`); }
+  else if (sealSec >= PROMO_RULES.sealWeakAfter) { scoreDim(20, undefined, 0); push('seal', '封板时间', 'fail', `${stock.firstSealTime} 尾盘偷袭板——资金信心不足，次日炸板断板概率极高`); }
+  else { scoreDim(20, undefined, 0.3); push('seal', '封板时间', 'warn', `${stock.firstSealTime} 午后封板，合力偏弱`); }
+
+  // ③ 竞价承接（15）
+  const av = auctionVerdict(stock, ctx);
+  const openPct = Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null;
+  if (openPct === null) push('auction', '竞价承接', 'na', '今开/昨收未取到');
+  else if (av.tag === '竞价避雷') push('auction', '竞价承接', 'fail', av.note);
+  else if (av.tag === '弱转强') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
+  else if (av.tag === '竞价合格') { scoreDim(15, undefined, 0.85); push('auction', '竞价承接', 'pass', av.note); }
+  else { scoreDim(15, undefined, 0.35); push('auction', '竞价承接', 'warn', av.note); }
+
+  // ④ 封板质量（15）
+  const brk = stock.breakCountAvailable === false ? null : (finiteNumber(stock.breakCount) || 0);
+  if (brk === null) push('quality', '封板质量', 'na', '炸板次数未知');
+  else if (brk >= PROMO_RULES.breakFailMin) { scoreDim(15, undefined, 0); push('quality', '封板质量', 'fail', `反复炸板 ${brk} 次——获利盘疯狂兑现，勉强封板次日大概率低开`); }
+  else if (brk === PROMO_RULES.breakPerfect) { scoreDim(15, undefined, 1); push('quality', '封板质量', 'pass', '一封封死不开板，筹码高度锁定'); }
+  else { scoreDim(15, undefined, 0.6); push('quality', '封板质量', 'warn', `开过 ${brk} 次板但快速回封，属充分换手的健康晋级`); }
+
+  // ⑤ 题材梯队（15）
+  const themeSize = Number.isFinite(Number(ctx.themeSize)) ? Number(ctx.themeSize) : null;
+  const role = String(ctx.role || stock.role || '');
+  if (themeSize === null) push('theme', '题材梯队', 'na', '板块家数未知');
+  else if (themeSize <= 1) push('theme', '题材梯队', 'fail', '孤立独板——无跟风无梯队，100% 无法晋级');
+  else if (role.includes('总龙头') || role.includes('板块龙头')) { scoreDim(15, undefined, 1); push('theme', '题材梯队', 'pass', `${role} · 板块 ${themeSize} 只涨停，抱团效应明显`); }
+  else if (boards >= PROMO_RULES.highBoardThreshold) { scoreDim(15, undefined, 0.9); push('theme', '题材梯队', 'pass', `${boards} 板市场高度（≥7 板才算高位龙头），梯队 ${themeSize} 只`); }
+  else if (themeSize >= 3) { scoreDim(15, undefined, 0.7); push('theme', '题材梯队', 'pass', `板块 ${themeSize} 只涨停，有梯队助攻`); }
+  else { scoreDim(15, undefined, 0.3); push('theme', '题材梯队', 'warn', `板块仅 ${themeSize} 只涨停，梯队薄`); }
+
+  // ⑥ 量能结构（10）：各阶缩放标准
+  const volChg = Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null;
+  if (volChg === null) push('volume', '量能结构', 'na', '无昨日成交量可比');
+  else if (boards === 2) {
+    const [lo, hi] = PROMO_RULES.volUpStage12;
+    if (volChg >= lo && volChg <= hi) { scoreDim(10, undefined, 1); push('volume', '量能结构', 'pass', `较首板放量 ${volChg}%（合格 ${lo}~${hi}%），充分换手洗筹`); }
+    else if (volChg < 0) { scoreDim(10, undefined, 0.2); push('volume', '量能结构', 'warn', `二板缩量 ${Math.abs(volChg)}%——筹码断层无接力空间，易炸板`); }
+    else { scoreDim(10, undefined, 0.55); push('volume', '量能结构', 'warn', `较首板放量 ${volChg}%（超 ${hi}%），分歧偏大`); }
+  } else if (boards === 3) {
+    const [lo, hi] = PROMO_RULES.volDownStage23; // [-40, -20]，负值代表缩量
+    if (volChg >= lo && volChg <= hi) { scoreDim(10, undefined, 1); push('volume', '量能结构', 'pass', `较二板缩量 ${Math.abs(volChg)}%（合格 ${Math.abs(lo)}~${Math.abs(hi)}%）——缩量加速是龙头最强信号`); }
+    else if (volChg > 0) { scoreDim(10, undefined, 0.45); push('volume', '量能结构', 'warn', `三板仍放量 ${volChg}%——分歧未消化，锁仓资金不足`); }
+    else { scoreDim(10, undefined, 0.6); push('volume', '量能结构', 'warn', `较二板缩量 ${Math.abs(volChg)}%，幅度超出常规区间`); }
+  } else if (boards >= 4) {
+    push('volume', '量能结构', volChg > 60 ? 'warn' : 'pass', volChg > 60 ? `高位爆量 ${volChg}%——持续爆量是见顶信号` : `高位交替缩放中（今较昨 ${volChg > 0 ? '+' : ''}${volChg}%），有序切换`);
+    scoreDim(10, undefined, volChg > 60 ? 0.3 : 0.8);
+  } else {
+    push('volume', '量能结构', volChg >= 0 ? 'pass' : 'warn', `首板较昨量 ${volChg > 0 ? '+' : ''}${volChg}%`);
+    scoreDim(10, undefined, volChg >= 0 ? 0.8 : 0.4);
+  }
+
+  // ⑦ 信息项：缺口保护 / 回踩首板确认 / 高位门槛提示（不计分，供抽屉展示）
+  if (ctx.gapUnfilled === true) push('info', '缺口保护', 'pass', '跳空缺口未回补——主力成本保护价成立，上攻状态强烈');
+  else if (ctx.gapUnfilled === false) push('info', '缺口保护', 'fail', '缺口已回补——做庄失败信号');
+  if (ctx.pullbackFirstBoard === true) push('info', '二次回踩', 'pass', '回踩后的首个首板——板上确认买点（N 字启动）');
+  if (boards >= 3 && boards < PROMO_RULES.highBoardThreshold) push('info', '身位提示', 'warn', `${boards} 板尚不足以判定市场龙头（≥${PROMO_RULES.highBoardThreshold} 板才有高切低/补涨龙玩法）`);
+
+  // 硬否决 → 规避
+  const hardFails = [];
+  if (themeSize !== null && themeSize <= 1) hardFails.push('孤立独板');
+  if (brk !== null && brk >= PROMO_RULES.breakFailMin) hardFails.push(`反复炸板 ${brk} 次`);
+  if (sealSec !== null && sealSec >= PROMO_RULES.sealWeakAfter) hardFails.push('尾盘偷袭封板');
+  if (openPct !== null && (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh)) hardFails.push(openPct <= 0 ? '竞价低开' : '竞价超级高开');
+  if (cycle === '退潮' && boards >= 3) hardFails.push('退潮周期高位板');
+
+  const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+  let verdict;
+  if (hardFails.length) verdict = '规避';
+  else if (score >= 70) verdict = '可接力';
+  else if (score >= 45) verdict = '观望';
+  else verdict = '规避';
+  return {
+    available: true,
+    score,
+    verdict,
+    faultTolerance: fault,
+    hardFails,
+    checklist,
+    asOf: Date.now(),
+    disclaimer: '体系规则辅助参考，非投资建议',
+  };
+}
+
+// 养家赢面仓位表：<60% 观望 / 60-70 小仓 / 70-80 中仓 / 80-90 大仓 / ≥90 满仓
+function winratePosition(winrate) {
+  const w = Number(winrate);
+  if (!Number.isFinite(w)) return { label: '--', ratio: null, note: '赢面未知' };
+  if (w >= 90) return { label: '满仓', ratio: 1, note: '胜率与盈亏比俱佳的机会极少，重仓出击' };
+  if (w >= 80) return { label: '大仓', ratio: 0.7, note: '上涨空间显著大于下跌空间' };
+  if (w >= 70) return { label: '中仓', ratio: 0.45, note: '顺势参与，控制单笔回撤' };
+  if (w >= 60) return { label: '小仓', ratio: 0.2, note: '试错仓，错了体面离开' };
+  return { label: '观望', ratio: 0, note: '赢面不足，空仓也是交易' };
+}
+
+// 心法库：按当前情绪阶段自动浮现（phases 里 '*' 表示任何阶段都适用）
+const MENTAL_NOTES = [
+  { id: 'discipline-lock-profit', phases: ['*'], topic: '纪律', text: '大赚的时候要离场：只要还在桌上都属于浮盈，落袋为安才是最真实的。' },
+  { id: 'discipline-self-control', phases: ['*'], topic: '纪律', text: '管住手，自控力执行力到位；如果卖飞了也不要急着追进去——我们已经赚到了。' },
+  { id: 'koujuu-core', phases: ['分歧期', '高潮转分歧'], topic: '口诀', text: '分歧切核心，弱势切抱团：分歧时买核心股，弱势时买抱团股。' },
+  { id: 'koujuu-chase', phases: ['*'], topic: '口诀', text: '追涨买的是确定性，追高是因为你看不懂。' },
+  { id: 'koujuu-stoploss', phases: ['*'], topic: '口诀', text: '止损不是失败，死扛才是深渊；不要意淫自己手上的杂毛会反转。' },
+  { id: 'koujuu-mainline', phases: ['*'], topic: '口诀', text: '有主线的时候做主线，没有主线的时候找主线；有了主线做龙头，没有龙头找龙回头。' },
+  { id: 'koujuu-expectation', phases: ['*'], topic: '预期管理', text: '符合预期格局，不符合预期止损，超预期加仓。' },
+  { id: 'koujuu-sell-high', phases: ['主升', '修复'], topic: '心态', text: '卖飞是常态，卖飞代表你的选股没有问题——选好下一个符合你审美的票。' },
+  { id: 'retreat-no-high', phases: ['退潮初期', '退潮', '冰点'], topic: '周期', text: '退潮期容错率不足 20%：放弃二板以上接力，试错只做首板，管住手不强行交易。' },
+  { id: 'retreat-goodnews', phases: ['退潮初期', '退潮', '冰点'], topic: '周期', text: '下跌趋势一旦形成，任何利好都是给你跑路的机会。' },
+  { id: 'retreat-three-stage-late', phases: ['冰点'], topic: '周期', text: '弱势末期场外资金憋疯了：一旦出现高强度热点容易引发哄抢，可试错新题材，绝不恋战。' },
+  { id: 'repair-pick-core', phases: ['分歧期', '高潮转分歧'], topic: '周期', text: '震荡修复周期晋级率约 50%：精挑细选只做核心龙头，杂毛直接淘汰。' },
+  { id: 'main-up-trend', phases: ['主升期', '高潮'], topic: '周期', text: '主升周期低位连板晋级率超 80%：大胆接力、分歧低吸，以拿晋级为主，不轻易恐高。' },
+  { id: 'yangjia-greedy', phases: ['主升期', '高潮'], topic: '心法', text: '别人贪婪我更贪婪：赢面大的主升里敢于重仓加仓；有走弱迹象时提前收紧风偏。' },
+  { id: 'yangjia-position', phases: ['*'], topic: '仓位', text: '赢面定仓位：<60% 观望，60-70% 小仓，70-80% 中仓，80-90% 大仓，90% 以上才满仓。' },
+  { id: 'yangjia-crowd', phases: ['*'], topic: '心法', text: '得散户心者得天下，人气所向牛股所在：市场聚焦的地方才是赚钱效应所在。' },
+  { id: 'clean-trade', phases: ['*'], topic: '纪律', text: '干净的交易只有入场和出局：永不止盈永不止损指的是只有买入逻辑和卖出逻辑，做T只能当解套工具。' },
+  { id: 'forget-cost', phases: ['*'], topic: '心态', text: '忘记成本：问自己若现在是空仓会怎么办——会买就拿着，会买别的就换股，会选择空仓就卖出。' },
+  { id: 'predict-follow', phases: ['*'], topic: '方法论', text: '预测为末应变为本：预判建立预期，跟随决定买卖；一切以盘面为准。' },
+  { id: 'new-theme-timing', phases: ['修复', '主升'], topic: '节奏', text: '新题材当天一般没机会：等批量首板分出龙一龙二，分歧转一致的那天才是上车点，分歧中不上。' },
+  { id: 'high-switch-low', phases: ['分歧期', '退潮初期'], topic: '节奏', text: '高切低一定发生在龙头断板那天才有性价比；七板以下谈不上高切低和补涨龙。' },
+  { id: 'supplement-dragon', phases: ['主升', '高潮'], topic: '节奏', text: '补涨龙出现在龙头高位断板当天，一字启动散户买不进；它的高度永远比龙头少一板以上。' },
+  { id: 'space-board', phases: ['主升', '高潮'], topic: '打法', text: '空间板只做换手充分+承接强+题材正的晋级，缩量一字慎接。' },
+  { id: 'weak-to-strong', phases: ['*'], topic: '打法', text: '烂板次日爆量高开=换庄确认弱转强成立可直接上车套利；但目的就是套利——不高开或平开都要走。' },
+  { id: 'second-entry', phases: ['*'], topic: '打法', text: '二次回踩试错买点只上一层二层仓：第二天有负反馈可以体面离开，上攻放量上板的瞬间才能推仓位。' },
+  { id: 'divergence-alive', phases: ['主升', '修复'], topic: '节奏', text: '天天有分歧才走得远，太过一致的死得快。' },
+  { id: 'institution-bigcap', phases: ['*'], topic: '打法', text: '机构主导的大票做跟随不要轻易下车，每一次回调都是买点；出局是因为逻辑破了，不是因为有利润。' },
+  { id: 'youzi-exit', phases: ['高潮'], topic: '离场', text: '游资票五个板之后顶部出现墓碑线或带爆量的大阴线，就是离场的时候。' },
+  { id: 'small-dragon-exit', phases: ['高潮'], topic: '离场', text: '小龙头以小阴小阳上涨，突然有一天一个涨停板——这个时候就是离场的时候。' },
+  { id: 'trial-order', phases: ['*'], topic: '方法论', text: '刺拳试探论：试错单小赚小亏不重要，重要的是借此感受市场情绪，决定何时出重拳。' },
+  { id: 'long-run', phases: ['*'], topic: '心态', text: '交易是一个长期的过程，一朝一夕的得失不要看得太重；积小胜为大胜。' },
+];
+
+// 按当前阶段挑心法（优先贴合当前周期的，其次通用），最多 limit 条
+function contextNotes(ctx = {}) {
+  const phase = String(ctx.phase || '');
+  const cycle = cycleOf(phase);
+  const scored = MENTAL_NOTES.map((note) => {
+    let rank = -1;
+    if (note.phases.includes('*')) rank = 1;
+    if (phase && note.phases.includes(phase)) rank = 3;
+    else if (cycle && note.phases.includes(cycle)) rank = 2;
+    return { note, rank };
+  }).filter((x) => x.rank > 0).sort((a, b) => b.rank - a.rank);
+  return scored.slice(0, Math.max(1, Number(ctx.limit) || 3)).map((x) => x.note);
 }
 
 export {
@@ -887,5 +1163,6 @@ export {
   calculateEmotionState, indicator, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure,
-  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, PHASE_NAMES, SIGNAL_STATE
+  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, PHASE_NAMES, SIGNAL_STATE,
+  PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes
 };

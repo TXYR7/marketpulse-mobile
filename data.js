@@ -144,6 +144,28 @@ export async function fetchQuotes(codes) {
   return out;
 }
 
+// 轻量日K（仅供 S/A/B 梯队股的晋级评估：量能阶变/缺口保护维度），取近 lmt 根日线
+const klineCacheByDate = new Map(); // code -> { dateKey, bars }
+export async function fetchKlineLite(code, lmt = 8) {
+  const secid = marketPrefix(code) + code;
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=${lmt}`;
+  const data = await getJSON(url);
+  const bars = (data?.data?.klines || []).map((line) => {
+    const p = String(line).split(',');
+    return { date: p[0], open: Number(p[1]), close: Number(p[2]), high: Number(p[3]), low: Number(p[4]), volume: Number(p[5]) };
+  }).filter((b) => b.close > 0 && b.volume > 0);
+  return bars;
+}
+export function cachedKlineBars(code, tradeDate) {
+  const hit = klineCacheByDate.get(String(code));
+  return hit && hit.dateKey === String(tradeDate) ? hit.bars : null;
+}
+export function storeKlineBars(code, tradeDate, bars) {
+  if (!bars || !bars.length) return;
+  if (klineCacheByDate.size > 80) klineCacheByDate.clear(); // 会话内防膨胀
+  klineCacheByDate.set(String(code), { dateKey: String(tradeDate), bars });
+}
+
 // 全市场：clist 分页。market: '' | 'sh' | 'sz' | 'bj'
 const FS_ALL = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
 const FS_MAP = { '': FS_ALL, sh: 'm:1+t:2,m:1+t:23', sz: 'm:0+t:80,m:0+t:6', bj: 'm:0+t:81+s:2048' };

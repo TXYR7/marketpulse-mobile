@@ -1,9 +1,10 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, todayStr, fmtTime } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, todayStr, fmtTime } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
-  buildExpectationGap, buildSignal, applyGate
+  buildExpectationGap, buildSignal, applyGate,
+  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList } from './views.js';
@@ -18,6 +19,7 @@ const state = {
   trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
   allMarket: null, marketPage: 1, gap: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
+  openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
 };
 
 const $ = (s) => document.querySelector(s);
@@ -114,7 +116,12 @@ function computeDerived(pools) {
   const structure = buildMarketStructure({ stocks: up, themes, leaders });
   const plan = buildPlan({ phase, riskRadar, emotion, opportunities });
 
-  Object.assign(state, { themes, leaders, opportunities, emotion, riskRadar, structure, plan, breakRate, phase });
+  // 交易体系 payload 级输出：养家赢面仓位档（情绪指数作赢面代理）+ 按阶段浮现的心法
+  const promoCycle = cycleOf(phase);
+  const positionAdvice = { ...winratePosition(emotion.emotionIndex), cycle: promoCycle, faultTolerance: promoCycle ? ({ '主升': 0.8, '修复': 0.5, '退潮': 0.15 })[promoCycle] : null };
+  const mentalNotes = contextNotes({ phase, limit: 3 });
+
+  Object.assign(state, { themes, leaders, opportunities, emotion, riskRadar, structure, plan, breakRate, phase, positionAdvice, mentalNotes });
   state.lastPayload = {
     tradeDate: pools.date, limitUpCount: upCount, limitDownCount: downCount,
     status: { phase: emotion.phase, level: emotion.level, emotionIndex: emotion.emotionIndex, maxBoard },
@@ -145,6 +152,11 @@ function renderStatus() {
   const partialChip = p.partial && p.partialMissing && p.partialMissing.length
     ? '<div class="chip risk-mid"><span>缺源</span><strong>' + esc(p.partialMissing.join('/')) + '</strong></div>'
     : '';
+  // 建议仓位档（养家赢面表，情绪指数作赢面代理）
+  const pa = state.positionAdvice;
+  const posChip = pa && pa.label !== '--'
+    ? '<div class="chip ' + (pa.label === '观望' ? 'risk-mid' : 'sent') + '" title="' + esc((pa.cycle || '--') + '周期容错 ' + (pa.faultTolerance != null ? Math.round(pa.faultTolerance * 100) + '%' : '--') + ' · ' + pa.note) + '"><span>仓位</span><strong>' + esc(pa.label) + '</strong></div>'
+    : '';
   const html = [
     chip('sent', '情绪', em.emotionIndex ?? '--'),
     chip('up', '涨停', p.upCount),
@@ -153,6 +165,7 @@ function renderStatus() {
     chip('', '最高板', maxBoard),
     chip('', '炸板率', (state.breakRate?.rate ?? '--') + '%'),
     chip(em.level === 'red' ? 'risk-high' : em.level === 'orange' ? 'risk-mid' : '', '风险', em.phase || '—'),
+    posChip,
     freshChip,
     partialChip,
   ].join('');
@@ -168,11 +181,15 @@ function chip(cls, label, val) {
 function ztCard(x) {
   const starred = state.watch.some((w) => w.code === x.code);
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
+  const pv = x.promo && x.promo.available !== false ? x.promo : null;
+  const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
+  const pvTip = pv ? escapeHtml(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div></div>' +
     '<div class="right">' +
+    (pv ? '<span class="promo-badge ' + pvc + '" title="' + pvTip + '">' + esc(pv.verdict) + '</span> ' : '') +
     (x.tier ? tierBadge(x.tier) : '') + (x.signal ? '<div style="margin-top:4px">' + signalTag(x.signal.state) + '</div>' : '') +
     '<div class="price ' + pctClass(x.changePct) + '" style="margin-top:4px">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
     '<div class="pct ' + pctClass(x.changePct) + '">' + pctText(x.changePct) + '</div>' +
@@ -195,9 +212,10 @@ function filterZt() {
   });
   return rows;
 }
-// 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
+// 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星/晋级结论）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
 function ztStructSig(x) {
-  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0].join('|');
+  const pv = x.promo && x.promo.available !== false ? x.promo.verdict : '';
+  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0, pv].join('|');
 }
 function pctFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.seal ?? '', x.turnover ?? ''].join('|'); }
 function downFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.turnover ?? ''].join('|'); }
@@ -414,7 +432,19 @@ async function openSheet(code) {
       (sg.triggers && sg.triggers.length ? '<div class="muted">触发条件：' + sg.triggers.join(' / ') + '</div>' : '') +
       (sg.risks && sg.risks.length ? '<div class="muted" style="color:var(--red)">风险：' + sg.risks.join(' / ') + '</div>' : '') + '</div>';
   }
-  body.innerHTML = head + tierHtml + signalHtml +
+  // 晋级评估八维检查表（交易体系规则引擎）
+  let promoHtml = '';
+  const promo = stock.promo;
+  if (promo && promo.available !== false && Array.isArray(promo.checklist)) {
+    const icons = { pass: '✓', warn: '!', fail: '✕', na: '–' };
+    const vcls = promo.verdict === '可接力' ? 'pass' : promo.verdict === '观望' ? 'warn' : 'fail';
+    promoHtml = '<div class="s-promo"><div class="sp-verdict verdict-' + vcls + '"><b>' + esc(promo.verdict) + '</b><span>评分 ' + promo.score +
+      ' · 周期容错 ' + (promo.faultTolerance != null ? Math.round(promo.faultTolerance * 100) + '%' : '--') +
+      ((promo.hardFails || []).length ? ' · 触发：' + esc(promo.hardFails.join('、')) : '') + '</span></div>' +
+      promo.checklist.map((row) => '<div class="promo-row status-' + row.status + '"><i>' + (icons[row.status] || '·') + '</i><span class="k">' + esc(row.label) + '</span><em>' + esc(row.note) + '</em></div>').join('') +
+      '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
+  }
+  body.innerHTML = head + tierHtml + signalHtml + promoHtml +
     kvGrid(stock, d) +
     '<div class="s-actions"><button class="btn primary" id="sheetWatch">' + (isWatch ? '取消自选' : '★ 加自选') + '</button>' +
     '<button class="btn" id="sheetClose">关闭</button></div>';
@@ -487,6 +517,7 @@ async function refresh(force = false) {
     state.pools = pools;
     renderStatus();
     renderView(state.view); // 只渲染活跃视图；其余视图数据已更新，切过去即最新
+    fetchOpenPct(pools).then(() => enrichPromo(pools)).catch(() => {}); // 竞价代理到手后再评估（fire-and-forget）
   } catch (e) {
     state.lastErrorAt = Date.now();
     renderStatus();
@@ -498,6 +529,73 @@ async function refresh(force = false) {
 function persistLastGood(pools) {
   setKV('lastGood', { date: pools.date, pools, savedAt: Date.now() }).catch(() => {});
 }
+
+/* ---------------- 交易体系规则引擎：竞价代理 + 梯队股晋级评估 ---------------- */
+const PROMO_TIER_CAP = 24; // 仅对 S/A/B 梯队前 N 只拉轻量K线（控流量），其余股票量能维度诚实标 na
+// 今开/昨收%（真竞价快照免费源没有，用开盘价代理；每个交易日只拉一次全池）
+async function fetchOpenPct(pools) {
+  const codes = [...(pools.up || []), ...(pools.down || [])].map((s) => s.code);
+  if (!codes.length) return;
+  if (state.openPctDate === pools.date && Object.keys(state.openPctByCode).length >= Math.min(codes.length, 30)) return;
+  const quotes = await fetchQuotes(codes).catch(() => ({}));
+  const map = {};
+  for (const [code, q] of Object.entries(quotes)) {
+    if (q && q.open != null && q.prevClose) map[code] = Number(((q.open - q.prevClose) / q.prevClose * 100).toFixed(2));
+  }
+  if (Object.keys(map).length) { state.openPctByCode = map; state.openPctDate = pools.date; }
+}
+// 组装评估 ctx：昨日同码（烂板/换手，历史记录含 breaks/turnoverRate 才有）
+function promoContextOf(s, pools) {
+  let prevDay = null;
+  const hist = state.history || [];
+  for (let i = hist.length - 1; i >= 0; i -= 1) {
+    if (String(hist[i].date) < String(pools.date)) { prevDay = (hist[i].stocks || []).find((x) => x.code === s.code) || null; break; }
+  }
+  return {
+    phase: state.phase,
+    themeSize: Number.isFinite(Number(s.themeSize)) ? Number(s.themeSize) : null,
+    role: s.role,
+    openPct: state.openPctByCode[s.code] ?? null,
+    prevDay: prevDay ? { boards: prevDay.boards, breakCount: prevDay.breaks, turnoverRate: prevDay.turnoverRate } : null,
+  };
+}
+let promoRunSeq = 0; // 序号守卫：新一轮行情到达后旧一轮评估作废
+async function enrichPromo(pools) {
+  if (state.promoInFlight) return;
+  const mySeq = ++promoRunSeq;
+  state.promoInFlight = true;
+  try {
+    const seen = new Set();
+    const tierCodes = new Set();
+    for (const k of ['S', 'A', 'B']) {
+      for (const t of (state.opportunities?.tiers?.[k] || [])) {
+        if (seen.size >= PROMO_TIER_CAP) break;
+        if (seen.has(t.code)) continue;
+        seen.add(t.code); tierCodes.add(t.code);
+      }
+      if (seen.size >= PROMO_TIER_CAP) break;
+    }
+    for (const s of pools.up || []) {
+      if (mySeq !== promoRunSeq) return;
+      let feats = {};
+      if (tierCodes.has(s.code)) {
+        let bars = cachedKlineBars(s.code, pools.date);
+        if (!bars) {
+          bars = await fetchKlineLite(s.code, 8).catch(() => null);
+          if (bars) storeKlineBars(s.code, pools.date, bars);
+        }
+        if (bars && bars.length >= 2) feats = klineFeatures(bars);
+      }
+      s.promo = assessPromotion(s, {
+        ...promoContextOf(s, pools),
+        volChg: feats.volChg1d ?? null,
+        gapUnfilled: feats.gapUnfilled ?? null,
+        pullbackFirstBoard: feats.pullbackFirstBoard === true,
+      });
+    }
+    if (mySeq === promoRunSeq) renderZt(); // 徽标随行级 diff 原地更新
+  } finally { state.promoInFlight = false; }
+}
 function updateBanner() {
   const p = state.pools;
   const banner = $('#intradayBanner');
@@ -507,6 +605,11 @@ function updateBanner() {
   } else if (!tradingNow()) {
     banner.classList.remove('hide');
     banner.textContent = '非交易时段 · 显示最近交易日快照（手动点 ↻ 获取最新）';
+  } else if (state.mentalNotes && state.mentalNotes.length) {
+    // 交易时段：用横幅位浮现当前阶段的第一条体系心法
+    const n = state.mentalNotes[0];
+    banner.classList.remove('hide');
+    banner.textContent = '【' + n.topic + '】' + n.text;
   } else banner.classList.add('hide');
 }
 function tradingNow() {
@@ -567,7 +670,8 @@ async function loadHistory() {
         continue;
       }
       if (p.upCount > 0) {
-        const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name })) };
+        // breaks/turnoverRate 供弱转强判定的「昨日烂板」维度（旧记录缺字段时评估器诚实标 na）
+        const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
         await putHistory(rec); map.set(dt, rec); count += 1;
       } else {
         // 空池（节假日/无数据）也记档，之后不再重复拉同一天

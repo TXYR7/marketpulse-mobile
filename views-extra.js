@@ -279,7 +279,15 @@ if (typeof document !== 'undefined') {
       const ctx = cq.closest('#aiView')?.__ctx;
       if (!ctx) return;
       if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
-      document.querySelector('#copilotAnswer').innerHTML = buildCopilotAnswer(cq.dataset.copilot, ctx.state.lastPayload);
+      // 注入交易体系数据：池内个股（带 promo 晋级评估）+ 赢面仓位档 + 阶段心法
+      const enriched = {
+        ...ctx.state.lastPayload,
+        status: { ...(ctx.state.lastPayload.status || {}), phase: ctx.state.phase, emotionIndex: ctx.state.emotion?.emotionIndex ?? null },
+        stocks: (ctx.state.pools && ctx.state.pools.up) || [],
+        positionAdvice: ctx.state.positionAdvice,
+        mentalNotes: ctx.state.mentalNotes,
+      };
+      document.querySelector('#copilotAnswer').innerHTML = buildCopilotAnswer(cq.dataset.copilot, enriched);
       return;
     }
     // chip 多选：只切类名，提交时按 .on 收集（不再维护 _sel 状态）

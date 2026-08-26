@@ -555,6 +555,27 @@ main {
 /* 键盘聚焦可见性（触屏无影响，键盘/读屏用户可达） */
 :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
+/* ===== 交易体系规则引擎：晋级徽标 / 八维检查表 ===== */
+.promo-badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; line-height: 1.4; vertical-align: middle; }
+.promo-badge.pass { background: var(--down-tint); color: var(--green); }
+.promo-badge.warn { background: var(--amber-tint); color: var(--amber); }
+.promo-badge.fail { background: var(--danger-tint); color: var(--red); }
+.s-promo { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.sp-verdict { display: flex; align-items: baseline; gap: 8px; font-size: 14px; margin-bottom: 6px; }
+.sp-verdict.verdict-pass b { color: var(--green); }
+.sp-verdict.verdict-warn b { color: var(--amber); }
+.sp-verdict.verdict-fail b { color: var(--red); }
+.sp-verdict span { color: var(--muted); font-size: 11px; }
+.promo-row { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed var(--line-soft); font-size: 12px; }
+.promo-row:last-of-type { border-bottom: 0; }
+.promo-row i { flex: 0 0 auto; width: 17px; height: 17px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 10px; font-weight: 800; }
+.promo-row.status-pass i { background: var(--down-tint); color: var(--green); }
+.promo-row.status-warn i { background: var(--amber-tint); color: var(--amber); }
+.promo-row.status-fail i { background: var(--danger-tint); color: var(--red); }
+.promo-row.status-na i { background: var(--surface-2); color: var(--muted); }
+.promo-row .k { flex: 0 0 58px; font-weight: 700; }
+.promo-row em { font-style: normal; color: var(--muted); }
+
 /* ===== 减弱动态效果：系统开启时关闭全部动画/过渡 ===== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

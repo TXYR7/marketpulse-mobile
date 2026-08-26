@@ -1,6 +1,6 @@
 // sw.js — 缓存 app 外壳（离线可启动）；行情接口直连不缓存
 // 发布新版本时必须递增 CACHE 版本号，否则手机端会一直用旧缓存（cache-first）。
-const CACHE = 'mp-mobile-v3';
+const CACHE = 'mp-mobile-v4';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data.js', './store.js',
   './analytics.js', './views.js', './views-extra.js',
@@ -25,14 +25,22 @@ self.addEventListener('fetch', (e) => {
 
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request).then((r) => { const cp = r.clone(); caches.open(CACHE).then((c) => c.put('./', cp)); return r; })
+      fetch(e.request).then((r) => {
+        if (r && r.ok) { const cp = r.clone(); caches.open(CACHE).then((c) => c.put('./', cp)); } // 错误页不污染缓存
+        return r;
+      })
         .catch(() => caches.match('./'))
     );
     return;
   }
   e.respondWith(
     caches.match(e.request).then((r) => r || fetch(e.request).then((resp) => {
-      const cp = resp.clone(); caches.open(CACHE).then((c) => c.put(e.request, cp)); return resp;
-    }).catch(() => caches.match('./')))
+      if (resp && resp.ok) { const cp = resp.clone(); caches.open(CACHE).then((c) => c.put(e.request, cp)); }
+      return resp;
+    }).catch(() => {
+      // 离线子资源缺失：只有页面导航才回退到外壳 HTML，其余返回真错误（避免拿 HTML 当 JS/CSS 用）
+      if (e.request.destination === 'document') return caches.match('./');
+      return Response.error();
+    }))
   );
 });

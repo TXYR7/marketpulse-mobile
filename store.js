@@ -49,6 +49,15 @@ export async function delWatch(code) {
     tx.onerror = () => rej(tx.error);
   });
 }
+export async function clearWatch() {
+  const db = await open();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('watch', 'readwrite');
+    tx.objectStore('watch').clear(); // 单事务清空，替代逐条 delete 的 N 次事务
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
 
 /* ---------- 设置 KV ---------- */
 export async function getKV(k, def) {
@@ -154,5 +163,20 @@ export async function getAllHistory() {
     const r = tx.objectStore('history').getAll();
     r.onsuccess = () => res(r.result || []);
     r.onerror = () => rej(r.error);
+  });
+}
+// 只保留 keepDates 里的历史记录，删除更旧的（防止 history 无限增长拖慢启动）
+export async function pruneHistoryKeep(keepDates) {
+  const db = await open();
+  const keep = new Set(keepDates.map(String));
+  return new Promise((res, rej) => {
+    const tx = db.transaction('history', 'readwrite');
+    const store = tx.objectStore('history');
+    const req = store.getAllKeys();
+    req.onsuccess = () => {
+      (req.result || []).forEach((k) => { if (!keep.has(String(k))) store.delete(k); });
+    };
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
   });
 }

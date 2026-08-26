@@ -2,9 +2,7 @@
 import { fetchAllMarket, searchStock } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, phaseStrategy } from './analytics.js';
-import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
-
-function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
 export function renderMarket(ctx) {
@@ -31,14 +29,14 @@ export function renderMarket(ctx) {
     paintRows(am.rows, '暂无数据');
     const totalPages = Math.max(1, Math.ceil(am.total / 60));
     const phtml = '<button data-pg="prev">上一页</button><span class="pg">' + am.page + ' / ' + totalPages + '</span><button data-pg="next">下一页</button>';
-    if (setHTML(pagerEl, phtml)) {
-      pagerEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-        if (search.value.trim()) return;
-        const cur = ctx.state.allMarket?.page || 1;
-        const np = b.dataset.pg === 'prev' ? Math.max(1, cur - 1) : Math.min(totalPages, cur + 1);
-        ctx.state.marketPage = np; load();
-      }));
-    }
+    setHTML(pagerEl, phtml);
+    // 翻页走模块级委托（见文件底部），这里只暴露导航回调，渲染不再重复绑监听
+    pagerEl.__nav = (dir) => {
+      const cur = ctx.state.allMarket?.page || 1;
+      const tp = Math.max(1, Math.ceil((ctx.state.allMarket?.total || 0) / 60));
+      ctx.state.marketPage = dir === 'prev' ? Math.max(1, cur - 1) : Math.min(tp, cur + 1);
+      load();
+    };
   }
   async function load() {
     try {
@@ -87,9 +85,13 @@ export function renderTrades(ctx) {
     const totalPnl = trades.reduce((s, t) => s + Number(t.pnl || 0), 0);
     const winRate = trades.length ? Math.round(wins / trades.length * 100) : 0;
 
-    // 风险
-    const positions = trades.map((t) => ({ fraction: Number(t.fraction || 0.2), theme: t.theme || '未分类', industry: t.industry || '未分类', status: 'open' }));
-    const risk = evaluatePortfolioRisk({ positions, trades, today: new Date().toISOString().slice(0, 10) });
+    // 风险：只把「当日且未记卖出价」的流水视为未平仓持仓；
+    // 历史已完成交易（有 pnl/卖出价）不再被当成 open 持仓反复计入风险暴露。
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const positions = trades
+      .filter((t) => t.sellPrice == null && t.date === todayIso)
+      .map((t) => ({ fraction: Number(t.fraction || 0.2), theme: t.theme || '未分类', industry: t.industry || '未分类', status: 'open' }));
+    const risk = evaluatePortfolioRisk({ positions, trades, today: todayIso });
     const riskHtml = risk.violations.length
       ? '<div class="risk-card"><div class="plan-verdict" style="color:var(--red)">⚠ 风险预警</div><ul class="plan-rules">' +
         risk.violations.map((v) => '<li>' + esc(v.label) + (v.value != null ? '（' + (typeof v.value === 'number' ? Math.round(v.value * 100) + '%' : v.value) + '）' : '') + '</li>').join('') + '</ul></div>'
@@ -131,49 +133,9 @@ export function renderTrades(ctx) {
       '<div class="stat"><div class="v ' + (totalPnl >= 0 ? 'up-c' : 'down-c') + '">' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + '</div><div class="k">累计盈亏</div></div>' +
       '</div>' + riskHtml + persona + form +
       '<div class="sec-title"><h2>交易流水</h2></div>' + ledger;
-    if (!setHTML(el, html)) return; // 内容未变：不重建、不重复绑监听
-
-    // chip 多选
-    el.querySelectorAll('.chips').forEach((group) => {
-      const key = group.dataset.group;
-      const sel = new Set();
-      group.querySelectorAll('.chip-btn').forEach((b) => b.addEventListener('click', () => {
-        b.classList.toggle('on');
-        if (b.classList.contains('on')) sel.add(b.dataset.v); else sel.delete(b.dataset.v);
-        group._sel = new Set(sel);
-      }));
-      group._sel = sel;
-    });
-    document.querySelector('#tfSubmit').addEventListener('click', async () => {
-      const code = document.querySelector('#tfCode').value.trim().replace(/\D/g, '');
-      if (!code) { ctx.toast('请输入代码'); return; }
-      const pnl = parseFloat(document.querySelector('#tfPnl').value);
-      if (isNaN(pnl)) { ctx.toast('请输入盈亏'); return; }
-      const groups = {};
-      el.querySelectorAll('.chips').forEach((g) => { groups[g.dataset.group] = [...(g._sel || [])]; });
-      const name = document.querySelector('#tfName').value.trim() || code;
-      const trade = {
-        id: Date.now() + '-' + code, code, name,
-        date: document.querySelector('#tfDate').value || new Date().toISOString().slice(0, 10),
-        pnl, result: document.querySelector('#tfResult').value,
-        buyPrice: parseFloat(document.querySelector('#tfBuy').value) || null,
-        sellPrice: parseFloat(document.querySelector('#tfSell').value) || null,
-        emotion: document.querySelector('#tfEmotion').value,
-        strategy: document.querySelector('#tfStrategy').value,
-        fraction: parseFloat(document.querySelector('#tfFraction').value) || 0.2,
-        buyReasons: groups.buyReasons, sellReason: (groups.sellReason || [])[0] || '', errorTags: groups.errorTags,
-        createdAt: Date.now()
-      };
-      await putTrade(trade);
-      ctx.state.trades = await getTrades();
-      ctx.toast('已保存交易');
-      paint();
-    });
-    el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-      await delTrade(b.dataset.del);
-      ctx.state.trades = await getTrades();
-      paint();
-    }));
+    el.__ctx = ctx;       // 模块级委托回调据此取到上下文
+    el.__repaint = paint;
+    if (!setHTML(el, html)) return; // 内容未变：不重建（chip 选中态/输入框内容天然保留）
   }
 }
 
@@ -212,23 +174,9 @@ export function renderReview(ctx) {
       '<div class="toolbar"><button class="btn" id="rvGen">⚡ 生成今日复盘</button><button class="btn primary" id="rvSave">保存</button></div>' +
       '<textarea id="rvText" rows="10" style="width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;font-family:inherit">' + esc(text) + '</textarea>' +
       '<div class="sec-title"><h2>历史复盘</h2></div>' + list;
+    el.__ctx = ctx;
+    el.__repaint = paint;
     if (!setHTML(el, html)) return; // 内容未变：不重建、保留用户正在编辑的文本
-
-    document.querySelector('#rvGen').addEventListener('click', () => { document.querySelector('#rvText').value = buildReviewText(ctx.state); });
-    document.querySelector('#rvSave').addEventListener('click', async () => {
-      const t = document.querySelector('#rvText').value.trim();
-      if (!t) { ctx.toast('内容为空'); return; }
-      const date = ctx.state.pools?.date || new Date().toISOString().slice(0, 10);
-      await putReview({ date, text: t, createdAt: Date.now() });
-      ctx.state.reviews = await getReviews();
-      ctx.toast('已保存复盘');
-      paint();
-    });
-    el.querySelectorAll('[data-rdel]').forEach((b) => b.addEventListener('click', async () => {
-      await delReview(b.dataset.rdel);
-      ctx.state.reviews = await getReviews();
-      paint();
-    }));
   }
 }
 
@@ -241,10 +189,101 @@ export function renderAI(ctx) {
   const html = '<div class="sec-title"><h2>决策助手</h2><span class="hint">规则驱动，非预测</span></div>' +
     '<div class="copilot-questions">' + qHtml + '</div>' +
     '<div id="copilotAnswer">' + (payload ? '<div class="all-empty">点击上方问题查看系统解释</div>' : '<div class="all-empty">等待实时行情后可用</div>') + '</div>';
+  el.__ctx = ctx;
   if (!setHTML(el, html)) return;
-  el.querySelectorAll('[data-copilot]').forEach((btn) => btn.addEventListener('click', () => {
-    if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
-    const ans = buildCopilotAnswer(btn.dataset.copilot, ctx.state.lastPayload);
-    document.querySelector('#copilotAnswer').innerHTML = ans;
-  }));
+}
+
+/* ---------------- 模块级事件委托（一次性挂载；Node 导入安全守卫） ----------------
+   覆盖：翻页 / chip 多选 / 交易保存删除 / 复盘生成保存删除 / 决策助手提问。
+   渲染函数只产出 HTML 并暴露 __ctx/__repaint/__nav，不再「每次渲染重新绑监听」。 */
+if (typeof document !== 'undefined') {
+  const selGroups = (root) => {
+    const groups = {};
+    root.querySelectorAll('.chips').forEach((g) => { groups[g.dataset.group] = [...g.querySelectorAll('.chip-btn.on')].map((b) => b.dataset.v); });
+    return groups;
+  };
+  async function tradeSubmit(container) {
+    const ctx = container?.__ctx; if (!ctx) return;
+    const q = (s2) => container.querySelector(s2);
+    const code = q('#tfCode').value.trim().replace(/\D/g, '');
+    if (!code) { ctx.toast('请输入代码'); return; }
+    const pnl = parseFloat(q('#tfPnl').value);
+    if (isNaN(pnl)) { ctx.toast('请输入盈亏'); return; }
+    const groups = selGroups(container);
+    const name = q('#tfName').value.trim() || code;
+    const trade = {
+      id: Date.now() + '-' + code, code, name,
+      date: q('#tfDate').value || new Date().toISOString().slice(0, 10),
+      pnl, result: q('#tfResult').value,
+      buyPrice: parseFloat(q('#tfBuy').value) || null,
+      sellPrice: parseFloat(q('#tfSell').value) || null,
+      emotion: q('#tfEmotion').value,
+      strategy: q('#tfStrategy').value,
+      fraction: parseFloat(q('#tfFraction').value) || 0.2,
+      buyReasons: groups.buyReasons, sellReason: (groups.sellReason || [])[0] || '', errorTags: groups.errorTags,
+      createdAt: Date.now()
+    };
+    await putTrade(trade);
+    ctx.state.trades = await getTrades();
+    ctx.toast('已保存交易');
+    container.__repaint();
+  }
+  document.addEventListener('click', async (e) => {
+    const hit = (s2) => e.target.closest(s2);
+    const pg = hit('[data-pg]');
+    if (pg) {
+      const search = document.querySelector('#marketSearch');
+      if (search && search.value.trim()) return; // 搜索态不翻页（与原行为一致）
+      document.querySelector('#marketPager')?.__nav?.(pg.dataset.pg);
+      return;
+    }
+    const delBtn = hit('[data-del]');
+    if (delBtn) {
+      const container = delBtn.closest('#tradesView');
+      const ctx = container?.__ctx; if (!ctx) return;
+      await delTrade(delBtn.dataset.del);
+      ctx.state.trades = await getTrades();
+      container.__repaint();
+      return;
+    }
+    const rdel = hit('[data-rdel]');
+    if (rdel) {
+      const container = rdel.closest('#reviewView');
+      const ctx = container?.__ctx; if (!ctx) return;
+      await delReview(rdel.dataset.rdel);
+      ctx.state.reviews = await getReviews();
+      container.__repaint();
+      return;
+    }
+    if (hit('#tfSubmit')) { await tradeSubmit(hit('#tradesView')); return; }
+    if (hit('#rvGen')) {
+      const tv = hit('#reviewView');
+      const ta = tv?.querySelector('#rvText');
+      if (ta && tv.__ctx) ta.value = buildReviewText(tv.__ctx.state);
+      return;
+    }
+    if (hit('#rvSave')) {
+      const container = hit('#reviewView');
+      const ctx = container?.__ctx; if (!ctx) return;
+      const t = container.querySelector('#rvText').value.trim();
+      if (!t) { ctx.toast('内容为空'); return; }
+      const date = ctx.state.pools?.date || new Date().toISOString().slice(0, 10);
+      await putReview({ date, text: t, createdAt: Date.now() });
+      ctx.state.reviews = await getReviews();
+      ctx.toast('已保存复盘');
+      container.__repaint();
+      return;
+    }
+    const cq = hit('[data-copilot]');
+    if (cq) {
+      const ctx = cq.closest('#aiView')?.__ctx;
+      if (!ctx) return;
+      if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
+      document.querySelector('#copilotAnswer').innerHTML = buildCopilotAnswer(cq.dataset.copilot, ctx.state.lastPayload);
+      return;
+    }
+    // chip 多选：只切类名，提交时按 .on 收集（不再维护 _sel 状态）
+    const chipBtn = hit('.chip-btn[data-v]');
+    if (chipBtn && chipBtn.closest('.chips')) chipBtn.classList.toggle('on');
+  });
 }

@@ -1,6 +1,7 @@
 {
   "name": "MarketPulse 手机版",
   "short_name": "MPulse",
+  "id": "./",
   "description": "A股情绪与连板行情看板（手机版）",
   "start_url": "./",
   "scope": "./",

@@ -5,8 +5,8 @@ import {
   calculateEmotionState, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate
 } from './analytics.js';
-import { getWatch, putWatch, delWatch, getKV, setKV, getAllHistory, putHistory } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
+import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList } from './views.js';
 import { renderMarket, renderTrades, renderReview, renderAI } from './views-extra.js';
 
 const state = {
@@ -17,6 +17,7 @@ const state = {
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
   trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
   allMarket: null, marketPage: 1, gap: null,
+  fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -24,17 +25,26 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------- 派生计算 ---------------- */
-function computePromotionFromHistory(hist) {
-  const arr = [...hist].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  if (arr.length < 2) return { available: false, firstBoardRate: null, multiBoardRate: null, prevMaxBoard: null, prevMultiBoardCount: null };
-  const today = state.pools?.date;
-  const prev = arr.filter((h) => today && String(h.date) < String(today)).pop() || arr[arr.length - 2];
+// state.history 恒为按日期升序（init/loadHistory 写入前已排序），派生结果按 history+交易日 缓存，
+// 盘中每 tick 不再重复全量重算晋级率/昨板映射。
+let histMemo = { key: '', promo: null, prevBoards: null };
+function historyDerived(poolsDate) {
+  const h = state.history || [];
+  const key = h.length + ':' + (h.length ? h[h.length - 1].date : '') + '|' + (poolsDate || '');
+  if (histMemo.key !== key) {
+    histMemo = { key, promo: computePromotionFromHistory(h, poolsDate), prevBoards: prevDayBoards(h, poolsDate) };
+  }
+  return histMemo;
+}
+function computePromotionFromHistory(hist, today) {
+  if (hist.length < 2) return { available: false, firstBoardRate: null, multiBoardRate: null, prevMaxBoard: null, prevMultiBoardCount: null };
+  const prev = hist.filter((h) => today && String(h.date) < String(today)).pop() || hist[hist.length - 2];
   const prevStocks = prev.stocks || [];
   const prevMaxBoard = prevStocks.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const prevMulti = prevStocks.filter((x) => (x.boards || 1) > 1).length;
   const byBoard = new Map();
-  for (let i = 1; i < arr.length; i += 1) {
-    const r = calculatePromotionStats(arr[i - 1].stocks, arr[i].stocks);
+  for (let i = 1; i < hist.length; i += 1) {
+    const r = calculatePromotionStats(hist[i - 1].stocks, hist[i].stocks);
     if (!r.available) continue;
     for (const g of r.byBoard) {
       if (!byBoard.has(g.board)) byBoard.set(g.board, { board: g.board, denominator: 0, promoted: 0 });
@@ -53,10 +63,8 @@ function computePromotionFromHistory(hist) {
   };
 }
 
-function prevDayBoards(hist) {
-  const arr = [...hist].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const today = state.pools?.date;
-  const prev = arr.filter((h) => today && String(h.date) < String(today)).pop() || arr[arr.length - 1];
+function prevDayBoards(hist, today) {
+  const prev = hist.filter((h) => today && String(h.date) < String(today)).pop() || hist[hist.length - 1];
   const map = {};
   (prev?.stocks || []).forEach((s) => { map[s.code] = s.boards; });
   return map;
@@ -70,7 +78,8 @@ function computeDerived(pools) {
   const maxBoard = up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const multiBoardCount = up.filter((x) => (x.boards || 1) > 1).length;
   const breakRate = calculateBreakRate({ limitUpCount: upCount, brokenCount, available: true });
-  const promo = computePromotionFromHistory(state.history || []);
+  const memo = historyDerived(pools.date);
+  const promo = memo.promo;
   const emotion = calculateEmotionState({
     limitUpCount: upCount, limitDownCount: downCount, multiBoardCount, maxBoard, breakRate,
     firstBoardPromotionRate: promo.firstBoardRate, multiBoardPromotionRate: promo.multiBoardRate,
@@ -79,7 +88,7 @@ function computeDerived(pools) {
   const phase = emotion.phase;
   const themes = buildThemeRanking(up);
   const leaders = rankCoreLeaders(up, themes);
-  const prevBoards = prevDayBoards(state.history || []);
+  const prevBoards = memo.prevBoards;
   up.forEach((s) => { s.buyType = buyTypeOf({ boards: s.boards, previousBoard: prevBoards[s.code] ?? null }); });
   const opportunities = rankOpportunities(up, { leaders, themes, phase });
   const riskRadar = buildRiskRadar({ stocks: up, leaders, emotion, breakRate, phase });
@@ -110,17 +119,32 @@ function computeDerived(pools) {
     tradeDate: pools.date, limitUpCount: upCount, limitDownCount: downCount,
     status: { phase: emotion.phase, level: emotion.level, emotionIndex: emotion.emotionIndex, maxBoard },
     stats: { breakRate }, themes, leaders, riskRadar, opportunities,
-    health: { ok: true, sources: { '东方财富行情': { ok: true } }, latencyMs: null },
+    health: {
+      ok: !pools.partial,
+      sources: { '东方财富行情': { ok: !pools.partial, missing: pools.partialMissing || [] } },
+      latencyMs: null,
+    },
   };
 }
 
 /* ---------------- 渲染：状态条 ---------------- */
+function hhmm(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
 function renderStatus() {
   const s = $('#statusStrip');
   if (!state.pools) { setHTML(s, '<div class="chip"><span>状态</span><strong>连接中</strong></div>'); return; }
   const p = state.pools;
   const maxBoard = p.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const em = state.emotion || {};
+  // 数据新鲜度：正常显示更新时间；只有快照时标注「快照」；最近一次刷新失败且无更新则提示
+  const failed = state.lastErrorAt > state.lastSuccessAt;
+  const freshChip = failed
+    ? '<div class="chip risk-high"><span>状态</span><strong>刷新失败</strong></div>'
+    : (state.lastSuccessAt
+      ? '<div class="chip sent"><span>更新</span><strong>' + hhmm(state.lastSuccessAt) + '</strong></div>'
+      : (state.lastGoodAt ? '<div class="chip risk-mid"><span>快照</span><strong>' + hhmm(state.lastGoodAt) + '</strong></div>' : ''));
+  const partialChip = p.partial && p.partialMissing && p.partialMissing.length
+    ? '<div class="chip risk-mid"><span>缺源</span><strong>' + esc(p.partialMissing.join('/')) + '</strong></div>'
+    : '';
   const html = [
     chip('sent', '情绪', em.emotionIndex ?? '--'),
     chip('up', '涨停', p.upCount),
@@ -129,6 +153,8 @@ function renderStatus() {
     chip('', '最高板', maxBoard),
     chip('', '炸板率', (state.breakRate?.rate ?? '--') + '%'),
     chip(em.level === 'red' ? 'risk-high' : em.level === 'orange' ? 'risk-mid' : '', '风险', em.phase || '—'),
+    freshChip,
+    partialChip,
   ].join('');
   setHTML(s, html);
   $('#phaseBadge').textContent = em.phase || '连接中';
@@ -169,12 +195,57 @@ function filterZt() {
   });
   return rows;
 }
+// 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
+function ztStructSig(x) {
+  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0].join('|');
+}
+function pctFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.seal ?? '', x.turnover ?? ''].join('|'); }
+function downFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.turnover ?? ''].join('|'); }
+function patchPricePct(node, x) {
+  const pc = pctClass(x.changePct);
+  const priceEl = node.querySelector('.price');
+  if (priceEl) {
+    const pt = x.price ? x.price.toFixed(2) : '--';
+    if (priceEl.textContent !== pt) priceEl.textContent = pt;
+    if (priceEl.className !== 'price ' + pc) priceEl.className = 'price ' + pc;
+  }
+  const pctEl = node.querySelector('.pct');
+  if (pctEl) {
+    const pv = pctText(x.changePct);
+    if (pctEl.textContent !== pv) pctEl.textContent = pv;
+    if (pctEl.className !== 'pct ' + pc) pctEl.className = 'pct ' + pc;
+  }
+}
+function patchZtCard(node, x) {
+  patchPricePct(node, x);
+  const metaEl = node.querySelector('.meta');
+  if (metaEl) {
+    const mt = '封 ' + fmtMoney(x.seal) + ' · 换 ' + (x.turnover != null ? x.turnover.toFixed(1) + '%' : '--');
+    if (metaEl.textContent !== mt) metaEl.textContent = mt;
+  }
+}
+function patchDownCard(node, x) {
+  patchPricePct(node, x);
+  const metaEl = node.querySelector('.meta');
+  if (metaEl) {
+    const mt = '换 ' + (x.turnover != null ? x.turnover.toFixed(1) + '%' : '--');
+    if (metaEl.textContent !== mt) metaEl.textContent = mt;
+  }
+}
+function showOfflineEmpty(err) {
+  // 冷启动拉不到数据且无任何池（含快照水合失败）：清掉骨架屏给显式离线态，替代无限 shimmer
+  const msg = err && err.message ? String(err.message) : '网络不可用或接口暂不可达';
+  setHTML($('#ztList'), '<div class="empty">暂无行情数据<br /><span class="muted">' + esc(msg) + '</span><br />' +
+    '<button class="btn" id="retryBtn" style="flex:0 0 auto;margin:14px auto 0;padding:0 22px">↻ 重试</button></div>');
+  $('#ztList').__seq = '';
+  $('#ztHint').textContent = '--';
+}
 function renderZt() {
   const list = $('#ztList');
   if (!state.pools) return; // 首屏骨架由 index.html 提供，数据到达前不覆盖
   const rows = filterZt();
   $('#ztHint').textContent = '共 ' + state.pools.upCount + ' 只';
-  setHTML(list, rows.length ? rows.map(ztCard).join('') : '<div class="empty">没有匹配的股票</div>');
+  patchCardList(list, rows, ztCard, ztStructSig, pctFieldSig, patchZtCard);
 }
 function downCard(x) {
   return '<div class="card" data-code="' + x.code + '">' +
@@ -188,8 +259,9 @@ function renderDowns() {
   const p = state.pools; if (!p) return;
   $('#dtCount').textContent = p.downCount;
   $('#zbCount').textContent = p.brokenCount;
-  setHTML($('#dtList'), p.down.length ? p.down.map(downCard).join('') : '<div class="empty">今日无跌停</div>');
-  setHTML($('#zbList'), p.broken.length ? p.broken.map(downCard).join('') : '<div class="empty">今日无炸板</div>');
+  // 折叠时不构建内部 DOM（炸板池常 50~150 行），首次展开才渲染
+  if ($('#dtFold').open) patchCardList($('#dtList'), p.down, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无跌停</div>');
+  if ($('#zbFold').open) patchCardList($('#zbList'), p.broken, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无炸板</div>');
 }
 
 /* ---------------- 昨日涨停 · 今日开盘预期差 ---------------- */
@@ -204,23 +276,32 @@ function renderGap(gap) {
       '<div class="pnl ' + cls + '">' + g.status + (g.diff != null ? ' (' + (g.diff >= 0 ? '+' : '') + g.diff + ')' : '') + '</div></div>';
   }).join('') : '<div class="muted">暂无数据</div>');
 }
+let gapSeq = 0; // 序号守卫：并发/先后两轮 loadGap，只有最新一轮可写 state.gap
 async function loadGap(force = false) {
+  const mySeq = ++gapSeq;
   const gapEl = $('#gapRows');
   const sum = $('#gapSummary');
-  const hist = state.history || [];
-  const yest = [...hist].sort((a, b) => String(a.date).localeCompare(String(b.date))).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
+  const yest = (state.history || []).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
   if (!yest) { sum.textContent = '需历史'; setHTML(gapEl, '<div class="muted">需先「补录历史」或次日数据后才能计算昨日涨停今日开盘预期差。</div>'); return; }
   const candidates = (yest.stocks || []).map((c) => ({ code: c.code, name: c.name, boards: c.boards, industry: c.industry }));
   if (!candidates.length) { sum.textContent = '--'; setHTML(gapEl, '<div class="muted">昨日无涨停缓存</div>'); return; }
   // 同一交易日且已有结果：直接用缓存，不重复打行情接口
   if (!force && state.gapDate === state.pools.date && state.gap) { renderGap(state.gap); return; }
   try {
-    let quotes = {};
-    try { quotes = await fetchQuotes(candidates.map((c) => c.code)); } catch (e) { quotes = {}; }
+    let quotes;
+    try { quotes = await fetchQuotes(candidates.map((c) => c.code)); }
+    catch (e) {
+      // 拉不到报价：保留上次的好结果，不用空数据覆盖
+      if (mySeq === gapSeq && state.gap) sum.textContent = '报价失败 · 保留上次结果';
+      return;
+    }
+    if (mySeq !== gapSeq) return; // 过期响应，丢弃
     const actualMap = {};
     candidates.forEach((c) => { const q = quotes[c.code]; if (q && q.open != null && q.prevClose) actualMap[c.code] = (q.open - q.prevClose) / q.prevClose * 100; });
     const ctx = { ctxFor: (s) => ({ buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: '板块龙头' }) };
-    state.gap = buildExpectationGap(candidates, actualMap, ctx);
+    const nextGap = buildExpectationGap(candidates, actualMap, ctx);
+    if (mySeq !== gapSeq) return;
+    state.gap = nextGap;
     state.gapDate = state.pools.date;
     renderGap(state.gap);
   } catch (e) { /* 静默：预期差属增强信息 */ }
@@ -284,7 +365,12 @@ async function loadWatch() {
   const inPools = new Set();
   if (state.pools) [...state.pools.up, ...state.pools.down, ...state.pools.broken].forEach((x) => inPools.add(x.code));
   const needQuote = codes.filter((c) => !inPools.has(c));
-  state.quotes = needQuote.length ? await fetchQuotes(needQuote).catch(() => ({})) : {};
+  // 报价带 TTL：TTL 内切回自选不重复打接口；新报价合并进旧表而非整体替换
+  const fresh = Date.now() - state.quotesAt < Math.min(state.refreshMs || 15000, 15000);
+  if (needQuote.length && !fresh) {
+    const q = await fetchQuotes(needQuote).catch(() => ({}));
+    if (Object.keys(q).length) { state.quotes = Object.assign({}, state.quotes, q); state.quotesAt = Date.now(); }
+  }
   renderWatch();
 }
 
@@ -295,8 +381,13 @@ async function openSheet(code) {
   if (state.pools) stock = state.pools.up.find((x) => x.code === code) || state.pools.down.find((x) => x.code === code) || state.pools.broken.find((x) => x.code === code);
   if (!stock) { const w = state.watch.find((x) => x.code === code); if (w) stock = { code, name: w.name || code, boards: 1, industry: '—', changePct: null, price: null }; }
   if (!stock) return;
-  const q = await fetchQuotes([code]).catch(() => ({}));
-  const d = q[code] || {};
+  // 已有新鲜报价直接用（点开/自选切换不再每次一个往返），过期才拉
+  let d = (Date.now() - state.quotesAt < 10000 && state.quotes[code]) || null;
+  if (!d) {
+    const q = await fetchQuotes([code]).catch(() => ({}));
+    d = q[code] || {};
+    if (d.price != null) state.quotes[code] = d; // 缓存供下次秒开（不动 quotesAt，避免拉长全局 TTL）
+  }
   const isWatch = state.watch.some((w) => w.code === code);
   const pct = d.price != null && d.prevClose ? ((d.price - d.prevClose) / d.prevClose * 100) : (stock.changePct != null ? stock.changePct : null);
   const body = $('#sheetBody');
@@ -389,11 +480,23 @@ async function refresh(force = false) {
   try {
     const date = state.manualDate || todayStr();
     const pools = await fetchPools(date);
-    state.pools = pools;
+    state.fromSnapshot = false;
+    state.lastSuccessAt = Date.now();
+    persistLastGood(pools); // 先落原始池（未挂派生字段，体积小），失败静默
     computeDerived(pools);
-    renderStatus(); renderIntraday();
-  } catch (e) { toast('刷新失败：' + e.message); }
+    state.pools = pools;
+    renderStatus();
+    renderView(state.view); // 只渲染活跃视图；其余视图数据已更新，切过去即最新
+  } catch (e) {
+    state.lastErrorAt = Date.now();
+    renderStatus();
+    if (!state.pools) showOfflineEmpty(e); // 无任何可用数据（含快照）：清骨架屏给显式离线态
+    toast('刷新失败：' + e.message);
+  }
   finally { $('#refreshBtn').classList.remove('spin'); refreshing = false; }
+}
+function persistLastGood(pools) {
+  setKV('lastGood', { date: pools.date, pools, savedAt: Date.now() }).catch(() => {});
 }
 function updateBanner() {
   const p = state.pools;
@@ -415,7 +518,14 @@ function tradingNow() {
 function applyRefreshTimer() {
   if (state.timer) clearInterval(state.timer);
   state.timer = null;
-  if (state.refreshMs > 0) state.timer = setInterval(() => { if (tradingNow()) refresh(); }, state.refreshMs);
+  if (state.refreshMs > 0) state.timer = setInterval(refreshTick, state.refreshMs);
+}
+function refreshTick() {
+  if (document.hidden) return; // 后台标签页不白耗流量/电量
+  if (!tradingNow()) return;
+  // 回看历史交易日：数据已是该日就不再重拉不变的历史，手动 ↻ 才强制
+  if (state.manualDate && state.pools && String(state.pools.date) === String(state.manualDate)) return;
+  refresh();
 }
 
 /* ---------------- 历史补录 ---------------- */
@@ -434,28 +544,56 @@ function tradingDatesBack(n) {
 async function loadHistory() {
   if (state.historyLoading) return;
   state.historyLoading = true;
-  const existing = await getAllHistory();
-  const map = new Map(existing.map((h) => [h.date, h]));
-  const dates = tradingDatesBack(45);
-  let count = map.size;
-  for (const dt of dates) {
-    if (map.has(dt)) continue;
-    try {
-      const p = await fetchPools(dt);
+  try {
+    const existing = await getAllHistory();
+    const map = new Map(existing.map((h) => [h.date, h]));
+    let emptyDates = [];
+    try { emptyDates = (await getKV('emptyDates', [])) || []; } catch (e) { emptyDates = []; }
+    const emptySet = new Set(emptyDates);
+    const dates = tradingDatesBack(45);
+    let count = map.size;
+    let failRun = 0;
+    for (const dt of dates) {
+      if (map.has(dt) || emptySet.has(dt)) continue;
+      let p;
+      try {
+        p = await fetchPools(dt);
+        failRun = 0;
+      } catch (e) {
+        // 失败退避后继续；连续 3 天失败视为接口异常，中止本轮
+        failRun += 1;
+        if (failRun >= 3) { toast('历史补录中止：接口连续失败'); break; }
+        await sleep(800 * failRun + Math.floor(Math.random() * 300));
+        continue;
+      }
       if (p.upCount > 0) {
         const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name })) };
         await putHistory(rec); map.set(dt, rec); count += 1;
+      } else {
+        // 空池（节假日/无数据）也记档，之后不再重复拉同一天
+        emptySet.add(dt);
       }
-    } catch (e) { /* 跳过无数据日 */ }
-    if (count >= 30) break;
-    await sleep(150);
+      if (count >= 30) break;
+      await sleep(150);
+    }
+    if (emptySet.size !== emptyDates.length || [...emptySet].some((d2) => !emptyDates.includes(d2))) {
+      setKV('emptyDates', [...emptySet].slice(-200)).catch(() => {});
+    }
+    // 历史库只保留最近 60 个交易日，防止数月后无限增长拖慢启动
+    const KEEP = 60;
+    if (map.size > KEEP) {
+      const keep = [...map.keys()].sort(String.localeCompare).slice(-KEEP);
+      try { await pruneHistoryKeep(keep); } catch (e) { /* 修剪失败不影响主流程 */ }
+      for (const k of [...map.keys()]) { if (!keep.includes(k)) map.delete(k); }
+    }
+    state.history = [...map.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    state.historyLoaded = true;
+    if (state.pools) computeDerived(state.pools);
+    renderCurrentView();
+    toast('历史补录完成：' + state.history.length + ' 个交易日');
+  } finally {
+    state.historyLoading = false;
   }
-  state.history = [...map.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  state.historyLoaded = true;
-  state.historyLoading = false;
-  if (state.pools) computeDerived(state.pools);
-  renderCurrentView();
-  toast('历史补录完成：' + state.history.length + ' 个交易日');
 }
 
 /* ---------------- 工具 ---------------- */
@@ -468,15 +606,25 @@ function toast(msg) {
 function bind() {
   // 全局事件委托：任何带 data-code 的卡片点按都打开详情（替代逐卡 addEventListener，刷新不再累积监听器）
   document.addEventListener('click', (e) => {
+    if (e.target.closest('#retryBtn')) { refresh(true); return; } // 离线空态里的重试按钮
     const t = e.target.closest('[data-code]');
     if (t) openSheet(t.dataset.code);
+  });
+  // 回前台立即补一次刷新（数据过期才拉），后台期间定时器已由 refreshTick 跳过
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !tradingNow()) return;
+    const age = Date.now() - state.lastSuccessAt;
+    if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
   });
   $$('.bottomnav button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
   $$('.menu-item').forEach((m) => m.addEventListener('click', () => switchView(m.dataset.view)));
   $('#menuBtn').addEventListener('click', openMenu);
   $('#menuScrim').addEventListener('click', closeMenu);
   $('#refreshBtn').addEventListener('click', () => refresh(true));
-  $('#ztSearch').addEventListener('input', (e) => { state.ztFilterText = e.target.value; renderZt(); });
+  // 涨停池搜索防抖（共享 views.js 的 debounce），避免逐键全列表重建
+  $('#ztSearch').addEventListener('input', debounce((e) => { state.ztFilterText = e.target.value; renderZt(); }, 250));
+  // 折叠池首次展开才渲染
+  ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
   $$('#ztSort button').forEach((b) => b.addEventListener('click', () => {
     $$('#ztSort button').forEach((x) => x.classList.remove('on')); b.classList.add('on');
     state.ztSort = b.dataset.sort; renderZt();
@@ -496,11 +644,11 @@ function bind() {
     state.watch.push({ code, name, addedAt: Date.now() });
     e.target.value = ''; toast('已加入自选'); loadWatch();
   });
-  $('#setTheme').addEventListener('change', (e) => { state.theme = e.target.value; document.documentElement.setAttribute('data-theme', state.theme); setKV('theme', state.theme); });
+  $('#setTheme').addEventListener('change', (e) => { state.theme = e.target.value; document.documentElement.setAttribute('data-theme', state.theme); applyThemeMeta(); setKV('theme', state.theme); });
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
   $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });
   $('#clearBtn').addEventListener('click', async () => {
-    for (const w of state.watch) await delWatch(w.code);
+    await clearWatch(); // 单事务清空
     state.watch = []; renderWatch(); toast('已清空自选');
   });
   $('#scrim').addEventListener('click', closeSheet);
@@ -522,18 +670,56 @@ function setupPTR() {
 }
 
 /* ---------------- 启动 ---------------- */
+function applyThemeMeta() {
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.setAttribute('content', state.theme === 'light' ? '#f4f6f8' : '#0e1417');
+}
 async function init() {
-  state.theme = await getKV('theme', 'dark');
-  state.refreshMs = await getKV('refreshMs', 15000);
-  document.documentElement.setAttribute('data-theme', state.theme);
-  $('#setTheme').value = state.theme;
-  $('#setRefresh').value = String(state.refreshMs);
-  bind();
-  const hist = await getAllHistory();
-  state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  state.historyLoaded = hist.length > 0;
-  await refresh();
-  applyRefreshTimer();
+  // SW 注册放最前：弱网首访不至于等几十秒的网络超时后才装上
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  window.addEventListener('unhandledrejection', (e) => { console.warn('[mp] 未处理的 Promise 拒绝：', e.reason); });
+  try {
+    // 设置/快照/历史并行读，首个网络请求不必排队等 IDB 串行往返
+    const [theme, refreshMs, snap, hist] = await Promise.all([
+      getKV('theme', 'dark'),
+      getKV('refreshMs', 15000),
+      getKV('lastGood', null).catch(() => null),
+      getAllHistory().catch(() => []),
+    ]);
+    state.theme = theme || 'dark';
+    state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
+    document.documentElement.setAttribute('data-theme', state.theme);
+    applyThemeMeta();
+    $('#setTheme').value = state.theme;
+    $('#setRefresh').value = String(state.refreshMs);
+    bind();
+    state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    state.historyLoaded = hist.length > 0;
+    // 快照水合：离线/弱网冷启动先显示上次成功数据（状态条标「快照」），新数据到达后替换
+    if (snap && snap.pools && Array.isArray(snap.pools.up)) {
+      state.pools = snap.pools;
+      state.fromSnapshot = true;
+      state.lastGoodAt = snap.savedAt || 0;
+      computeDerived(snap.pools);
+      renderStatus();
+      renderView(state.view);
+    }
+    await refresh();
+    applyRefreshTimer();
+  } catch (e) {
+    console.error('[mp] 启动失败：', e);
+    try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }
+  }
+}
+// 新 SW 接管后自动重载一次，消除「新 HTML 配旧 JS/CSS」的混合版本窗口；
+// 首次安装的 claim 不算升级；sessionStorage 防循环重载。
+if ('serviceWorker' in navigator) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; }
+    if (sessionStorage.getItem('mp-sw-reloaded')) return;
+    sessionStorage.setItem('mp-sw-reloaded', '1');
+    location.reload();
+  });
 }
 init();

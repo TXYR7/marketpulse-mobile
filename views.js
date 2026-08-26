@@ -11,6 +11,53 @@ export function setHTML(el, html) {
   return true;
 }
 
+// 共享防抖（原 views-extra 内部实现提升为公共工具，涨停池搜索框也复用）
+export function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// 行级 diff：列表成员与顺序不变时，只原地更新变化的字段（价格/涨跌/封单等），
+// 不再每 tick 整表 innerHTML 重建（盘中 300 卡 × 每 8~15s 一次的主线程卡顿根源）。
+// sigFn 返回卡片"结构签名"（连板数/评级/信号/自选星等），变了才整卡重建；
+// fieldSigFn 返回"数值签名"，变了走 patchFn 原地改文本/类名。
+export function patchCardList(list, rows, cardHtmlFn, sigFn, fieldSigFn, patchFn, emptyHtml) {
+  if (!rows.length) { setHTML(list, emptyHtml || '<div class="empty">没有匹配的股票</div>'); list.__seq = ''; return; }
+  const seq = rows.map((x) => x.code).join(',');
+  const first = list.firstElementChild;
+  if (list.__seq !== seq || !first || !first.classList.contains('card')) {
+    // 成员或顺序变化：整体重建一次
+    const html = rows.map(cardHtmlFn).join('');
+    if (setHTML(list, html)) {
+      list.__seq = seq;
+      for (let i = 0; i < rows.length; i += 1) {
+        const node = list.children[i];
+        if (!node) break;
+        node.dataset.sig = sigFn(rows[i]);
+        node.dataset.fs = fieldSigFn(rows[i]);
+      }
+    }
+    return;
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const node = list.children[i];
+    const x = rows[i];
+    if (!node) break;
+    const sig = sigFn(x);
+    if (node.dataset.sig !== sig) {
+      // 结构变化：仅重建这一张卡
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cardHtmlFn(x).trim();
+      const fresh = tpl.content.firstElementChild;
+      if (fresh) {
+        fresh.dataset.sig = sig;
+        fresh.dataset.fs = fieldSigFn(x);
+        list.replaceChild(fresh, node);
+      }
+      continue;
+    }
+    const fs = fieldSigFn(x);
+    if (node.dataset.fs !== fs) { patchFn(node, x); node.dataset.fs = fs; }
+  }
+}
+
 export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 export function fmtMoney(v) {
   if (v == null || isNaN(v)) return '--';
@@ -89,7 +136,7 @@ export function renderLadder(ctx) {
     const cnt = groups[k];
     const pct = Math.round((cnt / max) * 100);
     return '<div class="bar-row"><span class="lab">' + k + '板</span>' +
-      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="bar-track"><div class="bar-fill" style="transform:scaleX(' + (pct / 100).toFixed(3) + ')"></div></div>' +
       '<span class="cnt">' + cnt + '</span></div>';
   }).join('');
 

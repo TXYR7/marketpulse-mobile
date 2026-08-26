@@ -11,15 +11,12 @@ const EMA = {
   ulist(codes) {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
     return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66`;
-  },
-  kline(code, market) {
-    const secid = marketPrefix(code) + code;
-    return `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&end=20500101&lmt=120`;
   }
 };
 
 function marketPrefix(code) {
-  return String(code)[0] === '6' ? '1.' : '0.';
+  const c = String(code)[0];
+  return (c === '6' || c === '5') ? '1.' : '0.'; // 沪市股票(6)/沪市基金(5)→1.，深市(0/3)→0.
 }
 
 export function todayStr(d = new Date()) {
@@ -40,11 +37,13 @@ async function getJSON(url, tries = 3) {
         headers: { accept: 'application/json,text/plain,*/*' },
         signal: AbortSignal.timeout(9000),
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
       return res.json();
     } catch (e) {
       lastErr = e;
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      // 4xx（除 429 限流）重试无意义，直接失败；网络/超时/5xx 用带抖动的退避重试
+      if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1) + Math.floor(Math.random() * 250)));
     }
   }
   throw lastErr;
@@ -84,40 +83,63 @@ function mapPool(row) {
   };
 }
 
+// 合并三池请求结果（Promise.allSettled 形态）：任一源成功即返回部分数据并标记失败源，全败才抛错。
+// 纯函数，便于离线回归测试。
+export function mergePools(date, settled) {
+  const val = (r) => (r && r.status === 'fulfilled' ? r.value : null);
+  const up = val(settled[0]), down = val(settled[1]), broken = val(settled[2]);
+  if (!up && !down && !broken) {
+    const firstErr = settled.find((r) => r.status === 'rejected');
+    throw (firstErr && firstErr.reason) || new Error('行情接口全部失败');
+  }
+  const ups = (up?.data?.pool || []).map(mapPool);
+  const downs = (down?.data?.pool || []).map(mapPool);
+  const brokens = (broken?.data?.pool || []).map(mapPool);
+  const failed = [];
+  if (!up) failed.push('涨停池');
+  if (!down) failed.push('跌停池');
+  if (!broken) failed.push('炸板池');
+  return {
+    date: up?.data?.qdate || down?.data?.qdate || broken?.data?.qdate || date,
+    up: ups,
+    down: downs,
+    broken: brokens,
+    upCount: up ? (up.data?.tc ?? ups.length) : 0,
+    downCount: down ? (down.data?.tc ?? downs.length) : 0,
+    brokenCount: broken ? (broken.data?.tc ?? brokens.length) : 0,
+    sources: { up: !!up, down: !!down, broken: !!broken },
+    partial: failed.length > 0,
+    partialMissing: failed,
+  };
+}
+
 export async function fetchPools(date) {
-  const [up, down, broken] = await Promise.all([
+  const settled = await Promise.allSettled([
     getJSON(EMA.pool('up', date)),
     getJSON(EMA.pool('down', date)),
     getJSON(EMA.pool('broken', date)),
   ]);
-  const ups = (up?.data?.pool || []).map(mapPool);
-  const downs = (down?.data?.pool || []).map(mapPool);
-  const brokens = (broken?.data?.pool || []).map(mapPool);
-  return {
-    date: up?.data?.qdate || date,
-    up: ups,
-    down: downs,
-    broken: brokens,
-    upCount: up?.data?.tc ?? ups.length,
-    downCount: down?.data?.tc ?? downs.length,
-    brokenCount: broken?.data?.tc ?? brokens.length,
-  };
+  return mergePools(date, settled);
 }
 
+const ULIST_CHUNK = 60; // 单次 ulist secids 上限，超出的分块串行拉，避免长列表被截断
 export async function fetchQuotes(codes) {
-  if (!codes.length) return {};
-  const data = await getJSON(EMA.ulist(codes));
+  const list = (codes || []).map(String);
+  if (!list.length) return {};
   const out = {};
-  for (const row of data?.data?.diff || []) {
-    out[String(row.f12)] = {
-      code: String(row.f12),
-      name: row.f14,
-      price: row.f2,
-      open: row.f17,
-      prevClose: row.f18,
-      main: row.f62, // 主力净流入
-      super: row.f66, // 超大单净流入
-    };
+  for (let i = 0; i < list.length; i += ULIST_CHUNK) {
+    const data = await getJSON(EMA.ulist(list.slice(i, i + ULIST_CHUNK)));
+    for (const row of data?.data?.diff || []) {
+      out[String(row.f12)] = {
+        code: String(row.f12),
+        name: row.f14,
+        price: row.f2,
+        open: row.f17,
+        prevClose: row.f18,
+        main: row.f62, // 主力净流入
+        super: row.f66, // 超大单净流入
+      };
+    }
   }
   return out;
 }
@@ -154,37 +176,4 @@ export async function searchStock(q) {
     market: row.f13,
     name: row.f14,
   }));
-}
-
-// 日线（qfq），用于历史补录/预期差兜底
-export async function fetchKline(code) {
-  const url = EMA.kline(code);
-  const data = await getJSON(url);
-  const klines = data?.data?.klines || [];
-  return klines.map((line) => {
-    const [date, open, close, high, low, volume, amount] = line.split(',');
-    return { date, open: +open, close: +close, high: +high, low: +low, volume: +volume, amount: +amount };
-  });
-}
-
-// 轻量情绪/风险（简化启发式，仅用于状态条快速展示；结构视图使用 analytics.calculateEmotionState）
-export function computeSentiment({ upCount, downCount, brokenCount, maxBoard }) {
-  const total = upCount + downCount;
-  const breakRate = total ? (brokenCount / Math.max(total, 1)) * 100 : 0;
-  let score = 50;
-  score += Math.min(upCount, 120) * 0.4;
-  score -= Math.min(downCount, 60) * 0.8;
-  score += Math.min(maxBoard, 12) * 2;
-  score -= Math.min(breakRate, 50) * 0.6;
-  score = Math.max(0, Math.min(100, Math.round(score)));
-  let phase = '平衡';
-  if (score >= 75 && downCount <= 5) phase = '高潮';
-  else if (score >= 60) phase = '主升';
-  else if (score >= 45) phase = '分歧';
-  else if (score >= 30) phase = '退潮';
-  else phase = '冰点';
-  let risk = '低';
-  if (downCount >= 20 || breakRate >= 35) risk = '高';
-  else if (downCount >= 10 || breakRate >= 20) risk = '中';
-  return { score, phase, risk, breakRate: +breakRate.toFixed(1) };
 }

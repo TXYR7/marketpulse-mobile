@@ -826,7 +826,7 @@ const COPILOT_QUESTIONS = [
   { key: 'tomorrow', label: '明天重点是什么？' },
   { key: 'health', label: '当前数据可信吗？' }
 ];
-function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function copilotSection(label, items) {
   const arr = Array.isArray(items) ? items : [items];
   return `<div class="report-section"><b>${esc(label)}</b><div>${arr.length ? arr.map((i) => `<span>${esc(i)}</span>`).join(' / ') : '—'}</div></div>`;

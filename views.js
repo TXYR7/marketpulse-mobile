@@ -1,11 +1,15 @@
 // views.js — 各 workspace 的渲染与交互（纯前端，依赖 data.js / analytics.js / store.js）
-import { fetchAllMarket, searchStock, fmtTime } from './data.js';
-import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import {
   buildModeMonitor, calculateRollingPromotion, calculatePromotionStats, buildSimilarDays,
-  evaluatePortfolioRisk, attributionOf, DEFAULT_RISK_LIMITS, buildCopilotAnswer, COPILOT_QUESTIONS,
-  phaseStrategy
 } from './analytics.js';
+
+// 共享渲染工具：内容与上次相同则跳过 DOM 重建（防卡顿、保滚动位置）。返回是否真正重建。
+export function setHTML(el, html) {
+  if (!el || el.__last === html) return false;
+  el.innerHTML = html;
+  el.__last = html;
+  return true;
+}
 
 export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 export function fmtMoney(v) {
@@ -19,25 +23,6 @@ export function pctClass(p) { return p > 0 ? 'up-c' : p < 0 ? 'down-c' : 'flat-c
 export function pctText(p) { if (p == null) return '--'; return (p > 0 ? '+' : '') + Number(p).toFixed(2) + '%'; }
 export function tierBadge(t) { return '<span class="tier-badge ' + (t || '淘汰') + '">' + (t || '淘汰') + '</span>'; }
 export function signalTag(s) { return s ? '<span class="signal-tag ' + s + '">' + s + '</span>' : ''; }
-
-function stockCard(x, extra) {
-  const starred = (extra && extra.starred) || false;
-  const bcls = x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
-  const sub = [];
-  if (x.industry && x.industry !== '—') sub.push(x.industry);
-  if (x.role && x.role !== '后排') sub.push(x.role);
-  return '<div class="card" data-code="' + x.code + '">' +
-    '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
-    '<div><div class="name">' + esc(x.name || x.code) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
-    '<div class="code">' + x.code + (sub.length ? ' · ' + esc(sub.join(' · ')) : '') + '</div></div>' +
-    '<div class="right">' +
-    (extra && extra.tier ? tierBadge(extra.tier) : '') +
-    (extra && extra.signal ? '<div style="margin-top:4px">' + signalTag(extra.signal.state) + '</div>' : '') +
-    '<div class="price ' + pctClass(x.changePct) + '" style="margin-top:4px">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
-    '<div class="pct ' + pctClass(x.changePct) + '">' + pctText(x.changePct) + '</div>' +
-    '<div class="meta">封 ' + fmtMoney(x.seal) + ' · 换 ' + (x.turnover != null ? x.turnover.toFixed(1) + '%' : '--') + '</div></div>' +
-    '</div>';
-}
 
 /* ---------------- 机会 ---------------- */
 export function renderOpportunity(ctx) {
@@ -62,12 +47,12 @@ export function renderOpportunity(ctx) {
           '</div>';
       }).join('') + '</div>';
   };
-  el.innerHTML =
+  const html =
     block('S 级', tiers.S || [], 'S') +
     block('A 级', tiers.A || [], 'A') +
     block('B 级', tiers.B || [], 'B') +
     (eCount ? '<div class="muted" style="padding:6px 2px">淘汰 ' + eCount + ' 只（综合得分偏低或触发淘汰规则）</div>' : '');
-  bindCards(el);
+  setHTML(el, html);
 }
 
 /* ---------------- 梯队（含历史晋级率） ---------------- */
@@ -130,12 +115,14 @@ export function renderLadder(ctx) {
     histHtml = '<div class="muted">尚未缓存历史涨停池。点下方按钮拉取近 30 个交易日（手机直连东方财富，按交易日去重，约需一分钟）。</div>';
   }
 
-  el.innerHTML =
+  const html =
     '<div class="ladder-group">' + ladderBars + '</div>' +
     '<button class="btn" id="histLoadBtn" style="margin:10px 0">' + (ctx.state.historyLoading ? '补录中…' : '补录历史（晋级率/模式监控）') + '</button>' +
     '<div class="muted" id="histStatus"></div>' + histHtml;
-  const btn = document.querySelector('#histLoadBtn');
-  if (btn && !ctx.state.historyLoading) btn.addEventListener('click', () => ctx.actions.loadHistory && ctx.actions.loadHistory());
+  if (setHTML(el, html)) {
+    const btn = document.querySelector('#histLoadBtn');
+    if (btn && !ctx.state.historyLoading) btn.addEventListener('click', () => ctx.actions.loadHistory && ctx.actions.loadHistory());
+  }
 }
 
 /* ---------------- 结构（情绪驾驶舱 + 结构树 + 龙头 + 题材 + 相似） ---------------- */
@@ -193,19 +180,14 @@ export function renderStructure(ctx) {
     }
   }
 
-  el.innerHTML =
+  const html =
     '<div class="sec-title"><h2>情绪驾驶舱</h2></div>' + cockpit +
     '<div class="sec-title"><h2>市场结构</h2></div>' + tree +
     '<div class="sec-title"><h2>核心龙头</h2><span class="hint">Top ' + Math.min(12, (s.leaders || []).length) + '</span></div>' + (leaders || '<div class="empty">暂无</div>') +
     '<div class="sec-title"><h2>题材强度</h2><span class="hint">按强度</span></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>' +
     similar;
-  bindCards(el);
+  setHTML(el, html);
 }
 
-function bindCards(scope) {
-  scope.querySelectorAll('[data-code]').forEach((card) => {
-    card.addEventListener('click', () => { if (window.__openSheet) window.__openSheet(card.dataset.code); });
-  });
-}
-
-// 其余视图（全市场 / 交易 / 复盘 / 决策助手）在 views-extra.js 中定义，由 app.js 直接导入。
+// 卡片点击由 app.js 的 document 级事件委托统一处理，这里不再逐卡绑定。
+// 全市场 / 交易 / 复盘 / 决策助手视图在 views-extra.js 中定义，由 app.js 直接导入。

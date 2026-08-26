@@ -2,14 +2,9 @@
 import { fetchAllMarket, searchStock } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, phaseStrategy } from './analytics.js';
-import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag } from './views.js';
+import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-function bindCards(scope) {
-  scope.querySelectorAll('[data-code]').forEach((card) => {
-    card.addEventListener('click', () => { if (window.__openSheet) window.__openSheet(card.dataset.code); });
-  });
-}
 
 /* ---------------- 全市场 ---------------- */
 export function renderMarket(ctx) {
@@ -27,22 +22,23 @@ export function renderMarket(ctx) {
       '<div class="amt">' + (r.changePct != null ? pctText(r.changePct) : '') + '</div></div></div>';
   }
   function paintRows(rows, emptyText) {
-    if (!rows.length) { el.innerHTML = '<div class="empty">' + (emptyText || '暂无数据') + '</div>'; return; }
-    el.innerHTML = rows.map(marketRow).join('');
-    bindCards(el);
+    if (!rows.length) { setHTML(el, '<div class="empty">' + (emptyText || '暂无数据') + '</div>'); return; }
+    setHTML(el, rows.map(marketRow).join(''));
   }
   function render() {
     const am = ctx.state.allMarket || { rows: [], total: 0, page: 1 };
     status.textContent = '共 ' + am.total + ' 只';
     paintRows(am.rows, '暂无数据');
     const totalPages = Math.max(1, Math.ceil(am.total / 60));
-    pagerEl.innerHTML = '<button data-pg="prev">上一页</button><span class="pg">' + am.page + ' / ' + totalPages + '</span><button data-pg="next">下一页</button>';
-    pagerEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-      if (search.value.trim()) return;
-      const cur = ctx.state.allMarket?.page || 1;
-      const np = b.dataset.pg === 'prev' ? Math.max(1, cur - 1) : Math.min(totalPages, cur + 1);
-      ctx.state.marketPage = np; load();
-    }));
+    const phtml = '<button data-pg="prev">上一页</button><span class="pg">' + am.page + ' / ' + totalPages + '</span><button data-pg="next">下一页</button>';
+    if (setHTML(pagerEl, phtml)) {
+      pagerEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+        if (search.value.trim()) return;
+        const cur = ctx.state.allMarket?.page || 1;
+        const np = b.dataset.pg === 'prev' ? Math.max(1, cur - 1) : Math.min(totalPages, cur + 1);
+        ctx.state.marketPage = np; load();
+      }));
+    }
   }
   async function load() {
     try {
@@ -128,13 +124,14 @@ export function renderTrades(ctx) {
         '<button class="trade-del" data-del="' + t.id + '">删除</button></div></div>';
     }).join('') : '<div class="empty">还没有交易记录</div>';
 
-    el.innerHTML =
+    const html =
       '<div class="stat-grid">' +
       '<div class="stat"><div class="v">' + trades.length + '</div><div class="k">交易笔数</div></div>' +
       '<div class="stat"><div class="v ' + (winRate >= 50 ? 'up-c' : 'down-c') + '">' + winRate + '%</div><div class="k">胜率</div></div>' +
       '<div class="stat"><div class="v ' + (totalPnl >= 0 ? 'up-c' : 'down-c') + '">' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + '</div><div class="k">累计盈亏</div></div>' +
       '</div>' + riskHtml + persona + form +
       '<div class="sec-title"><h2>交易流水</h2></div>' + ledger;
+    if (!setHTML(el, html)) return; // 内容未变：不重建、不重复绑监听
 
     // chip 多选
     el.querySelectorAll('.chips').forEach((group) => {
@@ -211,10 +208,11 @@ export function renderReview(ctx) {
       '<button class="trade-del" data-rdel="' + esc(rv.date) + '">删除</button></div>' +
       '<div class="rv-body">' + esc(rv.text) + '</div></div>'
     ).join('') || '<div class="empty">还没有复盘记录</div>';
-    el.innerHTML =
+    const html =
       '<div class="toolbar"><button class="btn" id="rvGen">⚡ 生成今日复盘</button><button class="btn primary" id="rvSave">保存</button></div>' +
       '<textarea id="rvText" rows="10" style="width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;font-family:inherit">' + esc(text) + '</textarea>' +
       '<div class="sec-title"><h2>历史复盘</h2></div>' + list;
+    if (!setHTML(el, html)) return; // 内容未变：不重建、保留用户正在编辑的文本
 
     document.querySelector('#rvGen').addEventListener('click', () => { document.querySelector('#rvText').value = buildReviewText(ctx.state); });
     document.querySelector('#rvSave').addEventListener('click', async () => {
@@ -240,9 +238,10 @@ export function renderAI(ctx) {
   if (!el) return;
   const payload = ctx.state.lastPayload;
   const qHtml = COPILOT_QUESTIONS.map((q) => '<button type="button" class="copilot-question" data-copilot="' + q.key + '">' + esc(q.label) + '</button>').join('');
-  el.innerHTML = '<div class="sec-title"><h2>决策助手</h2><span class="hint">规则驱动，非预测</span></div>' +
+  const html = '<div class="sec-title"><h2>决策助手</h2><span class="hint">规则驱动，非预测</span></div>' +
     '<div class="copilot-questions">' + qHtml + '</div>' +
     '<div id="copilotAnswer">' + (payload ? '<div class="all-empty">点击上方问题查看系统解释</div>' : '<div class="all-empty">等待实时行情后可用</div>') + '</div>';
+  if (!setHTML(el, html)) return;
   el.querySelectorAll('[data-copilot]').forEach((btn) => btn.addEventListener('click', () => {
     if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
     const ans = buildCopilotAnswer(btn.dataset.copilot, ctx.state.lastPayload);

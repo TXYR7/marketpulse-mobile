@@ -6,7 +6,7 @@ import {
   buildExpectationGap, buildSignal, applyGate
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, getKV, setKV, getAllHistory, putHistory } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag } from './views.js';
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
 import { renderMarket, renderTrades, renderReview, renderAI } from './views-extra.js';
 
 const state = {
@@ -117,19 +117,20 @@ function computeDerived(pools) {
 /* ---------------- 渲染：状态条 ---------------- */
 function renderStatus() {
   const s = $('#statusStrip');
-  if (!state.pools) { s.innerHTML = '<div class="chip"><span>状态</span><strong>连接中</strong></div>'; return; }
+  if (!state.pools) { setHTML(s, '<div class="chip"><span>状态</span><strong>连接中</strong></div>'); return; }
   const p = state.pools;
   const maxBoard = p.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const em = state.emotion || {};
-  s.innerHTML = [
+  const html = [
     chip('sent', '情绪', em.emotionIndex ?? '--'),
-    chip('', '涨停', p.upCount),
+    chip('up', '涨停', p.upCount),
     chip('down', '跌停', p.downCount),
     chip('broken', '炸板', p.brokenCount),
     chip('', '最高板', maxBoard),
     chip('', '炸板率', (state.breakRate?.rate ?? '--') + '%'),
     chip(em.level === 'red' ? 'risk-high' : em.level === 'orange' ? 'risk-mid' : '', '风险', em.phase || '—'),
   ].join('');
+  setHTML(s, html);
   $('#phaseBadge').textContent = em.phase || '连接中';
   $('#ladderHint').textContent = '最高 ' + maxBoard + ' 板';
 }
@@ -140,7 +141,7 @@ function chip(cls, label, val) {
 /* ---------------- 渲染：盘中涨停池 ---------------- */
 function ztCard(x) {
   const starred = state.watch.some((w) => w.code === x.code);
-  const bcls = x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
+  const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
@@ -170,12 +171,10 @@ function filterZt() {
 }
 function renderZt() {
   const list = $('#ztList');
-  if (!state.pools) { list.innerHTML = ''; return; }
+  if (!state.pools) return; // 首屏骨架由 index.html 提供，数据到达前不覆盖
   const rows = filterZt();
   $('#ztHint').textContent = '共 ' + state.pools.upCount + ' 只';
-  if (!rows.length) { list.innerHTML = '<div class="empty">没有匹配的股票</div>'; return; }
-  list.innerHTML = rows.map(ztCard).join('');
-  bindCards(list);
+  setHTML(list, rows.length ? rows.map(ztCard).join('') : '<div class="empty">没有匹配的股票</div>');
 }
 function downCard(x) {
   return '<div class="card" data-code="' + x.code + '">' +
@@ -189,43 +188,49 @@ function renderDowns() {
   const p = state.pools; if (!p) return;
   $('#dtCount').textContent = p.downCount;
   $('#zbCount').textContent = p.brokenCount;
-  $('#dtList').innerHTML = p.down.length ? p.down.map(downCard).join('') : '<div class="empty">今日无跌停</div>';
-  $('#zbList').innerHTML = p.broken.length ? p.broken.map(downCard).join('') : '<div class="empty">今日无炸板</div>';
-  bindCards($('#dtList')); bindCards($('#zbList'));
+  setHTML($('#dtList'), p.down.length ? p.down.map(downCard).join('') : '<div class="empty">今日无跌停</div>');
+  setHTML($('#zbList'), p.broken.length ? p.broken.map(downCard).join('') : '<div class="empty">今日无炸板</div>');
 }
 
 /* ---------------- 昨日涨停 · 今日开盘预期差 ---------------- */
-async function loadGap() {
-  const gapEl = $('#gapRows');
+function renderGap(gap) {
   const sum = $('#gapSummary');
-  const hist = state.history || [];
-  const yest = [...hist].sort((a, b) => String(a.date).localeCompare(String(b.date))).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
-  if (!yest) { sum.textContent = '需历史'; gapEl.innerHTML = '<div class="muted">需先「补录历史」或次日数据后才能计算昨日涨停今日开盘预期差。</div>'; return; }
-  const candidates = (yest.stocks || []).map((c) => ({ code: c.code, name: c.name, boards: c.boards, industry: c.industry }));
-  if (!candidates.length) { gapEl.innerHTML = '<div class="muted">昨日无涨停缓存</div>'; return; }
-  let quotes = {};
-  try { quotes = await fetchQuotes(candidates.map((c) => c.code)); } catch (e) { quotes = {}; }
-  const actualMap = {};
-  candidates.forEach((c) => { const q = quotes[c.code]; if (q && q.open != null && q.prevClose) actualMap[c.code] = (q.open - q.prevClose) / q.prevClose * 100; });
-  const ctx = { ctxFor: (s) => ({ buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: '板块龙头' }) };
-  const gap = buildExpectationGap(candidates, actualMap, ctx);
-  state.gap = gap;
   const c = gap.counts || { beat: 0, meet: 0, miss: 0 };
   sum.textContent = `超 ${c.beat} / 符 ${c.meet} / 不及 ${c.miss}`;
-  if (!gap.candidates.length) { gapEl.innerHTML = '<div class="muted">暂无数据</div>'; return; }
-  gapEl.innerHTML = gap.candidates.map((g) => {
+  setHTML($('#gapRows'), gap.candidates.length ? gap.candidates.map((g) => {
     const cls = g.status === '超预期' ? 'up-c' : g.status === '不及预期' ? 'down-c' : '';
     return '<div class="ledger-row"><div><div class="nm">' + esc(g.name) + ' <span class="pill">' + g.buyType + '</span></div>' +
       '<div class="meta">预期中值 ' + g.expectedMid + '% · 实际 ' + (g.actualOpen != null ? g.actualOpen.toFixed(2) + '%' : '—') + '</div></div>' +
       '<div class="pnl ' + cls + '">' + g.status + (g.diff != null ? ' (' + (g.diff >= 0 ? '+' : '') + g.diff + ')' : '') + '</div></div>';
-  }).join('');
+  }).join('') : '<div class="muted">暂无数据</div>');
+}
+async function loadGap(force = false) {
+  const gapEl = $('#gapRows');
+  const sum = $('#gapSummary');
+  const hist = state.history || [];
+  const yest = [...hist].sort((a, b) => String(a.date).localeCompare(String(b.date))).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
+  if (!yest) { sum.textContent = '需历史'; setHTML(gapEl, '<div class="muted">需先「补录历史」或次日数据后才能计算昨日涨停今日开盘预期差。</div>'); return; }
+  const candidates = (yest.stocks || []).map((c) => ({ code: c.code, name: c.name, boards: c.boards, industry: c.industry }));
+  if (!candidates.length) { sum.textContent = '--'; setHTML(gapEl, '<div class="muted">昨日无涨停缓存</div>'); return; }
+  // 同一交易日且已有结果：直接用缓存，不重复打行情接口
+  if (!force && state.gapDate === state.pools.date && state.gap) { renderGap(state.gap); return; }
+  try {
+    let quotes = {};
+    try { quotes = await fetchQuotes(candidates.map((c) => c.code)); } catch (e) { quotes = {}; }
+    const actualMap = {};
+    candidates.forEach((c) => { const q = quotes[c.code]; if (q && q.open != null && q.prevClose) actualMap[c.code] = (q.open - q.prevClose) / q.prevClose * 100; });
+    const ctx = { ctxFor: (s) => ({ buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: '板块龙头' }) };
+    state.gap = buildExpectationGap(candidates, actualMap, ctx);
+    state.gapDate = state.pools.date;
+    renderGap(state.gap);
+  } catch (e) { /* 静默：预期差属增强信息 */ }
 }
 
 /* ---------------- 风险雷达 ---------------- */
 function renderRadar() {
   const el = $('#radar');
   const r = state.riskRadar;
-  if (!r || !r.available) { el.innerHTML = '<div class="muted">暂无风险数据</div>'; return; }
+  if (!r || !r.available) { setHTML(el, '<div class="muted">暂无风险数据</div>'); return; }
   const items = r.items.map((it) => {
     const lvCls = it.level === 'red' ? 'red' : it.level === 'orange' ? 'orange' : it.level === 'yellow' ? 'yellow' : it.level === 'green' ? 'green' : 'gray';
     return '<div class="risk-item"><div class="top"><span class="lab">' + esc(it.label) + '</span><span class="lv ' + lvCls + '">' + it.score + '</span><span class="score"></span></div>' +
@@ -233,8 +238,8 @@ function renderRadar() {
       (it.reasons && it.reasons.length ? '<div class="reasons">' + it.reasons.map((x) => esc(x)).join(' · ') + '</div>' : '') + '</div>';
   }).join('');
   const cannot = (r.cannotDo || []).map((x) => '<span class="ci">' + esc(x) + '</span>').join('');
-  el.innerHTML = items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
-    (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : '');
+  setHTML(el, items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
+    (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''));
 }
 
 function renderIntraday() {
@@ -260,9 +265,9 @@ function recordFor(code) {
 function renderWatch() {
   const list = $('#watchList');
   const empty = $('#watchEmpty');
-  if (!state.watch.length) { list.innerHTML = ''; empty.classList.remove('hide'); return; }
+  if (!state.watch.length) { setHTML(list, ''); empty.classList.remove('hide'); return; }
   empty.classList.add('hide');
-  list.innerHTML = state.watch.map((w) => {
+  const html = state.watch.map((w) => {
     const r = recordFor(w.code);
     return '<div class="card" data-code="' + w.code + '">' +
       '<div><div class="name">' + esc(r.name) + (r.tier ? ' ' + tierBadge(r.tier) : '') + '</div>' +
@@ -271,7 +276,7 @@ function renderWatch() {
       '<div class="pct ' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</div>' +
       '<div class="meta">主 ' + (r.main != null ? fmtMoney(r.main) : '--') + '</div></div></div>';
   }).join('');
-  bindCards(list);
+  setHTML(list, html);
 }
 async function loadWatch() {
   state.watch = await getWatch();
@@ -376,9 +381,10 @@ function closeMenu() { $('#menuScrim').classList.remove('show'); $('#menuPanel')
 
 /* ---------------- 刷新 ---------------- */
 let refreshing = false;
-async function refresh() {
+async function refresh(force = false) {
   if (refreshing) return;
   refreshing = true;
+  if (force) state.gapDate = null; // 手动刷新才重新拉预期差
   $('#refreshBtn').classList.add('spin');
   try {
     const date = state.manualDate || todayStr();
@@ -457,19 +463,19 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
-function bindCards(scope) {
-  scope.querySelectorAll('[data-code]').forEach((card) => {
-    card.addEventListener('click', () => openSheet(card.dataset.code));
-  });
-}
 
 /* ---------------- 事件绑定 ---------------- */
 function bind() {
+  // 全局事件委托：任何带 data-code 的卡片点按都打开详情（替代逐卡 addEventListener，刷新不再累积监听器）
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-code]');
+    if (t) openSheet(t.dataset.code);
+  });
   $$('.bottomnav button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
   $$('.menu-item').forEach((m) => m.addEventListener('click', () => switchView(m.dataset.view)));
   $('#menuBtn').addEventListener('click', openMenu);
   $('#menuScrim').addEventListener('click', closeMenu);
-  $('#refreshBtn').addEventListener('click', refresh);
+  $('#refreshBtn').addEventListener('click', () => refresh(true));
   $('#ztSearch').addEventListener('input', (e) => { state.ztFilterText = e.target.value; renderZt(); });
   $$('#ztSort button').forEach((b) => b.addEventListener('click', () => {
     $$('#ztSort button').forEach((x) => x.classList.remove('on')); b.classList.add('on');
@@ -510,7 +516,7 @@ function setupPTR() {
     if (e.touches[0].clientY - startY > 60) $('#ptr').classList.add('show');
   }, { passive: true });
   main.addEventListener('touchend', () => {
-    if ($('#ptr').classList.contains('show')) refresh();
+    if ($('#ptr').classList.contains('show')) refresh(true);
     $('#ptr').classList.remove('show'); startY = null;
   });
 }
@@ -522,7 +528,6 @@ async function init() {
   document.documentElement.setAttribute('data-theme', state.theme);
   $('#setTheme').value = state.theme;
   $('#setRefresh').value = String(state.refreshMs);
-  window.__openSheet = openSheet;
   bind();
   const hist = await getAllHistory();
   state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));

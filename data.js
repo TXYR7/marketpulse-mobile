@@ -2,7 +2,10 @@
 // 复用 D:\codex\server.js 的接口参数与字段口径；改为手机端直连 + 前端计算。
 
 const EMA = {
-  token: '7eea3edcaed734bea9cbfc24409ed989',
+  // 东方财富公开 push2 token（非密钥）。可用 localStorage['mp_ema_token'] 或 window.MP_CONFIG.emaToken 覆盖。
+  token: (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token'))
+    || (typeof window !== 'undefined' && window.MP_CONFIG && window.MP_CONFIG.emaToken)
+    || '7eea3edcaed734bea9cbfc24409ed989',
   pool(kind, date) {
     const ep = kind === 'up' ? 'getTopicZTPool' : kind === 'down' ? 'getTopicDTPool' : 'getTopicZBPool';
     const sort = kind === 'down' ? 'fund:asc' : 'fbt:asc';
@@ -184,6 +187,7 @@ export async function fetchQuotes(codes) {
 
 // 轻量日K（仅供 S/A/B 梯队股的晋级评估：量能阶变/缺口保护维度），取近 lmt 根日线
 const klineCacheByDate = new Map(); // code -> { dateKey, bars }
+const KLINE_CACHE_CAP = 200; // 会话内防膨胀（抽屉 60 根日K 也进缓存，容量放宽避免翻页清缓存导致会话内重抓）
 export async function fetchKlineLite(code, lmt = 8) {
   const secid = marketPrefix(code) + code;
   const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=${lmt}`;
@@ -200,8 +204,20 @@ export function cachedKlineBars(code, tradeDate) {
 }
 export function storeKlineBars(code, tradeDate, bars) {
   if (!bars || !bars.length) return;
-  if (klineCacheByDate.size > 80) klineCacheByDate.clear(); // 会话内防膨胀
+  if (klineCacheByDate.size > KLINE_CACHE_CAP) klineCacheByDate.clear();
   klineCacheByDate.set(String(code), { dateKey: String(tradeDate), bars });
+}
+// SW 重载后从 IndexedDB 水合，避免当日完整预热（历史日K 日内不变，dateKey 不匹配即自然 miss，安全）
+export function hydrateKlineCache(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  for (const [code, v] of Object.entries(obj)) {
+    if (v && v.dateKey && Array.isArray(v.bars) && v.bars.length) klineCacheByDate.set(String(code), { dateKey: String(v.dateKey), bars: v.bars });
+  }
+}
+export function exportKlineCache() {
+  const out = {};
+  for (const [code, v] of klineCacheByDate) out[code] = { dateKey: v.dateKey, bars: v.bars };
+  return out;
 }
 
 // 全市场：clist 分页。market: '' | 'sh' | 'sz' | 'bj'

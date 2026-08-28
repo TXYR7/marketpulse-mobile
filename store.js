@@ -1,7 +1,7 @@
 // store.js — 本地持久化（IndexedDB，仅存本机）：自选 / 设置 / 交易流水 / 复盘日记 / 历史涨停池缓存
 
 const DB = 'mp-mobile';
-const VER = 2;
+const VER = 3;
 let _db = null;
 
 function open() {
@@ -180,3 +180,4 @@ export async function pruneHistoryKeep(keepDates) {
     tx.onerror = () => rej(tx.error);
   });
 }
+

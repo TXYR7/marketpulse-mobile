@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, todayStr, fmtTime, shanghaiNow, shanghaiOf } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -82,7 +82,17 @@ function prevDayBoards(hist, today) {
   return map;
 }
 
+function deriveSig(pools) {
+  const up = pools.up || [];
+  const hist = state.history || [];
+  const hk = hist.length ? (hist[hist.length - 1].date + ':' + hist.length) : '-';
+  const codes = up.map((s) => s.code + ':' + (s.boards || 1)).sort().join(',');
+  return pools.date + '|' + up.length + '|' + codes + '|' + hk;
+}
 function computeDerived(pools) {
+  // M4 结构签名记忆化：结构字段(boards/成员/日期/历史)日内稳定，派生结果恒定，跳过重算省 CPU（不碰实时价）
+  const sig = deriveSig(pools);
+  if (sig === state.derivedSig && state.derived) { state.lastPayload = state.derived.lastPayload; return; }
   const up = pools.up || [];
   const upCount = pools.upCount ?? up.length;
   const downCount = pools.downCount ?? (pools.down || []).length;
@@ -142,6 +152,8 @@ function computeDerived(pools) {
       latencyMs: null,
     },
   };
+  state.derivedSig = sig;
+  state.derived = { lastPayload: state.lastPayload };
 }
 
 /* ---------------- 渲染：状态条 ---------------- */
@@ -553,7 +565,10 @@ async function refresh(force = false) {
     state.pools = pools;
     renderStatus();
     renderView(state.view); // 只渲染活跃视图；其余视图数据已更新，切过去即最新
-    fetchOpenPct(pools).then(() => enrichPromo(pools)).catch(() => {}); // 竞价代理到手后再评估（fire-and-forget）
+    // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
+    const openPctP = fetchOpenPct(pools);
+    openPctP.catch(() => {});
+    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(persistWarmCache).catch(() => {});
   } catch (e) {
     state.lastErrorAt = Date.now();
     renderStatus();
@@ -564,6 +579,14 @@ async function refresh(force = false) {
 }
 function persistLastGood(pools) {
   setKV('lastGood', { date: pools.date, pools, savedAt: Date.now() }).catch(() => {});
+}
+// M1 预热持久化：把当日 K线 + 竞价缓存写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热
+let warmPersistTimer = null;
+function persistWarmCache() {
+  clearTimeout(warmPersistTimer);
+  warmPersistTimer = setTimeout(() => {
+    setKV('warmCache', { kline: exportKlineCache(), openPct: state.openPctByCode, openPctDate: state.openPctDate }).catch(() => {});
+  }, 2000);
 }
 
 /* ---------------- 交易体系规则引擎：竞价代理 + 梯队股晋级评估 ---------------- */
@@ -596,7 +619,7 @@ function promoContextOf(s, pools) {
   };
 }
 let promoRunSeq = 0; // 序号守卫：新一轮行情到达后旧一轮评估作废
-async function enrichPromo(pools) {
+async function enrichPromo(pools, openPctReady = Promise.resolve()) {
   if (state.promoInFlight) return;
   const mySeq = ++promoRunSeq;
   state.promoInFlight = true;
@@ -646,7 +669,23 @@ async function enrichPromo(pools) {
         pullbackFirstBoard: feats.pullbackFirstBoard === true,
       });
     });
-    if (mySeq === promoRunSeq) renderZt(); // 徽标随行级 diff 原地更新
+    if (mySeq === promoRunSeq) {
+      await openPctReady; // 竞价维度就绪后再定稿（与 K线抓取并发，墙钟不增加）
+      if (mySeq !== promoRunSeq) return;
+      // 定稿：用内存缓存的 K线 + 已就绪的竞价，对梯队股重算晋级评估（无网络），保证 open-pct 维度不缺失
+      for (const code of tierCodes) {
+        const s = byCode[code]; if (!s) continue;
+        const bars = cachedKlineBars(code, pools.date);
+        const feats = bars && bars.length >= 2 ? klineFeatures(bars) : {};
+        s.promo = assessPromotion(s, {
+          ...promoContextOf(s, pools),
+          volChg: feats.volChg1d ?? null,
+          gapUnfilled: feats.gapUnfilled ?? null,
+          pullbackFirstBoard: feats.pullbackFirstBoard === true,
+        });
+      }
+      renderZt(); // 徽标随行级 diff 原地更新
+    }
   } finally { state.promoInFlight = false; }
 }
 function updateBanner() {
@@ -836,13 +875,16 @@ async function init() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   window.addEventListener('unhandledrejection', (e) => { console.warn('[mp] 未处理的 Promise 拒绝：', e.reason); });
   try {
-    // 设置/快照/历史并行读，首个网络请求不必排队等 IDB 串行往返
-    const [theme, refreshMs, snap, hist] = await Promise.all([
+    // 设置/快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
+    const [theme, refreshMs, snap, hist, warm] = await Promise.all([
       getKV('theme', 'dark'),
       getKV('refreshMs', 15000),
       getKV('lastGood', null).catch(() => null),
       getAllHistory().catch(() => []),
+      getKV('warmCache', null).catch(() => null),
     ]);
+    if (warm && warm.kline) hydrateKlineCache(warm.kline); // 当日 K线命中 → enrichPromo 免重抓
+    if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
     state.theme = theme || 'dark';
     state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
     document.documentElement.setAttribute('data-theme', state.theme);

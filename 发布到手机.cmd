@@ -20,7 +20,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-node scripts/bump-sw.mjs`r`necho === Adding files ===
+node scripts/bump-sw.mjs
+echo === Adding files ===
 git add -A
 if errorlevel 1 goto fail
 

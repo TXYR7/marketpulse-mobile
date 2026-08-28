@@ -44,27 +44,6 @@ function calculateBreakRate({ limitUpCount, brokenCount, available, previousRate
 }
 
 /* ---------- 连板梯队 ---------- */
-function buildLimitUpLadder(stocks = []) {
-  const groups = new Map();
-  for (const stock of stocks) {
-    const board = Math.max(1, Math.trunc(finiteNumber(stock.boards) || 1));
-    if (!groups.has(board)) groups.set(board, []);
-    groups.get(board).push(stock);
-  }
-  const total = stocks.length;
-  return [...groups.entries()].sort((a, b) => b[0] - a[0]).map(([board, group]) => ({
-    board,
-    label: board === 1 ? '首板' : `${board}板`,
-    count: group.length,
-    ratio: total ? round(group.length / total, 4) : 0,
-    stocks: [...group].sort((a, b) => {
-      const aTime = String(a.firstSealTime || '999999');
-      const bTime = String(b.firstSealTime || '999999');
-      return aTime.localeCompare(bTime) || (finiteNumber(b.sealAmount) || 0) - (finiteNumber(a.sealAmount) || 0) || String(a.code).localeCompare(String(b.code));
-    })
-  }));
-}
-
 /* ---------- 题材强度 ---------- */
 function summarizeTheme(stocks) {
   const gains = stocks.map((stock) => finiteNumber(stock.changePercent ?? parseFloat(stock.gain))).filter((value) => value !== null);
@@ -383,8 +362,6 @@ const PHASE_STRATEGY = {
   '退潮': { allowed: ['分歧回封', '板块核心'], forbidden: ['高位加速', '后排', '一进二'], advice: '防守为主，等待冰点后的修复' }
 };
 
-const PHASE_NAMES = ['冰点', '退潮初期', '修复', '修复', '分歧期', '主升期', '高潮'];
-
 function phaseStrategy(phase) {
   return PHASE_STRATEGY[phase] || { allowed: [], forbidden: [], advice: '阶段未知，按分歧对待' };
 }
@@ -621,7 +598,6 @@ function buildRiskRadar({ stocks = [], leaders = [], emotion = {}, breakRate = {
 }
 
 /* ---------- 信号 / 闸门 ---------- */
-const SIGNAL_STATE = { 禁打: '禁打', 可打: '可打', 待触发: '待触发', 观察: '观察' };
 function applyGate(stock, ctx = {}) {
   const gates = [];
   const marketOk = ctx.emotionLevel !== 'red' && !(ctx.breakRate !== null && ctx.breakRate !== undefined && ctx.breakRate >= 40);
@@ -961,23 +937,40 @@ function evaluatePortfolioRisk({ positions = [], trades = [], limits = DEFAULT_R
 
 /* ---------- 决策助手（返回 HTML 字符串，由视图注入） ---------- */
 const COPILOT_QUESTIONS = [
-  { key: 'relay', label: '为什么今天不建议接力？' },
-  { key: 'phase', label: '今天市场处于什么阶段？' },
-  { key: 'mainline', label: '今天主线是什么？' },
-  { key: 'limitup', label: '今天涨停多说明什么？' },
-  { key: 'emotion', label: '情绪指数高低意味着什么？' },
-  { key: 'height', label: '连板高度说明什么？' },
-  { key: 'breakrate', label: '炸板率高说明什么？' },
-  { key: 'leader', label: '当前龙头是谁？' },
-  { key: 'playable', label: '现在有什么机会和风险？' },
-  { key: 'should', label: '现在该不该出手？' },
-  { key: 'retreat', label: '有没有退潮信号？' },
-  { key: 'promotion', label: '今天的票能晋级吗？（体系检查表）' },
-  { key: 'position', label: '现在该上多少仓位？' },
-  { key: 'recede', label: '当前阶段的心法口诀' },
-  { key: 'tomorrow', label: '明天重点是什么？' },
-  { key: 'health', label: '当前数据可信吗？' }
+  { key: 'relay', label: '为什么今天不建议接力？', keywords: ['接力', '后排', '追高', '跟风', '还能打板', '能不能接', '接力的风险'] },
+  { key: 'phase', label: '今天市场处于什么阶段？', keywords: ['阶段', '情绪周期', '什么行情', '冰点', '退潮', '主升', '分歧', '修复'] },
+  { key: 'mainline', label: '今天主线是什么？', keywords: ['主线', '题材', '热点', '板块', '领涨'] },
+  { key: 'limitup', label: '今天涨停多说明什么？', keywords: ['涨停', '涨多', '百股涨停', '涨停家数'] },
+  { key: 'emotion', label: '情绪指数高低意味着什么？', keywords: ['情绪', '情绪指数', '冰点', '高潮', '亢奋', '恐慌'] },
+  { key: 'height', label: '连板高度说明什么？', keywords: ['高度', '连板', '几板', '空间', '最高板'] },
+  { key: 'breakrate', label: '炸板率高说明什么？', keywords: ['炸板', '开板', '炸板率', '烂板'] },
+  { key: 'leader', label: '当前龙头是谁？', keywords: ['龙头', '领头', '核心股', '总龙', '高标'] },
+  { key: 'playable', label: '现在有什么机会和风险？', keywords: ['机会', '风险', '能买', '可打', '出手', '看点'] },
+  { key: 'should', label: '现在该不该出手？', keywords: ['该不该', '出手', '买不买', '能买吗', '要不要买', '干不干'] },
+  { key: 'retreat', label: '有没有退潮信号？', keywords: ['退潮', '见顶', '结束', '风险信号', '退潮迹象'] },
+  { key: 'promotion', label: '今天的票能晋级吗？（体系检查表）', keywords: ['晋级', '能不能板', '连板', '上板', '封板', '明天还板', '能不能继续'] },
+  { key: 'position', label: '现在该上多少仓位？', keywords: ['仓位', '几成', '上多少', '满仓', '半仓', '怎么分配', '拿多少'] },
+  { key: 'recede', label: '当前阶段的心法口诀', keywords: ['心法', '口诀', '纪律', '怎么说', '修心'] },
+  { key: 'tomorrow', label: '明天重点是什么？', keywords: ['明天', '次日', '重点', '关注', '预判', '展望'] },
+  { key: 'health', label: '当前数据可信吗？', keywords: ['数据', '可信', '真实', '延迟', '靠谱', '来源', '准吗'] }
 ];
+// 关键词路由：自由文本 → 最匹配的问题 key（子串 label +2 / 每关键词 +1），无匹配返回 null
+function routeCopilotQuery(text, questions) {
+  const t = String(text || '').trim().toLowerCase();
+  if (!t) return null;
+  let best = null, bestScore = 0;
+  for (const q of (questions || [])) {
+    let score = 0;
+    const label = String(q.label || '').toLowerCase();
+    if (label && t.includes(label)) score += 2;
+    for (const kw of (q.keywords || [])) {
+      const k = String(kw).toLowerCase();
+      if (k && t.includes(k)) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; best = q.key; }
+  }
+  return bestScore > 0 ? best : null;
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function spans(arr) {
   const a = Array.isArray(arr) ? arr : [arr];
@@ -1394,11 +1387,11 @@ function contextNotes(ctx = {}) {
 }
 
 export {
-  finiteNumber, round, calculateBreakRate, buildLimitUpLadder, summarizeTheme, groupThemes, buildThemeRanking,
+  finiteNumber, round, calculateBreakRate, summarizeTheme, groupThemes, buildThemeRanking,
   rankCoreLeaders, leaderScore, calculatePromotionStats, calculateRollingPromotion, buildModeMonitor, aggregateModeRates,
   calculateEmotionState, indicator, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
-  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, PHASE_NAMES, SIGNAL_STATE,
+  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer,
   PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes
 };

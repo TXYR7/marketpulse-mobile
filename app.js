@@ -1,10 +1,10 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, todayStr, fmtTime } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, todayStr, fmtTime, shanghaiNow, shanghaiOf } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate,
-  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes
+  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList } from './views.js';
@@ -25,6 +25,16 @@ const state = {
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 并发限额执行：把 items 分给 limit 个 worker 并行处理（避免 24 次串行 K 线等重网络往返拖慢首屏）
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) { const idx = i++; results[idx] = await fn(items[idx], idx); }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
 
 /* ---------------- 派生计算 ---------------- */
 // state.history 恒为按日期升序（init/loadHistory 写入前已排序），派生结果按 history+交易日 缓存，
@@ -111,7 +121,7 @@ function computeDerived(pools) {
   const byCode = {};
   ['S', 'A', 'B'].forEach((k) => opportunities.tiers[k].forEach((s) => { byCode[s.code] = s; }));
   opportunities.eliminated.forEach((s) => { byCode[s.code] = s; });
-  up.forEach((s) => { const m = byCode[s.code]; if (m) Object.assign(s, { tier: m.tier, score: m.score, signal: m.signal, role: m.role, themeName: m.themeName, themeScore: m.themeScore }); });
+  up.forEach((s) => { const m = byCode[s.code]; if (m) Object.assign(s, { tier: m.tier, score: m.score, signal: m.signal, role: m.role, themeName: m.themeName, themeScore: m.themeScore, breakdown: m.breakdown }); });
 
   const structure = buildMarketStructure({ stocks: up, themes, leaders });
   const plan = buildPlan({ phase, riskRadar, emotion, opportunities });
@@ -135,7 +145,7 @@ function computeDerived(pools) {
 }
 
 /* ---------------- 渲染：状态条 ---------------- */
-function hhmm(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function hhmm(ts) { const d = shanghaiOf(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
 function renderStatus() {
   const s = $('#statusStrip');
   if (!state.pools) { setHTML(s, '<div class="chip"><span>状态</span><strong>连接中</strong></div>'); return; }
@@ -183,7 +193,7 @@ function ztCard(x) {
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   const pv = x.promo && x.promo.available !== false ? x.promo : null;
   const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
-  const pvTip = pv ? escapeHtml(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
+  const pvTip = pv ? esc(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
@@ -316,7 +326,7 @@ async function loadGap(force = false) {
     if (mySeq !== gapSeq) return; // 过期响应，丢弃
     const actualMap = {};
     candidates.forEach((c) => { const q = quotes[c.code]; if (q && q.open != null && q.prevClose) actualMap[c.code] = (q.open - q.prevClose) / q.prevClose * 100; });
-    const ctx = { ctxFor: (s) => ({ buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: '板块龙头' }) };
+    const ctx = { ctxFor: (s) => { const ld = state.leaders.find((l) => l.code === s.code); return { buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: ld?.role || '板块龙头', themeScore: ld?.themeScore ?? null }; } };
     const nextGap = buildExpectationGap(candidates, actualMap, ctx);
     if (mySeq !== gapSeq) return;
     state.gap = nextGap;
@@ -446,9 +456,11 @@ async function openSheet(code) {
   }
   body.innerHTML = head + tierHtml + signalHtml + promoHtml +
     kvGrid(stock, d) +
+    '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetWatch">' + (isWatch ? '取消自选' : '★ 加自选') + '</button>' +
     '<button class="btn" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
+  loadSimilarCases(code);
   $('#sheetWatch').addEventListener('click', async () => {
     if (isWatch) { await delWatch(code); state.watch = state.watch.filter((w) => w.code !== code); }
     else { await putWatch({ code, name: stock.name || code, addedAt: Date.now() }); state.watch.push({ code, name: stock.name || code, addedAt: Date.now() }); }
@@ -472,6 +484,29 @@ function kvGrid(s, d) {
   return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
 function closeSheet() { $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); }
+
+// 个股相似案例（对齐桌面 G24）：拉取更长日K（≥26 根才能滑窗匹配），复用 analytics.stockSimilarCases，
+// 展示 top-3 相似形态 + 六维特征 delta + 后续表现按相似度加权。仅在打开抽屉时按需拉取。
+async function loadSimilarCases(code) {
+  const el = $('#detailSimilarCases');
+  if (!el) return;
+  let bars;
+  try { bars = await fetchKlineLite(code, 60); } catch (e) { bars = null; }
+  if (!bars || bars.length < 26) { el.innerHTML = '<div class="muted">暂无足够历史日K，无法匹配相似形态</div>'; return; }
+  const r = stockSimilarCases(bars, { window: 20, horizon: 5, limit: 3 });
+  if (!r.available || !r.similar.length) { el.innerHTML = '<div class="muted">暂未匹配到相似历史形态</div>'; return; }
+  const sim = r.similar.map((c) => {
+    const feats = c.features.map((f) => {
+      const cur = f.cur == null ? '–' : f.cur;
+      const arrow = f.cur == null ? '' : f.cur > 0.001 ? '↑' : f.cur < -0.001 ? '↓' : '→';
+      return '<div class="sf-row"><span>' + esc(f.label) + '</span><b>' + arrow + ' ' + cur + '</b><i>' + (f.hist == null ? '–' : f.hist) + '</i></div>';
+    }).join('');
+    return '<div class="sim-card"><div class="sim-top"><b>' + esc(c.date) + '</b><span class="sim-score">相似度 ' + c.score + '%</span></div><div class="sf-grid">' + feats + '</div></div>';
+  }).join('');
+  const o = r.outcome || {};
+  const outBar = '<div class="outcome">后续表现（按相似度加权）：<b class="up-c">涨 ' + (o.up ?? 0) + '%</b> / <b>平 ' + (o.flat ?? 0) + '%</b> / <b class="down-c">跌 ' + (o.down ?? 0) + '%</b></div>';
+  el.innerHTML = sim + outBar + '<div class="muted" style="font-size:11px;margin-top:6px">' + esc(r.vectorNote) + '</div>';
+}
 
 /* ---------------- 导航 ---------------- */
 function switchView(v) {
@@ -509,6 +544,7 @@ async function refresh(force = false) {
   $('#refreshBtn').classList.add('spin');
   try {
     const date = state.manualDate || todayStr();
+    if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
     const pools = await fetchPools(date);
     state.fromSnapshot = false;
     state.lastSuccessAt = Date.now();
@@ -575,16 +611,16 @@ async function enrichPromo(pools) {
       }
       if (seen.size >= PROMO_TIER_CAP) break;
     }
+    const byCode = {};
+    for (const s of pools.up || []) byCode[s.code] = s;
+    // 先同步：所有股用本地缓存/空量能维度挂晋级评估（不阻塞 UI）
+    const missing = [];
     for (const s of pools.up || []) {
-      if (mySeq !== promoRunSeq) return;
       let feats = {};
       if (tierCodes.has(s.code)) {
-        let bars = cachedKlineBars(s.code, pools.date);
-        if (!bars) {
-          bars = await fetchKlineLite(s.code, 8).catch(() => null);
-          if (bars) storeKlineBars(s.code, pools.date, bars);
-        }
+        const bars = cachedKlineBars(s.code, pools.date);
         if (bars && bars.length >= 2) feats = klineFeatures(bars);
+        else if (!bars) missing.push(s.code);
       }
       s.promo = assessPromotion(s, {
         ...promoContextOf(s, pools),
@@ -593,6 +629,23 @@ async function enrichPromo(pools) {
         pullbackFirstBoard: feats.pullbackFirstBoard === true,
       });
     }
+    if (mySeq !== promoRunSeq) return;
+    // 再并发限额拉取缺失的轻量 K 线（最多 PROMO_TIER_CAP 只），数量少时几乎瞬时
+    await mapWithConcurrency(missing, 6, async (code) => {
+      if (mySeq !== promoRunSeq) return;
+      const bars = await fetchKlineLite(code, 8).catch(() => null);
+      if (!bars) return;
+      storeKlineBars(code, pools.date, bars);
+      const s = byCode[code];
+      if (!s) return;
+      const feats = bars.length >= 2 ? klineFeatures(bars) : {};
+      s.promo = assessPromotion(s, {
+        ...promoContextOf(s, pools),
+        volChg: feats.volChg1d ?? null,
+        gapUnfilled: feats.gapUnfilled ?? null,
+        pullbackFirstBoard: feats.pullbackFirstBoard === true,
+      });
+    });
     if (mySeq === promoRunSeq) renderZt(); // 徽标随行级 diff 原地更新
   } finally { state.promoInFlight = false; }
 }
@@ -613,7 +666,7 @@ function updateBanner() {
   } else banner.classList.add('hide');
 }
 function tradingNow() {
-  const d = new Date();
+  const d = shanghaiNow();
   if (d.getDay() === 0 || d.getDay() === 6) return false;
   const t = d.getHours() * 60 + d.getMinutes();
   return (t >= 555 && t <= 690) || (t >= 780 && t <= 900);
@@ -634,9 +687,9 @@ function refreshTick() {
 /* ---------------- 历史补录 ---------------- */
 function tradingDatesBack(n) {
   const out = [];
-  const d = new Date();
+  const base = shanghaiNow();
   for (let i = 1; i <= n && out.length < 40; i += 1) {
-    const dt = new Date(d); dt.setDate(d.getDate() - i);
+    const dt = new Date(base.getTime()); dt.setDate(base.getDate() - i);
     const day = dt.getDay();
     if (day === 0 || day === 6) continue;
     const s = `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, '0')}${String(dt.getDate()).padStart(2, '0')}`;

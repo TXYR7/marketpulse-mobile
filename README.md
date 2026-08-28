@@ -4,11 +4,11 @@
 
 - 数据来自东方财富公开接口，由**手机浏览器直接抓取**（CORS 已验证 `*`），**无后端、无服务器、不依赖电脑开机**。
 - 仅保留看盘核心：涨停池 / 连板梯队 / 题材强度 / 跌停炸板 / 自选 / 个股详情。
-- 砍掉了：回测、交易记账、复盘、数据中心、历史晋级、决策助手等重型功能。
+- 不含：回测、数据中心等桌面端重型功能（手机端保留交易记账/复盘/决策助手/历史晋级，见 `views-extra.js`）。
 
 ## 目录
 ```
-index.html  app.js  data.js  store.js  styles.css
+index.html  app.js  analytics.js  views.js  views-extra.js  data.js  store.js  styles.css
 manifest.webmanifest  sw.js  icons/
 ```
 - `data.js`：东方财富接口封装（fetch 直连 + 字段解析 + 轻量情绪计算）

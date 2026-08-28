@@ -19,7 +19,18 @@ function marketPrefix(code) {
   return (c === '6' || c === '5') ? '1.' : '0.'; // 沪市股票(6)/沪市基金(5)→1.，深市(0/3)→0.
 }
 
-export function todayStr(d = new Date()) {
+// 上海时区（UTC+8，无夏令时）。把 epoch 偏移成「本地 getter 即上海墙钟」的 Date，
+// 避免设备时区≠中国时区时交易时段判定/日期键漂移（与桌面 server.js:shanghaiClock 口径一致）。
+const SHANGHAI_OFFSET_MS = 8 * 3600000;
+export function shanghaiNow() {
+  const n = new Date();
+  return new Date(n.getTime() + SHANGHAI_OFFSET_MS + n.getTimezoneOffset() * 60000);
+}
+export function shanghaiOf(ts) {
+  const n = new Date(ts);
+  return new Date(n.getTime() + SHANGHAI_OFFSET_MS + n.getTimezoneOffset() * 60000);
+}
+export function todayStr(d = shanghaiNow()) {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -49,14 +60,28 @@ async function getJSON(url, tries = 3) {
   throw lastErr;
 }
 
+// 封单质量：与桌面 server.js:sealQuality 保持同步（平行副本同步义务），供评分引擎读取 sealStars。
+function sealQuality({ sealAmount, circulatingValue, breakCount = 0 }) {
+  if (sealAmount === null || sealAmount === undefined || sealAmount === '' || circulatingValue === null || circulatingValue === undefined || circulatingValue === '') return null;
+  const seal = Number(sealAmount);
+  const circ = Number(circulatingValue);
+  if (!Number.isFinite(seal) || !Number.isFinite(circ) || circ <= 0 || seal < 0) return null;
+  const ratio = (seal / circ) * 100;
+  let stars = ratio >= 5 ? 5 : ratio >= 3 ? 4 : ratio >= 1.5 ? 3 : ratio >= 0.8 ? 2 : 1;
+  stars = Math.max(1, stars - (Number(breakCount) || 0));
+  return { ratio: Math.round(ratio * 100) / 100, stars, label: ['极弱', '弱', '一般', '强', '极强'][stars - 1] };
+}
+
 // 涨停/跌停/炸板池字段映射：同时暴露「移动端旧字段」与「桌面 analytics 期望字段」，便于评分逻辑直连。
+// 字段口径与桌面 server.js:mapStocks 对齐，确保同一只股票在两端的归一化输入一致（否则评分分层会漂移）。
 function mapPool(row) {
-  const boards = row.lbc ?? 1;
+  const boards = Number(row.lbc || row.zttj?.ct || 1); // 与桌面一致：缺 lbc 时回退 zttj.ct，且 0 也视为有效
   const zdp = row.zdp;
   const fund = row.fund ?? null;
   const hs = row.hs;
   const zbc = row.zbc ?? 0;
   const ltsz = row.ltsz ?? null;
+  const seal = sealQuality({ sealAmount: fund, circulatingValue: ltsz, breakCount: zbc });
   return {
     code: String(row.c),
     market: row.m,
@@ -74,11 +99,14 @@ function mapPool(row) {
     turnoverRate: hs,
     seal: fund,
     sealAmount: fund, // 封单资金(元)
+    sealStars: seal ? seal.stars : null, // 桌面 mapStocks 计算，移动端此前缺失 → 封单维度被静默清零
+    sealRatio: seal ? seal.ratio : null,
+    sealLabel: seal ? seal.label : null,
     amount: row.amount ?? null, // 成交额(元)
     circ: ltsz,
     circulatingValue: ltsz, // 流通市值(元)
     total: row.tshare ?? null,
-    industry: row.hybk || '—',
+    industry: row.hybk || '未分类',
     zttj: row.zttj || null,
   };
 }
@@ -122,25 +150,35 @@ export async function fetchPools(date) {
   return mergePools(date, settled);
 }
 
-const ULIST_CHUNK = 60; // 单次 ulist secids 上限，超出的分块串行拉，避免长列表被截断
+const ULIST_CHUNK = 60; // 单次 ulist secids 上限，超出的分块
+// 分块后并发拉取（并发上限 6），避免 300+ 代码串行往返拖慢首屏；单块失败仅缺失该块，其余正常返回。
 export async function fetchQuotes(codes) {
   const list = (codes || []).map(String);
   if (!list.length) return {};
+  const chunks = [];
+  for (let i = 0; i < list.length; i += ULIST_CHUNK) chunks.push(list.slice(i, i + ULIST_CHUNK));
   const out = {};
-  for (let i = 0; i < list.length; i += ULIST_CHUNK) {
-    const data = await getJSON(EMA.ulist(list.slice(i, i + ULIST_CHUNK)));
-    for (const row of data?.data?.diff || []) {
-      out[String(row.f12)] = {
-        code: String(row.f12),
-        name: row.f14,
-        price: row.f2,
-        open: row.f17,
-        prevClose: row.f18,
-        main: row.f62, // 主力净流入
-        super: row.f66, // 超大单净流入
-      };
+  let idx = 0;
+  const worker = async () => {
+    while (idx < chunks.length) {
+      const ch = chunks[idx++];
+      try {
+        const data = await getJSON(EMA.ulist(ch));
+        for (const row of data?.data?.diff || []) {
+          out[String(row.f12)] = {
+            code: String(row.f12),
+            name: row.f14,
+            price: row.f2,
+            open: row.f17,
+            prevClose: row.f18,
+            main: row.f62, // 主力净流入
+            super: row.f66, // 超大单净流入
+          };
+        }
+      } catch (e) { /* 单块失败仅缺失该块数据，调用方按缺值降级 */ }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, chunks.length) }, () => worker()));
   return out;
 }
 

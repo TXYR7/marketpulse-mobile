@@ -166,13 +166,41 @@ function rankCoreLeaders(stocks = [], themes = []) {
     const themePosition = ranks.get(stock.code) || { rank: 1, size: 1, name: stock.industry || '未分类' };
     const theme = themeByName.get(themePosition.name);
     return { ...stock, themeName: themePosition.name, themeRank: themePosition.rank, themeSize: themePosition.size, themeScore: theme?.score ?? null, ...leaderScore(stock, theme, themePosition.rank) };
-  }).sort((a, b) => b.score - a.score || (finiteNumber(b.boards) || 1) - (finiteNumber(a.boards) || 1) || String(a.code).localeCompare(String(b.code)));
-  return scored.slice(0, 30).map((stock, index) => {
-    let role = '后排';
-    if (index === 0) role = '市场总龙头';
+  });
+  // G10 容量核心：同主题封板资金（sealAmount）第一
+  const themeTopSeal = new Map();
+  for (const [name, group] of themeGroups) {
+    let best = null;
+    for (const s of group) {
+      const amt = finiteNumber(s.sealAmount);
+      if (amt === null) continue;
+      if (!best || amt > best.amt) best = { code: s.code, amt };
+    }
+    if (best) themeTopSeal.set(name, best.code);
+  }
+  const scoredSorted = [...scored].sort((a, b) => b.score - a.score || (finiteNumber(b.boards) || 1) - (finiteNumber(a.boards) || 1) || String(a.code).localeCompare(String(b.code)));
+  const topScoreCode = scoredSorted[0]?.code;
+
+  return scoredSorted.slice(0, 30).map((stock) => {
+    const boards = Math.max(1, finiteNumber(stock.boards) || 1);
+    const turnover = finiteNumber(stock.turnoverRate);
+    // 趋势核心：仅当个股带 kline 时由 klineFeatures 判定 ma5≥ma10（池快照默认无 kline，不臆造趋势）
+    let trendUp = false;
+    if (Array.isArray(stock.kline) && stock.kline.length) {
+      const kf = klineFeatures(stock.kline);
+      trendUp = kf.available && kf.ma5 !== null && kf.ma10 !== null && kf.ma5 >= kf.ma10;
+    }
+    let role;
+    if (stock.code === topScoreCode && boards >= 3) role = '市场总龙头';
+    else if (boards >= 5) role = '高度龙头';
     else if (stock.themeRank === 1 && stock.themeSize >= 2) role = '板块龙头';
     else if (stock.themeRank === 2 && stock.themeSize >= 3) role = '板块中军';
-    else if ((finiteNumber(stock.boards) || 1) > 1 || stock.themeSize >= 4) role = '跟风';
+    else if (themeTopSeal.get(stock.themeName) === stock.code) role = '容量核心';
+    else if (trendUp) role = '趋势核心';
+    else if (turnover !== null && turnover >= 8 && boards <= 2) role = '情绪核心';
+    else if (stock.themeSize >= 3 && boards <= 2) role = '补涨龙';
+    else if (boards > 1 || stock.themeSize >= 4) role = '跟风';
+    else role = '后排';
     return { ...stock, role };
   });
 }
@@ -268,8 +296,11 @@ function calculateEmotionState(input) {
   const breakRate = input.breakRate?.available ? finiteNumber(input.breakRate.rate) : null;
   const firstPromotion = finiteNumber(input.firstBoardPromotionRate);
   const multiPromotion = finiteNumber(input.multiBoardPromotionRate);
-  const availableCount = [limitUp, limitDown, multiBoard, maxBoard, breakRate, firstPromotion, multiPromotion].filter((value) => value !== null).length;
-  const confidence = Math.round(availableCount / 7 * 100);
+  const marketBreakRate = finiteNumber(input.marketBreakRate);
+  const firstBoardPremium = finiteNumber(input.firstBoardPremium);
+  const highBoardPremium = finiteNumber(input.highBoardPremium);
+  const availableCount = [limitUp, limitDown, multiBoard, maxBoard, breakRate, firstPromotion, multiPromotion, marketBreakRate, firstBoardPremium, highBoardPremium].filter((value) => value !== null).length;
+  const confidence = Math.round(availableCount / PARAM_MANIFEST.emotion.confidenceDenominator * 100);
   const indicators = [
     indicator('limitUp', '涨停家数', limitUp, limitUp >= 80 ? 'green' : limitUp >= 40 ? 'yellow' : 'red', limitUp !== null),
     indicator('limitDown', '跌停家数', limitDown, limitDown <= 10 ? 'green' : limitDown <= 20 ? 'yellow' : 'red', limitDown !== null),
@@ -277,7 +308,10 @@ function calculateEmotionState(input) {
     indicator('maxBoard', '最高板', maxBoard, maxBoard >= 5 ? 'green' : maxBoard >= 3 ? 'yellow' : 'red', maxBoard !== null),
     indicator('breakRate', '炸板率', breakRate, breakRate <= 20 ? 'green' : breakRate <= 35 ? 'yellow' : 'red', breakRate !== null),
     indicator('firstPromotion', '首板晋级率', firstPromotion, firstPromotion >= 35 ? 'green' : firstPromotion >= 20 ? 'yellow' : 'red', firstPromotion !== null),
-    indicator('multiPromotion', '连板晋级率', multiPromotion, multiPromotion >= 45 ? 'green' : multiPromotion >= 25 ? 'yellow' : 'red', multiPromotion !== null)
+    indicator('multiPromotion', '连板晋级率', multiPromotion, multiPromotion >= 45 ? 'green' : multiPromotion >= 25 ? 'yellow' : 'red', multiPromotion !== null),
+    indicator('marketBreakRate', '市场断板率', marketBreakRate, marketBreakRate <= 20 ? 'green' : marketBreakRate <= 35 ? 'yellow' : 'red', marketBreakRate !== null),
+    indicator('firstBoardPremium', '昨首板溢价', firstBoardPremium, firstBoardPremium >= 3 ? 'green' : firstBoardPremium >= 1 ? 'yellow' : 'red', firstBoardPremium !== null),
+    indicator('highBoardPremium', '昨高位溢价', highBoardPremium, highBoardPremium >= 2 ? 'green' : highBoardPremium >= 0 ? 'yellow' : 'red', highBoardPremium !== null)
   ];
   const availableIndicators = indicators.filter((item) => item.available);
   const emotionIndex = availableIndicators.length ? Math.round(availableIndicators.reduce((sum, item) => sum + ({ green: 100, yellow: 60, red: 20, unavailable: 0 }[item.status] || 0), 0) / availableIndicators.length) : null;
@@ -325,8 +359,10 @@ function calculateEmotionState(input) {
 }
 
 /* ---------- 机会评分 ---------- */
+const CORE_LEADER_ROLES = ['市场总龙头', '高度龙头', '板块龙头', '板块中军', '容量核心', '趋势核心', '补涨龙', '情绪核心'];
 const RULES = {
-  rolePoints: { '市场总龙头': 20, '板块龙头': 16, '板块中军': 12, '跟风': 7, '后排': 3 },
+  rolePoints: { '市场总龙头': 20, '高度龙头': 18, '板块龙头': 16, '容量核心': 14, '板块中军': 12, '趋势核心': 12, '补涨龙': 11, '情绪核心': 10, '跟风': 7, '后排': 3 },
+  roleCap: 20,
   themeFactor: 0.2, themeCap: 20, heightPointsPerBoard: 3, heightCap: 15,
   sealPointsPerStar: 3, sealCap: 15,
   turnoverGood: 10, turnoverMid: 6, turnoverOther: 2,
@@ -362,46 +398,61 @@ function computeOpportunityScore(stock, ctx = {}) {
   const turnoverRate = finiteNumber(stock.turnoverRate);
   const breakCount = finiteNumber(stock.breakCount) ?? 0;
   const strategy = phaseStrategy(ctx.phase);
+  const phaseKnown = Boolean(ctx.phase);
 
   const breakdown = {};
   const plus = [];
   const minus = [];
 
+  // 归一化：只把「可得」维度的权重计入满分（assessPromotion 同款思想）。
+  // 数据缺失股不再被绝对刻度误杀——比较的是「拿到可得分的比例」而非裸分。
+  let possibleMax = 0;
+  const avail = (weight, ok2) => { if (ok2) possibleMax += weight; };
+
   const rolePoints = RULES.rolePoints[role] ?? 3;
   breakdown.role = rolePoints;
-  if (role === '市场总龙头') plus.push('市场总龙头');
-  else if (role === '板块龙头') plus.push('板块龙头');
+  avail(RULES.roleCap, true); // 角色恒可得（rankOpportunities 必给兜底角色）
+  if (CORE_LEADER_ROLES.includes(role)) plus.push(role);
 
   const themePoints = Math.min(RULES.themeCap, (themeScore ?? 0) * RULES.themeFactor);
   breakdown.theme = round(themePoints);
+  avail(RULES.themeCap, themeScore !== null);
   if (themeScore !== null && themeScore >= 80) plus.push('板块强度强');
   else if (themeScore !== null && themeScore < 30) minus.push('板块强度弱');
 
   const heightPoints = Math.min(RULES.heightCap, boards * RULES.heightPointsPerBoard);
   breakdown.height = heightPoints;
+  avail(RULES.heightCap, true);
   if (boards >= 4) plus.push(`高度 ${boards} 板`);
 
   const sealPoints = sealStars === null ? 0 : Math.min(RULES.sealCap, sealStars * RULES.sealPointsPerStar);
   breakdown.seal = sealPoints;
+  avail(RULES.sealCap, sealStars !== null);
   if (sealStars !== null && sealStars >= 5) plus.push('封单极强');
   else if (sealStars !== null && sealStars <= 2) minus.push('封单偏弱');
 
   const turnoverPoints = turnoverRate === null ? 0 : turnoverRate >= 1.5 && turnoverRate <= 12 ? RULES.turnoverGood : turnoverRate <= 20 ? RULES.turnoverMid : RULES.turnoverOther;
   breakdown.turnover = turnoverPoints;
+  avail(RULES.turnoverGood, turnoverRate !== null);
   if (turnoverPoints === RULES.turnoverGood) plus.push('换手良性');
   else if (turnoverPoints === RULES.turnoverOther) minus.push('换手异常');
 
   const breakPoints = Math.max(0, RULES.breakMaxPoints - breakCount * RULES.breakPointsPerCount);
   breakdown.breaks = breakPoints;
+  avail(RULES.breakMaxPoints, true);
   if (breakCount > 0) minus.push(`炸板 ${breakCount} 次`);
   else plus.push('未炸板');
 
   const modePoints = strategy.allowed.includes(buyType) ? RULES.modeAllowed : strategy.forbidden.includes(buyType) ? RULES.modeForbidden : RULES.modeOther;
   breakdown.mode = modePoints;
+  avail(RULES.modeAllowed, phaseKnown);
   if (strategy.allowed.includes(buyType)) plus.push(`买点「${buyType}」契合当前阶段`);
   else if (strategy.forbidden.includes(buyType)) minus.push(`买点「${buyType}」当前阶段不适用`);
 
   const score = Math.max(0, Math.min(100, Math.round(rolePoints + themePoints + heightPoints + sealPoints + turnoverPoints + breakPoints + modePoints)));
+  // 注意：role 的实际得分上限随角色而变（后排3分），但「可得性」按满配 20 计——
+  // 角色低不是数据缺失而是事实判定，不应放宽刻度。
+  const scoreNorm = possibleMax > 0 ? Math.max(0, Math.min(100, Math.round(score / possibleMax * 100))) : score;
 
   const elim = [];
   if (breakCount >= RULES.elim.breakCountTooMany) elim.push(`炸板次数过多（${breakCount} 次）`);
@@ -410,14 +461,15 @@ function computeOpportunityScore(stock, ctx = {}) {
   if (themeScore !== null && themeScore < RULES.elim.themeBelow) elim.push('板块强度弱');
   if (boards >= RULES.elim.highBoardBreak && (finiteNumber(stock.breakCount) ?? 0) >= 1) elim.push('高位分歧');
 
+  const isCoreLeader = CORE_LEADER_ROLES.includes(role);
   let tier;
   if (elim.length) tier = '淘汰';
-  else if (score >= RULES.tier.sScore && (role === '市场总龙头' || role === '板块龙头')) tier = 'S';
-  else if (score >= RULES.tier.aScore || (score >= RULES.tier.aCoreScore && (role === '市场总龙头' || role === '板块龙头'))) tier = 'A';
-  else if (score >= RULES.tier.bScore) tier = 'B';
+  else if (scoreNorm >= RULES.tier.sScore && isCoreLeader) tier = 'S';
+  else if (scoreNorm >= RULES.tier.aScore || (scoreNorm >= RULES.tier.aCoreScore && isCoreLeader)) tier = 'A';
+  else if (scoreNorm >= RULES.tier.bScore) tier = 'B';
   else { tier = '淘汰'; elim.push('综合得分偏低'); }
   const weights = { role: rolePoints, theme: RULES.themeCap, height: RULES.heightCap, seal: RULES.sealCap, turnover: RULES.turnoverGood, breaks: RULES.breakMaxPoints, mode: RULES.modeAllowed };
-  return { score, tier, reasons: { plus, minus, elim }, breakdown, weights };
+  return { score, scoreNorm, possibleMax, tier, reasons: { plus, minus, elim }, breakdown, weights };
 }
 
 function rankOpportunities(stocks = [], ctx = {}) {
@@ -434,7 +486,7 @@ function rankOpportunities(stocks = [], ctx = {}) {
   });
   const tiers = { S: [], A: [], B: [] };
   const eliminated = [];
-  const ordered = ranked.sort((a, b) => b.score - a.score || (finiteNumber(b.boards) || 1) - (finiteNumber(a.boards) || 1) || String(a.code).localeCompare(String(b.code)));
+  const ordered = ranked.sort((a, b) => (b.scoreNorm ?? b.score) - (a.scoreNorm ?? a.score) || (finiteNumber(b.boards) || 1) - (finiteNumber(a.boards) || 1) || String(a.code).localeCompare(String(b.code)));
   for (const item of ordered) {
     if (item.tier === 'S') tiers.S.push(item);
     else if (item.tier === 'A') tiers.A.push(item);
@@ -539,9 +591,9 @@ function buildRiskRadar({ stocks = [], leaders = [], emotion = {}, breakRate = {
     if (score >= 40) return 'orange';
     return 'yellow';
   };
-  const frontCount = leaders.filter((leader) => ['市场总龙头', '板块龙头', '板块中军'].includes(leader.role)).length;
+  const frontCount = leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)).length;
   const avgGain = (list) => { const values = list.map((leader) => finiteNumber(leader.changePercent)).filter((value) => value !== null); return values.length ? round(values.reduce((sum, v) => sum + v, 0) / values.length, 2) : null; };
-  const frontAvg = avgGain(leaders.filter((leader) => ['市场总龙头', '板块龙头', '板块中军'].includes(leader.role)));
+  const frontAvg = avgGain(leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)));
   const rearAvg = avgGain(leaders.filter((leader) => leader.role === '跟风' || leader.role === '后排'));
   const spread = frontAvg !== null && rearAvg !== null ? `前后排涨幅差 ${round(frontAvg - rearAvg, 2)}` : null;
   const actionFor = {
@@ -595,7 +647,7 @@ function buildSignal(stock, ctx = {}) {
   const boards = Number(stock.boards) || 1;
   const phaseRisk = ['退潮初期', '退潮', '冰点'].includes(ctx.phase);
   const breakOver = Number(ctx.breakRate) >= 40;
-  const isLeader = stock.role === '市场总龙头' || stock.role === '板块龙头';
+  const isLeader = CORE_LEADER_ROLES.includes(stock.role);
   const triggers = [];
   const risks = [];
   if (phaseRisk) risks.push('市场退潮/冰点');
@@ -706,6 +758,96 @@ function buildSimilarDays(days = [], todayStocks = [], limit = 3) {
   const pct = (key) => totalWeight ? Math.round(weights[key] / totalWeight * 100) : null;
   return { available: Boolean(similar.length), similar: similar.map((item) => ({ date: item.date, score: Math.round(item.score * 100), dimensions: item.dimensions, trajectory: item.trajectory })), outcome: { up: pct('up'), flat: pct('flat'), down: pct('down') }, samples: outcomes.length };
 }
+
+// G24 个股相似案例（mobile 移植自桌面 analytics.js）：复用 klineFeatures 构造个股窗口特征向量，
+// 与自身历史各窗口做欧氏距离，取 top-N 相似片段 + 后续 horizon 日收益作为「案例结果」。
+// marketSimilarity 是盘面级（比两个市场快照向量），无法直接比单只股票，故此处新增平行实现。
+const STOCK_SIMILAR_NOTE = '相似度用 量能变化 / 缺口未补 / MA5·MA20 乖离 / 5日收益 / 波动率 / 回踩首板 六维（欧氏距离·按实际维度数归一），由该股自身日K滑动窗口构造，匹配历史上形态最相近的片段并复盘其后续表现。';
+
+function stockShapeVector(slice = []) {
+  const f = klineFeatures(slice);
+  if (!f.available) return null;
+  const closes = slice.map((b) => Number(b.close)).filter((v) => Number.isFinite(v));
+  const ret5 = closes.length >= 6 ? closes[closes.length - 1] / closes[closes.length - 6] - 1 : null;
+  let vol5 = null;
+  if (closes.length >= 6) {
+    const rets = [];
+    for (let i = 1; i < closes.length; i += 1) rets.push(closes[i] / closes[i - 1] - 1);
+    const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+    const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / rets.length;
+    vol5 = Math.sqrt(variance);
+  }
+  const maSpread = (f.ma5 != null && f.ma20) ? f.ma5 / f.ma20 - 1 : null;
+  return {
+    volChg1d: f.volChg1d != null ? f.volChg1d / 100 : null,
+    gap: f.gapUnfilled === true ? 1 : f.gapUnfilled === false ? 0 : null,
+    maSpread: maSpread != null ? maSpread / 0.3 : null,
+    ret5: ret5 != null ? ret5 / 0.3 : null,
+    vol5: vol5 != null ? vol5 / 0.1 : null,
+    pullback: f.pullbackFirstBoard ? 1 : 0
+  };
+}
+
+function shapeScore(a, b) {
+  const dims = [];
+  for (const key of Object.keys(a)) {
+    const x = a[key];
+    const y = b[key];
+    if (x != null && y != null && Number.isFinite(x) && Number.isFinite(y)) dims.push([x, y]);
+  }
+  if (!dims.length) return 0;
+  const distance = Math.sqrt(dims.reduce((sum, [x, y]) => sum + (x - y) ** 2, 0));
+  return round(Math.max(0, Math.min(1, 1 - distance / Math.sqrt(dims.length))), 3);
+}
+
+function describeShapeFeatures(cur, hist) {
+  const map = [
+    ['量能变化', cur.volChg1d, hist.volChg1d],
+    ['缺口未补', cur.gap, hist.gap],
+    ['MA5·MA20 乖离', cur.maSpread, hist.maSpread],
+    ['5日收益', cur.ret5, hist.ret5],
+    ['波动率', cur.vol5, hist.vol5],
+    ['回踩首板', cur.pullback, hist.pullback]
+  ];
+  const round3 = (v) => (v == null ? null : Math.round(v * 1000) / 1000);
+  return map.map(([label, c, h]) => ({ label, cur: round3(c), hist: round3(h) }));
+}
+
+function stockSimilarCases(bars = [], { window = 20, horizon = 5, limit = 3 } = {}) {
+  const rows = (Array.isArray(bars) ? bars : []).filter((b) => b && Number.isFinite(Number(b.close)) && Number(b.close) > 0);
+  if (rows.length < window + horizon + 1) {
+    return { available: false, similar: [], outcome: { up: null, flat: null, down: null }, samples: 0, vectorNote: STOCK_SIMILAR_NOTE };
+  }
+  const curVec = stockShapeVector(rows.slice(-window));
+  if (!curVec) return { available: false, similar: [], outcome: { up: null, flat: null, down: null }, samples: 0, vectorNote: STOCK_SIMILAR_NOTE };
+  const candidates = [];
+  for (let i = 2 * window; i <= rows.length - horizon - 1; i += 1) {
+    const vec = stockShapeVector(rows.slice(i - window + 1, i + 1));
+    if (!vec) continue;
+    candidates.push({ end: i, date: rows[i].date, score: shapeScore(curVec, vec), features: describeShapeFeatures(curVec, vec) });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const top = candidates.slice(0, limit);
+  const outcomes = [];
+  for (const c of top) {
+    const next = rows[c.end + horizon];
+    if (!next) continue;
+    const ret = Number(next.close) / Number(rows[c.end].close) - 1;
+    outcomes.push({ outcome: ret > 0.005 ? 'up' : ret < -0.005 ? 'down' : 'flat', score: c.score });
+  }
+  const weights = { up: 0, flat: 0, down: 0 };
+  let total = 0;
+  for (const o of outcomes) { weights[o.outcome] += o.score; total += o.score; }
+  const pct = (key) => (total ? Math.round((weights[key] / total) * 100) : null);
+  return {
+    available: Boolean(top.length),
+    similar: top.map((c) => ({ date: c.date, score: Math.round(c.score * 100), features: c.features })),
+    outcome: { up: pct('up'), flat: pct('flat'), down: pct('down') },
+    samples: outcomes.length,
+    vectorNote: STOCK_SIMILAR_NOTE
+  };
+}
+
 function trajectoryLabel(dayVec, prevVec) {
   const up = Number(dayVec?.limitUp) - Number(prevVec?.limitUp);
   if (up >= 20) return '强扩散';
@@ -822,7 +964,14 @@ const COPILOT_QUESTIONS = [
   { key: 'relay', label: '为什么今天不建议接力？' },
   { key: 'phase', label: '今天市场处于什么阶段？' },
   { key: 'mainline', label: '今天主线是什么？' },
+  { key: 'limitup', label: '今天涨停多说明什么？' },
+  { key: 'emotion', label: '情绪指数高低意味着什么？' },
+  { key: 'height', label: '连板高度说明什么？' },
+  { key: 'breakrate', label: '炸板率高说明什么？' },
+  { key: 'leader', label: '当前龙头是谁？' },
   { key: 'playable', label: '现在有什么机会和风险？' },
+  { key: 'should', label: '现在该不该出手？' },
+  { key: 'retreat', label: '有没有退潮信号？' },
   { key: 'promotion', label: '今天的票能晋级吗？（体系检查表）' },
   { key: 'position', label: '现在该上多少仓位？' },
   { key: 'recede', label: '当前阶段的心法口诀' },
@@ -830,10 +979,14 @@ const COPILOT_QUESTIONS = [
   { key: 'health', label: '当前数据可信吗？' }
 ];
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-function copilotSection(label, items) {
-  const arr = Array.isArray(items) ? items : [items];
-  return `<div class="report-section"><b>${esc(label)}</b><div>${arr.length ? arr.map((i) => `<span>${esc(i)}</span>`).join(' / ') : '—'}</div></div>`;
+function spans(arr) {
+  const a = Array.isArray(arr) ? arr : [arr];
+  return a.length ? a.map((i) => `<span>${esc(i)}</span>`).join(' / ') : '—';
 }
+function copilotLayer(cls, label, html) {
+  return `<div class="copilot-layer ${cls}"><b class="cl-label">${esc(label)}</b><div class="cl-body">${html || '—'}</div></div>`;
+}
+// 三层输出（事实 / 推断 / 建议），对齐桌面 P9 决策助手；纯数据描述、不预测，结尾统一标注规则参考。
 function buildCopilotAnswer(key, payload) {
   if (!payload) return '<div class="all-empty">等待实时行情后再询问</div>';
   const status = payload.status || {};
@@ -845,62 +998,124 @@ function buildCopilotAnswer(key, payload) {
   const br = stats.breakRate?.available ? stats.breakRate.rate : null;
   const q = COPILOT_QUESTIONS.find((item) => item.key === key);
   const title = q ? q.label : key;
-  let answer;
+  const tradeDate = payload.tradeDate || '--';
+  let fact = '', infer = '', advise = '';
   if (key === 'relay') {
     const rear = (radar.items || []).find((item) => item.key === 'rear');
     const reasons = (rear?.reasons || []).concat(radar.cannotDo || []);
-    answer = `<p class="copilot-verdict">${esc(rear?.action || (reasons.length ? '需要谨慎接力' : '当前无明确禁止接力'))}</p>${copilotSection('原因', reasons.length ? reasons : ['当前无明确的接力风险信号'])}`;
+    fact = rear?.action || '当前无明确禁止接力信号';
+    infer = spans(reasons.length ? reasons : ['当前无明确的接力风险信号']);
+    advise = spans(['后排跟风与高位缩量板谨慎追', '只在体系检查表通过且换手充分时介入']);
   } else if (key === 'phase') {
     const reasons = [];
     if (br !== null) reasons.push(`炸板率 ${br}%${stats.breakRate?.change != null && stats.breakRate?.change !== undefined ? `（较昨日${stats.breakRate.change >= 0 ? '升' : '降'} ${Math.abs(stats.breakRate.change)}）` : ''}`);
     reasons.push(`涨停 ${payload.limitUpCount ?? '--'} 家 · 跌停 ${payload.limitDownCount ?? '--'} · 最高 ${status.maxBoard ?? '--'}板`);
     if (status.level === 'red') reasons.push('情绪极差，注意防守');
     if (['退潮', '退潮初期', '冰点'].includes(status.phase)) reasons.push('退潮/冰点环境，建议减少主动进攻');
-    answer = `<p class="copilot-verdict">当前市场处于<b>${esc(status.phase || '--')}</b>阶段，情绪指数 ${status.emotionIndex ?? '--'}。</p>${copilotSection('依据', reasons)}`;
+    fact = `市场处于 <b>${esc(status.phase || '--')}</b> 阶段，情绪指数 ${esc(status.emotionIndex ?? '--')}`;
+    infer = spans(reasons);
+    const ps = phaseStrategy(status.phase) || {};
+    advise = spans(ps.advice ? [ps.advice] : ['按阶段策略控制仓位与出手频率']);
   } else if (key === 'mainline') {
     const main = themes[0];
-    if (!main) answer = '<p class="copilot-verdict">当前主线不明确（题材数据缺失）。</p>';
+    if (!main) { fact = '当前主线不明确（题材数据缺失）'; infer = '题材强度分散，缺乏合力方向'; advise = '控制仓位，等待主线清晰'; }
     else {
       const lds = leaders.filter((l) => l.themeName === main.name).slice(0, 3);
-      answer = `<p class="copilot-verdict">今日主线是<b>${esc(main.name)}</b>（强度 ${main.score ?? '--'} · 涨停 ${main.limitUpCount ?? '--'} 家 · 最高 ${main.maxBoard ?? '--'}板）。</p>${copilotSection('核心', lds.length ? lds.map((l) => `${l.name} · ${l.boards}板 · ${l.role}`) : ['暂无核心个股'])}`;
+      fact = `主线是 <b>${esc(main.name)}</b>（强度 ${esc(main.score ?? '--')} · 涨停 ${esc(main.limitUpCount ?? '--')} 家 · 最高 ${esc(main.maxBoard ?? '--')}板）`;
+      infer = spans(lds.length ? lds.map((l) => `${l.name} · ${l.boards}板 · ${l.role}`) : ['暂无核心个股']);
+      advise = spans(['沿主线前排核心参与，回避支线杂毛']);
     }
+  } else if (key === 'limitup') {
+    const n = Number(payload.limitUpCount ?? 0);
+    fact = `今日涨停 <b>${esc(payload.limitUpCount ?? '--')}</b> 家，最高板 <b>${esc(status.maxBoard ?? '--')}</b>`;
+    infer = spans(n >= 80 ? ['涨停密集，情绪亢奋、主线清晰', '注意后排与高位分化'] : n >= 30 ? ['情绪温和恢复，聚焦核心'] : ['涨停清淡，情绪偏弱、等待确认']);
+    advise = spans(n >= 80 ? ['高潮期去弱留强，警惕一致后的分歧'] : ['控制仓位，只做前排确定性']);
+  } else if (key === 'emotion') {
+    const ei = status.emotionIndex ?? null, lvl = status.level;
+    fact = `情绪指数 <b>${esc(ei ?? '--')}</b>（${esc(lvl || '--')}）`;
+    infer = spans(lvl === 'red' ? ['情绪极差，风险偏好低'] : lvl === 'orange' ? ['情绪转弱，需谨慎'] : ['情绪尚可，可积极']);
+    advise = spans(ei != null && ei >= 80 ? ['高情绪对应高仓位档'] : ei != null && ei < 40 ? ['低情绪对应观望/小仓'] : ['按赢面仓位档执行']);
+  } else if (key === 'height') {
+    const mb = Number(status.maxBoard ?? 0);
+    fact = `当前最高连板 <b>${esc(status.maxBoard ?? '--')}</b> 板`;
+    infer = spans(mb >= 7 ? ['进入高位博弈，存在高切低/补涨龙玩法'] : mb >= 4 ? ['梯队完整，主升结构健康'] : ['高度压缩，处于启动/试探期']);
+    advise = spans(mb >= 7 ? ['高位只做最核心，回避缩量加速'] : ['聚焦低位晋级与一进二']);
+  } else if (key === 'breakrate') {
+    const r = br;
+    fact = `炸板率 <b>${esc(r ?? '--')}%</b>`;
+    infer = spans(r != null && r >= 35 ? ['封板意愿弱、分歧大，资金畏高'] : r != null && r <= 20 ? ['封板坚决，情绪一致'] : ['分歧中等，注意盘中回封']);
+    advise = spans(r != null && r >= 35 ? ['减少打板，等回封确认'] : ['可正常参与前排']);
+  } else if (key === 'leader') {
+    const top = leaders.slice(0, 5);
+    fact = top.length ? `核心龙头：${top.slice(0, 3).map((l) => `${l.name}(${l.boards}板)`).join('、')}` : '暂未识别核心龙头';
+    infer = spans(top.length ? top.map((l) => `${l.name} · ${l.role || '前排'}`) : ['题材分散，无明确龙头']);
+    advise = spans(top.length ? ['聚焦龙头与其带动的题材梯队'] : ['等龙头分歧转一致再参与']);
   } else if (key === 'playable') {
     const tiers = opportunities.tiers || {};
     const sCount = (tiers.S || []).length, aCount = (tiers.A || []).length, bCount = (tiers.B || []).length;
     const playable = [...(tiers.S || []), ...(tiers.A || []), ...(tiers.B || [])].filter((s) => s.signal?.state === '可打').length;
     const risks = (radar.items || []).map((item) => `${item.label}（${item.score}）`).slice(0, 4);
     const cant = radar.cannotDo || [];
-    let extra = `<p class="copilot-verdict">机会池 S ${sCount} / A ${aCount} / B ${bCount}，其中<b>可打信号 ${playable}</b> 只。</p>${copilotSection('风险', risks.length ? risks : ['暂无显著风险'])}`;
-    if (cant.length) extra += copilotSection('禁止', cant);
-    answer = extra;
-  } else if (key === 'tomorrow') {
-    const strategy = phaseStrategy(status.phase);
-    answer = `<p class="copilot-verdict">明日重点：${esc((strategy.allowed || []).join(' / ') || '等待方向选择')}。</p>${copilotSection('可参与', strategy.allowed || [])}${copilotSection('禁止', strategy.forbidden || [])}`;
-  } else if (key === 'health') {
-    const h = payload.health;
-    if (!h) answer = '<p class="copilot-verdict">健康数据缺失。</p>';
-    else answer = `<p class="copilot-verdict">整体 ${h.ok ? '🟢 正常' : `🔴 ${h.message || '异常'}`}${h.latencyMs != null ? ` · 延迟 ${h.latencyMs}ms` : ''}。</p>${copilotSection('数据源', Object.entries(h.sources || {}).map(([name, s]) => `${name} ${s.ok ? '🟢' : '🔴'}`))}`;
+    fact = `机会池 S ${sCount} / A ${aCount} / B ${bCount}，其中<b>可打信号 ${playable}</b> 只`;
+    infer = spans(risks.length ? risks : ['暂无显著风险']);
+    advise = spans(cant.length ? cant.concat(['避开体系禁止的接力情形']) : ['优先 S/A 梯队、信号可打且换手充分的标的']);
+  } else if (key === 'should') {
+    const tiers = opportunities.tiers || {};
+    const playable = [...(tiers.S || []), ...(tiers.A || []), ...(tiers.B || [])].filter((s) => s.signal?.state === '可打').length;
+    const cant = radar.cannotDo || [];
+    fact = `可打信号 <b>${playable}</b> 只${cant.length ? ` · 禁止 ${cant.length} 项` : ''}`;
+    infer = spans(cant.length ? cant : ['无明确体系禁止，看前排确定性']);
+    advise = spans(playable > 0 && !cant.length ? ['只在换手充分、检查表通过时出手'] : ['不出手也是一种操作']);
+  } else if (key === 'retreat') {
+    const weak = (status.level === 'red') || ['退潮', '退潮初期', '冰点'].includes(status.phase) || (br != null && br >= 35);
+    fact = `退潮信号：${weak ? '存在' : '暂不明显'}`;
+    infer = spans(weak ? ['高位断板/炸板率抬升/情绪转弱', '亏钱效应扩散'] : ['高位仍韧，赚钱效应尚可']);
+    advise = spans(weak ? ['收缩仓位、停止高位接力、管住手'] : ['按阶段策略正常参与']);
   } else if (key === 'promotion') {
-    // 晋级评估汇总（交易体系规则引擎）
     const stocks = (payload.stocks || []).filter((s) => s.promo && s.promo.available !== false);
     const groups = { 可接力: [], 观望: [], 规避: [] };
     for (const s of stocks) (groups[s.promo.verdict] || groups.规避).push(s);
     const lineOf = (list) => list.length ? `${list.slice(0, 4).map((s) => `${s.name}(${s.boards || 1}板·${s.promo.score}分)`).join('、')}${list.length > 4 ? ' 等' : ''}` : '暂无——宁缺毋滥';
     const pa = payload.positionAdvice;
-    answer = `<p class="copilot-verdict">体系检查表结论：<b>可接力 ${groups['可接力'].length}</b> / 观望 ${groups['观望'].length} / 规避 ${groups['规避'].length}。</p>` +
-      copilotSection('可接力', [lineOf(groups['可接力'])]) +
-      copilotSection('周期容错', [pa && pa.faultTolerance != null ? `${pa.cycle || '--'}周期约 ${Math.round(pa.faultTolerance * 100)}%（退潮期放弃高位接力）` : '阶段未知']);
+    fact = `体系检查表结论：可接力 ${groups['可接力'].length} / 观望 ${groups['观望'].length} / 规避 ${groups['规避'].length}`;
+    infer = spans([lineOf(groups['可接力']), lineOf(groups['规避'])]);
+    advise = spans([pa && pa.faultTolerance != null ? `${pa.cycle || '--'}周期约 ${Math.round(pa.faultTolerance * 100)}%（退潮期放弃高位接力）` : '阶段未知，按检查表逐项核对']);
   } else if (key === 'position') {
     const pa = payload.positionAdvice;
-    if (!pa || pa.label === '--') answer = '<p class="copilot-verdict">情绪指数不足，无法估算赢面。</p>';
-    else answer = `<p class="copilot-verdict">情绪指数 ${payload.status?.emotionIndex ?? '--'} → 赢面映射建议：<b>${esc(pa.label)}</b>${pa.ratio != null ? `（约 ${Math.round(pa.ratio * 100)}% 仓）` : ''}。</p>${copilotSection('依据', [pa.note, '永远把最高市值当作你的成本；把控制回撤当成重中之重。'])}`;
+    if (!pa || pa.label === '--') { fact = '情绪指数不足，无法估算赢面'; infer = '数据样本不足'; advise = '空仓或极小仓观望'; }
+    else {
+      fact = `情绪指数 ${esc(payload.status?.emotionIndex ?? '--')} → 赢面映射建议：<b>${esc(pa.label)}</b>${pa.ratio != null ? `（约 ${Math.round(pa.ratio * 100)}% 仓）` : ''}`;
+      infer = spans([pa.note, '永远把最高市值当作你的成本；把控制回撤当成重中之重']);
+      advise = spans([(pa.label === '观望' ? '不开新仓' : `按 ${pa.label} 档控制总仓位`)]);
+    }
   } else if (key === 'recede') {
     const notes = payload.mentalNotes || [];
-    answer = notes.length
-      ? `<p class="copilot-verdict">当前「<b>${esc(payload.status?.phase || '--')}</b>」阶段的体系心法：</p>${copilotSection('心法', notes.map((n) => `【${n.topic}】${n.text}`))}`
-      : '<div class="all-empty">等待实时行情后可用</div>';
-  } else answer = '<p class="copilot-verdict">暂不支持该问题。</p>';
-  return `<div class="report-card copilot-card"><div class="report-head"><strong>🤖 ${esc(title)}</strong><span>系统基于 ${esc(payload.tradeDate || '--')} 实时数据</span></div>${answer}</div>`;
+    fact = `当前阶段：<b>${esc(payload.status?.phase || '--')}</b>`;
+    infer = spans(notes.length ? notes.map((n) => `【${n.topic}】${n.text}`) : ['暂无心法']);
+    advise = spans(['把心法作为纪律提醒，不替代交易系统']);
+  } else if (key === 'tomorrow') {
+    const strategy = phaseStrategy(status.phase) || {};
+    fact = `当前阶段：<b>${esc(status.phase || '--')}</b>`;
+    infer = spans(['明日方向取决于竞价与开盘确认']);
+    advise = spans([('可参与：' + (strategy.allowed || []).join(' / ') || '等待方向选择'), ('禁止：' + (strategy.forbidden || []).join(' / ') || '无')]);
+  } else if (key === 'health') {
+    const h = payload.health;
+    if (!h) { fact = '健康数据缺失'; infer = '无法评估数据源可信度'; advise = '以快照/缓存为准，谨慎决策'; }
+    else {
+      fact = `整体 ${h.ok ? '🟢 正常' : `🔴 ${h.message || '异常'}`}${h.latencyMs != null ? ` · 延迟 ${h.latencyMs}ms` : ''}`;
+      infer = spans(Object.entries(h.sources || {}).map(([name, s]) => `${name} ${s.ok ? '🟢' : '🔴'}`));
+      advise = spans(h.ok ? ['数据源正常，可信任当前行情'] : ['存在源缺失，优先参考仍可用的源']);
+    }
+  } else {
+    fact = `市场处于 <b>${esc(status.phase || '--')}</b> 阶段，情绪指数 ${esc(status.emotionIndex ?? '--')}，涨停 ${esc(payload.limitUpCount ?? '--')} 家`;
+    infer = spans(['该问题暂无专门分析模块，以上为当前盘面快照']);
+    advise = spans(['结合阶段策略与风险雷达综合判断']);
+  }
+  return `<div class="report-card copilot-card"><div class="report-head"><strong>🤖 ${esc(title)}</strong><span>系统基于 ${esc(tradeDate)} 实时数据</span></div>` +
+    copilotLayer('fact', '事实', fact) +
+    copilotLayer('infer', '推断', infer) +
+    copilotLayer('advise', '建议', advise) +
+    `<div class="muted" style="font-size:11px;margin-top:6px">体系规则辅助参考，非投资建议</div></div>`;
 }
 
 /* ==================== 交易体系规则引擎（个人交易心得融入 · 2026-08） ====================
@@ -929,6 +1144,27 @@ const PROMO_RULES = {
   volDownStage23: [-40, -20],
   // 高位门槛：七板以上才算高位/市场龙头，<7 板不存在高切低/补涨龙玩法
   highBoardThreshold: 7,
+};
+
+const PARAM_MANIFEST = {
+  rules: { ...RULES },
+  phaseStrategy: { ...PHASE_STRATEGY },
+  promoRules: { ...PROMO_RULES },
+  emotion: {
+    confidenceDenominator: 10,
+    indicators: {
+      limitUp: { green: 80, yellow: 40 },
+      limitDown: { green: 10, yellow: 20 },
+      multiBoard: { green: 20, yellow: 10 },
+      maxBoard: { green: 5, yellow: 3 },
+      breakRate: { green: 20, yellow: 35 },
+      firstPromotion: { green: 35, yellow: 20 },
+      multiPromotion: { green: 45, yellow: 25 },
+      marketBreakRate: { green: 20, yellow: 35 },
+      firstBoardPremium: { green: 3, yellow: 1 },
+      highBoardPremium: { green: 2, yellow: 0 }
+    }
+  }
 };
 
 // 情绪阶段 → 三大周期（连板晋级体系的周期天花板）
@@ -1039,7 +1275,7 @@ function assessPromotion(stock, ctx = {}) {
   const role = String(ctx.role || stock.role || '');
   if (themeSize === null) push('theme', '题材梯队', 'na', '板块家数未知');
   else if (themeSize <= 1) push('theme', '题材梯队', 'fail', '孤立独板——无跟风无梯队，100% 无法晋级');
-  else if (role.includes('总龙头') || role.includes('板块龙头')) { scoreDim(15, undefined, 1); push('theme', '题材梯队', 'pass', `${role} · 板块 ${themeSize} 只涨停，抱团效应明显`); }
+  else if (CORE_LEADER_ROLES.includes(role)) { scoreDim(15, undefined, 1); push('theme', '题材梯队', 'pass', `${role} · 板块 ${themeSize} 只涨停，抱团效应明显`); }
   else if (boards >= PROMO_RULES.highBoardThreshold) { scoreDim(15, undefined, 0.9); push('theme', '题材梯队', 'pass', `${boards} 板市场高度（≥7 板才算高位龙头），梯队 ${themeSize} 只`); }
   else if (themeSize >= 3) { scoreDim(15, undefined, 0.7); push('theme', '题材梯队', 'pass', `板块 ${themeSize} 只涨停，有梯队助攻`); }
   else { scoreDim(15, undefined, 0.3); push('theme', '题材梯队', 'warn', `板块仅 ${themeSize} 只涨停，梯队薄`); }
@@ -1162,7 +1398,7 @@ export {
   rankCoreLeaders, leaderScore, calculatePromotionStats, calculateRollingPromotion, buildModeMonitor, aggregateModeRates,
   calculateEmotionState, indicator, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
-  buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure,
+  buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, PHASE_NAMES, SIGNAL_STATE,
   PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes
 };

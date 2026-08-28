@@ -576,6 +576,28 @@ main {
 .promo-row .k { flex: 0 0 58px; font-weight: 700; }
 .promo-row em { font-style: normal; color: var(--muted); }
 
+/* 决策助手三层输出（事实 / 推断 / 建议） */
+.copilot-layer { margin: 8px 0; border-left: 3px solid var(--line); padding: 4px 10px; }
+.copilot-layer .cl-label { font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: 0.04em; }
+.copilot-layer .cl-body { margin-top: 3px; font-size: 13px; line-height: 1.5; }
+.copilot-layer .cl-body span { display: inline-block; background: var(--surface-2); border-radius: 6px; padding: 2px 8px; margin: 3px 4px 0 0; font-size: 12px; }
+.copilot-layer.fact { border-left-color: var(--teal); }
+.copilot-layer.infer { border-left-color: var(--amber); }
+.copilot-layer.advise { border-left-color: var(--green); }
+
+/* 详情抽屉：个股相似案例（对齐桌面 G24） */
+.s-similar { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.s-similar .sim-card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.s-similar .sim-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.s-similar .sim-top b { font-size: 13px; }
+.s-similar .sim-score { font-size: 11px; color: var(--teal-strong); font-weight: 800; }
+.s-similar .sf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin-top: 6px; }
+.s-similar .sf-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--muted); }
+.s-similar .sf-row span { flex: 1 1 46%; }
+.s-similar .sf-row b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.s-similar .sf-row i { color: var(--muted); font-style: normal; min-width: 44px; text-align: right; }
+.s-similar .outcome { margin-top: 8px; font-size: 12px; }
+
 /* ===== 减弱动态效果：系统开启时关闭全部动画/过渡 ===== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

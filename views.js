@@ -68,6 +68,11 @@ export function fmtMoney(v) {
 }
 export function pctClass(p) { return p > 0 ? 'up-c' : p < 0 ? 'down-c' : 'flat-c'; }
 export function pctText(p) { if (p == null) return '--'; return (p > 0 ? '+' : '') + Number(p).toFixed(2) + '%'; }
+// 评分维度 breakdown 的英文字键 → 中文标签（展示层用；未知键回退原值，新增维度不消失）。
+export const BD_LABELS = {
+  height: '高度', theme: '题材', position: '地位', coordination: '协同', turnover: '换手',
+  seal: '封单', firstSeal: '首封', breaks: '烂板', role: '角色', mode: '模式',
+};
 export function tierBadge(t) { return '<span class="tier-badge ' + (t || '淘汰') + '">' + (t || '淘汰') + '</span>'; }
 export function signalTag(s) { return s ? '<span class="signal-tag ' + s + '">' + s + '</span>' : ''; }
 
@@ -204,7 +209,7 @@ export function renderStructure(ctx) {
   const tree = (st.main ? treeBranch(st.main, 'tree-main') : '<div class="muted">暂无主线</div>') + (st.branches || []).map((b) => treeBranch(b, 'tree-branch')).join('');
 
   const leaders = (s.leaders || []).slice(0, 12).map((l) => {
-    const bd = Object.entries(l.breakdown || {}).filter(([, v]) => v != null).map(([k, v]) => '<span>' + k + ':' + v + '</span>').join('');
+    const bd = Object.entries(l.breakdown || {}).filter(([, v]) => v != null).map(([k, v]) => '<span>' + (BD_LABELS[k] || k) + ':' + v + '</span>').join('');
     return '<div class="leader-card" data-code="' + l.code + '"><div class="row1"><div class="nm">' + esc(l.name) + '</div>' +
       '<div class="right"><div class="sc">' + l.score + '</div></div></div>' +
       '<div class="sub">' + (l.boards || 1) + '板 · ' + esc(l.role) + ' · ' + esc(l.themeName || '') + '</div>' +

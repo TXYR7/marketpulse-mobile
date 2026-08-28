@@ -7,7 +7,7 @@ import {
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList } from './views.js';
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList, BD_LABELS } from './views.js';
 import { renderMarket, renderTrades, renderReview, renderAI } from './views-extra.js';
 
 const state = {
@@ -431,7 +431,7 @@ async function openSheet(code) {
     const bars = Object.entries(bd).filter(([, v]) => v != null).map(([k, v]) => {
       const max = { height: 35, theme: 20, position: 15, coordination: 5, turnover: 8, seal: 10, firstSeal: 7, breaks: 5 }[k] || 10;
       const w = Math.min(100, Math.round(v / max * 100));
-      return '<div class="bd-row"><span class="k">' + k + '</span><div class="bd-bar"><i style="width:' + w + '%"></i></div><span>' + v + '</span></div>';
+      return '<div class="bd-row"><span class="k">' + (BD_LABELS[k] || k) + '</span><div class="bd-bar"><i style="width:' + w + '%"></i></div><span>' + v + '</span></div>';
     }).join('');
     if (bars) tierHtml += '<div class="s-breakdown">' + bars + '</div>';
   }

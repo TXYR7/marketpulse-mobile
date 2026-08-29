@@ -1124,8 +1124,8 @@ function buildCopilotAnswer(key, payload) {
     const h = payload.health;
     if (!h) { fact = '健康数据缺失'; infer = '无法评估数据源可信度'; advise = '以快照/缓存为准，谨慎决策'; }
     else {
-      fact = `整体 ${h.ok ? '🟢 正常' : `🔴 ${h.message || '异常'}`}${h.latencyMs != null ? ` · 延迟 ${h.latencyMs}ms` : ''}`;
-      infer = spans(Object.entries(h.sources || {}).map(([name, s]) => `${name} ${s.ok ? '🟢' : '🔴'}`));
+      fact = `整体 ${h.ok ? '正常' : (h.message || '异常')}${h.latencyMs != null ? ` · 延迟 ${h.latencyMs}ms` : ''}`;
+      infer = spans(Object.entries(h.sources || {}).map(([name, s]) => `${name} ${s.ok ? '正常' : '异常'}`));
       advise = spans(h.ok ? ['数据源正常，可信任当前行情'] : ['存在源缺失，优先参考仍可用的源']);
     }
   } else {
@@ -1133,7 +1133,7 @@ function buildCopilotAnswer(key, payload) {
     infer = spans(['该问题暂无专门分析模块，以上为当前盘面快照']);
     advise = spans(['结合阶段策略与风险雷达综合判断']);
   }
-  return `<div class="report-card copilot-card"><div class="report-head"><strong>🤖 ${esc(title)}</strong><span>系统基于 ${esc(tradeDate)} 实时数据</span></div>` +
+  return `<div class="report-card copilot-card"><div class="report-head"><strong>AI · ${esc(title)}</strong><span>系统基于 ${esc(tradeDate)} 实时数据</span></div>` +
     copilotLayer('fact', '事实', fact) +
     copilotLayer('infer', '推断', infer) +
     copilotLayer('advise', '建议', advise) +

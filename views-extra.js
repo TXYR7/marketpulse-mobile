@@ -93,7 +93,7 @@ export function renderTrades(ctx) {
       .map((t) => ({ fraction: Number(t.fraction || 0.2), theme: t.theme || '未分类', industry: t.industry || '未分类', status: 'open' }));
     const risk = evaluatePortfolioRisk({ positions, trades, today: todayIso });
     const riskHtml = risk.violations.length
-      ? '<div class="risk-card"><div class="plan-verdict" style="color:var(--red)">⚠ 风险预警</div><ul class="plan-rules">' +
+      ? '<div class="risk-card"><div class="plan-verdict" style="color:var(--red)">风险预警</div><ul class="plan-rules">' +
         risk.violations.map((v) => '<li>' + esc(v.label) + (v.value != null ? '（' + (typeof v.value === 'number' ? Math.round(v.value * 100) + '%' : v.value) + '）' : '') + '</li>').join('') + '</ul></div>'
       : '<div class="risk-card"><div class="plan-verdict" style="color:var(--green)">仓位与风险在限制内</div><div class="muted">总仓位 ' + Math.round(risk.totalExposure * 100) + '% · 持仓 ' + risk.positions + ' 只 · 连续亏损 ' + risk.losingStreak + ' 笔</div></div>';
 
@@ -171,7 +171,7 @@ export function renderReview(ctx) {
       '<div class="rv-body">' + esc(rv.text) + '</div></div>'
     ).join('') || '<div class="empty">还没有复盘记录</div>';
     const html =
-      '<div class="toolbar"><button class="btn" id="rvGen">⚡ 生成今日复盘</button><button class="btn primary" id="rvSave">保存</button></div>' +
+      '<div class="toolbar"><button class="btn" id="rvGen">生成今日复盘</button><button class="btn primary" id="rvSave">保存</button></div>' +
       '<textarea id="rvText" rows="10" style="width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;font-family:inherit">' + esc(text) + '</textarea>' +
       '<div class="sec-title"><h2>历史复盘</h2></div>' + list;
     el.__ctx = ctx;

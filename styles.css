@@ -130,7 +130,8 @@ button { font-family: inherit; cursor: pointer; }
 }
 .menu-panel .menu-item:active { background: var(--surface-2); }
 .menu-panel .menu-item.on { background: var(--teal-soft); color: var(--teal); }
-.menu-panel .menu-item .ic { font-size: 18px; }
+.menu-panel .menu-item .ic { display: inline-flex; align-items: center; flex: none; }
+.ic { display: inline-block; vertical-align: -2px; flex: none; }
 
 /* ===== 主区域 ===== */
 main {
@@ -273,7 +274,7 @@ main {
   font-size: 11px; border-radius: var(--r-m);
   transition: background 0.15s ease, color 0.15s ease;
 }
-.bottomnav button .ic { font-size: 18px; line-height: 1; }
+.bottomnav button .ic { display: inline-flex; align-items: center; line-height: 1; }
 .bottomnav button.on { background: var(--teal-soft); color: var(--teal); font-weight: 700; }
 .bottomnav button:active { transform: scale(0.94); }
 

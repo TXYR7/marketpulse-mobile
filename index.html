@@ -28,27 +28,27 @@
     <header class="topbar">
       <div class="topbar-row">
         <div style="display:flex;align-items:center;gap:8px">
-          <button class="hamburger" id="menuBtn" aria-label="菜单">☰</button>
+          <button class="hamburger" id="menuBtn" aria-label="菜单"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
           <div class="brand"><span class="dot"></span> MarketPulse <span class="phase-badge" id="phaseBadge">连接中</span></div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="date" id="dateLabel">--</span>
-          <button class="refresh-btn" id="refreshBtn" title="刷新" aria-label="刷新">↻</button>
+          <button class="refresh-btn" id="refreshBtn" title="刷新" aria-label="刷新"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></button>
         </div>
       </div>
       <div class="status-strip" id="statusStrip"></div>
     </header>
 
-    <div class="ptr" id="ptr"><span class="spin">↻</span> 正在刷新…</div>
+    <div class="ptr" id="ptr"><span class="spin"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></span> 正在刷新…</div>
 
     <div class="menu-scrim" id="menuScrim"></div>
     <nav class="menu-panel" id="menuPanel">
       <h3>行情工作台</h3>
-      <button class="menu-item" data-view="market"><span class="ic">🔭</span> 全市场</button>
-      <button class="menu-item" data-view="trades"><span class="ic">💼</span> 交易与持仓</button>
-      <button class="menu-item" data-view="review"><span class="ic">📝</span> 每日复盘</button>
-      <button class="menu-item" data-view="ai"><span class="ic">🤖</span> 决策助手</button>
-      <button class="menu-item" data-view="settings"><span class="ic">⚙️</span> 设置</button>
+      <button class="menu-item" data-view="market"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></span> 全市场</button>
+      <button class="menu-item" data-view="trades"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3 12.5h18"/></svg></span> 交易与持仓</button>
+      <button class="menu-item" data-view="review"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h4"/></svg></span> 每日复盘</button>
+      <button class="menu-item" data-view="ai"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M12 8V5.5"/><circle cx="12" cy="4" r="1.2"/><path d="M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg></span> 决策助手</button>
+      <button class="menu-item" data-view="settings"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span> 设置</button>
     </nav>
 
     <main>
@@ -57,7 +57,7 @@
         <div class="banner hide" id="intradayBanner"></div>
         <div class="sec-title"><h2>涨停池</h2><span class="hint" id="ztHint">--</span></div>
         <div class="toolbar">
-          <label class="search"><span aria-hidden="true">⌕</span><input id="ztSearch" type="search" placeholder="搜索名称 / 代码" autocomplete="off" /></label>
+          <label class="search"><span aria-hidden="true"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><input id="ztSearch" type="search" placeholder="搜索名称 / 代码" autocomplete="off" /></label>
           <div class="seg" id="ztSort">
             <button data-sort="boards" class="on">连板</button>
             <button data-sort="seal">封单</button>
@@ -126,7 +126,7 @@
       <section class="view" id="view-market">
         <div class="sec-title"><h2>全市场</h2><span class="hint" id="marketTotal">--</span></div>
         <div class="toolbar">
-          <label class="search"><span aria-hidden="true">⌕</span><input id="marketSearch" type="search" placeholder="搜索代码 / 名称" autocomplete="off" /></label>
+          <label class="search"><span aria-hidden="true"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><input id="marketSearch" type="search" placeholder="搜索代码 / 名称" autocomplete="off" /></label>
           <select id="marketMarket" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-s);padding:0 8px;font-size:13px">
             <option value="">全部</option>
             <option value="sh">沪市</option>
@@ -194,11 +194,11 @@
     </main>
 
     <nav class="bottomnav">
-      <button class="on" data-view="intraday"><span class="ic">📈</span>盘中</button>
-      <button data-view="opportunity"><span class="ic">🎯</span>机会</button>
-      <button data-view="ladder"><span class="ic">🪜</span>梯队</button>
-      <button data-view="structure"><span class="ic">🧠</span>结构</button>
-      <button data-view="watch"><span class="ic">⭐</span>自选</button>
+      <button class="on" data-view="intraday"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9 16v-5M12.5 16V8M16 16v-3"/></svg></span>盘中</button>
+      <button data-view="opportunity"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 11.4v1.2"/></svg></span>机会</button>
+      <button data-view="ladder"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 3v18M17 3v18M7 7.5h10M7 12h10M7 16.5h10"/></svg></span>梯队</button>
+      <button data-view="structure"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.8 7.2l3.8 8.6M17.2 7.2l-3.8 8.6M7 6h10"/></svg></span>结构</button>
+      <button data-view="watch"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3z"/></svg></span>自选</button>
     </nav>
 
     <div class="scrim" id="scrim"></div>

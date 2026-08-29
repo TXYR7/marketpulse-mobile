@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0e1417" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0c1017" />
     <meta name="description" content="MarketPulse 手机版 · A股情绪与连板行情" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -126,7 +127,7 @@
         <div class="sec-title"><h2>全市场</h2><span class="hint" id="marketTotal">--</span></div>
         <div class="toolbar">
           <label class="search"><span aria-hidden="true">⌕</span><input id="marketSearch" type="search" placeholder="搜索代码 / 名称" autocomplete="off" /></label>
-          <select id="marketMarket" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:13px">
+          <select id="marketMarket" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-s);padding:0 8px;font-size:13px">
             <option value="">全部</option>
             <option value="sh">沪市</option>
             <option value="sz">深市</option>
@@ -159,10 +160,6 @@
       <!-- 设置（侧滑菜单） -->
       <section class="view" id="view-settings">
         <div class="sec-title"><h2>设置</h2></div>
-        <div class="set-row">
-          <label for="setTheme">主题</label>
-          <select id="setTheme"><option value="dark">深色</option><option value="light">浅色</option></select>
-        </div>
         <div class="set-row">
           <label for="setRefresh">自动刷新</label>
           <select id="setRefresh">

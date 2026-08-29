@@ -14,7 +14,7 @@ import { APP_VERSION } from './version.js';
 const state = {
   pools: null, quotes: {}, watch: [], view: 'intraday',
   ztSort: 'boards', ztFilter: 'all', ztFilterText: '',
-  theme: 'dark', refreshMs: 15000, manualDate: '', timer: null,
+  refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
   trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
@@ -293,7 +293,7 @@ function showOfflineEmpty(err) {
   const msg = err && err.message ? String(err.message) : '网络不可用或接口暂不可达';
   const tokenIssue = err && (err.status === 401 || err.status === 403); // getJSON 抛错带 .status
   setHTML($('#ztList'), '<div class="empty">暂无行情数据<br /><span class="muted">' + esc(msg) + '</span>' +
-    (tokenIssue ? '<br /><span style="color:var(--orange,#e6a23c)">Token 可能失效：设置 → 数据接口 Token 更换后重试</span>' : '') +
+    (tokenIssue ? '<br /><span style="color:var(--amber)">Token 可能失效：设置 → 数据接口 Token 更换后重试</span>' : '') +
     '<br /><button class="btn" id="retryBtn" style="flex:0 0 auto;margin:14px auto 0;padding:0 22px">↻ 重试</button></div>');
   $('#ztList').__seq = '';
   $('#ztHint').textContent = '--';
@@ -892,7 +892,6 @@ function bind() {
     state.watch.push({ code, name, addedAt: Date.now() });
     e.target.value = ''; toast('已加入自选'); loadWatch();
   });
-  $('#setTheme').addEventListener('change', (e) => { state.theme = e.target.value; document.documentElement.setAttribute('data-theme', state.theme); applyThemeMeta(); setKV('theme', state.theme); });
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
   $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });
   // B6:接口 token 设置——手机 PWA 无控制台，这是 token 失效时的救命通道（改后即时生效，免重启）
@@ -942,10 +941,6 @@ function setupPTR() {
 }
 
 /* ---------------- 启动 ---------------- */
-function applyThemeMeta() {
-  const m = document.querySelector('meta[name="theme-color"]');
-  if (m) m.setAttribute('content', state.theme === 'light' ? '#f4f6f8' : '#0e1417');
-}
 async function init() {
   // SW 注册放最前：弱网首访不至于等几十秒的网络超时后才装上
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -954,8 +949,7 @@ async function init() {
   if (verEl) verEl.textContent = APP_VERSION; // 设置页展示当前版本（与 SW CACHE 同源，发布自动递增）
   try {
     // 设置/快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
-    const [theme, refreshMs, snap, hist, warm, notifySignals] = await Promise.all([
-      getKV('theme', 'dark'),
+    const [refreshMs, snap, hist, warm, notifySignals] = await Promise.all([
       getKV('refreshMs', 15000),
       getKV('lastGood', null).catch(() => null),
       getAllHistory().catch(() => []),
@@ -964,12 +958,8 @@ async function init() {
     ]);
     if (warm && warm.kline) hydrateKlineCache(warm.kline); // 当日 K线命中 → enrichPromo 免重抓
     if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
-    state.theme = theme || 'dark';
     state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
     state.notifySignals = Boolean(notifySignals); // D3:信号变化通知开关（默认关）
-    document.documentElement.setAttribute('data-theme', state.theme);
-    applyThemeMeta();
-    $('#setTheme').value = state.theme;
     $('#setRefresh').value = String(state.refreshMs);
     bind();
     state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));

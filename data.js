@@ -64,7 +64,7 @@ async function getJSON(url, tries = 3) {
 }
 
 // 封单质量：与桌面 server.js:sealQuality 保持同步（平行副本同步义务），供评分引擎读取 sealStars。
-function sealQuality({ sealAmount, circulatingValue, breakCount = 0 }) {
+export function sealQuality({ sealAmount, circulatingValue, breakCount = 0 }) {
   if (sealAmount === null || sealAmount === undefined || sealAmount === '' || circulatingValue === null || circulatingValue === undefined || circulatingValue === '') return null;
   const seal = Number(sealAmount);
   const circ = Number(circulatingValue);

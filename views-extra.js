@@ -1,7 +1,7 @@
 // views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
 import { fetchAllMarket, searchStock } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
-import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, phaseStrategy } from './analytics.js';
+import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, routeCopilotQuery } from './analytics.js';
 import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
@@ -188,7 +188,9 @@ export function renderAI(ctx) {
   const qHtml = COPILOT_QUESTIONS.map((q) => '<button type="button" class="copilot-question" data-copilot="' + q.key + '">' + esc(q.label) + '</button>').join('');
   const html = '<div class="sec-title"><h2>决策助手</h2><span class="hint">规则驱动，非预测</span></div>' +
     '<div class="copilot-questions">' + qHtml + '</div>' +
-    '<div id="copilotAnswer">' + (payload ? '<div class="all-empty">点击上方问题查看系统解释</div>' : '<div class="all-empty">等待实时行情后可用</div>') + '</div>';
+    '<div class="copilot-input-row"><input id="copilotInput" type="search" placeholder="问点什么，例如：现在能上几成仓" aria-label="向决策助手提问" autocomplete="off" />' +
+    '<button class="btn primary" type="button" id="copilotAsk">提问</button></div>' +
+    '<div id="copilotAnswer">' + (payload ? '<div class="all-empty">点击上方问题或输入关键词，查看系统解释</div>' : '<div class="all-empty">等待实时行情后可用</div>') + '</div>';
   el.__ctx = ctx;
   if (!setHTML(el, html)) return;
 }
@@ -227,6 +229,29 @@ if (typeof document !== 'undefined') {
     ctx.state.trades = await getTrades();
     ctx.toast('已保存交易');
     container.__repaint();
+  }
+  // 决策助手共用应答路径：预设按钮与自由文本输入（G25 对齐桌面）走同一 enriched 组装
+  function answerCopilotWith(key, ctx) {
+    if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
+    const enriched = {
+      ...ctx.state.lastPayload,
+      status: { ...(ctx.state.lastPayload.status || {}), phase: ctx.state.phase, emotionIndex: ctx.state.emotion?.emotionIndex ?? null },
+      stocks: (ctx.state.pools && ctx.state.pools.up) || [],
+      positionAdvice: ctx.state.positionAdvice,
+      mentalNotes: ctx.state.mentalNotes,
+    };
+    const el = document.querySelector('#copilotAnswer');
+    if (el) el.innerHTML = buildCopilotAnswer(key, enriched);
+  }
+  function submitCopilotInput(input) {
+    const ctx = input.closest('#aiView')?.__ctx;
+    if (!ctx) return;
+    const text = input.value.trim();
+    if (!text) { ctx.toast('输入问题后再提问'); return; }
+    const key = routeCopilotQuery(text, COPILOT_QUESTIONS);
+    if (!key) { ctx.toast('没匹配到——换个说法，或点上方预设问题'); return; }
+    answerCopilotWith(key, ctx);
+    input.value = '';
   }
   document.addEventListener('click', async (e) => {
     const hit = (s2) => e.target.closest(s2);
@@ -278,20 +303,20 @@ if (typeof document !== 'undefined') {
     if (cq) {
       const ctx = cq.closest('#aiView')?.__ctx;
       if (!ctx) return;
-      if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
-      // 注入交易体系数据：池内个股（带 promo 晋级评估）+ 赢面仓位档 + 阶段心法
-      const enriched = {
-        ...ctx.state.lastPayload,
-        status: { ...(ctx.state.lastPayload.status || {}), phase: ctx.state.phase, emotionIndex: ctx.state.emotion?.emotionIndex ?? null },
-        stocks: (ctx.state.pools && ctx.state.pools.up) || [],
-        positionAdvice: ctx.state.positionAdvice,
-        mentalNotes: ctx.state.mentalNotes,
-      };
-      document.querySelector('#copilotAnswer').innerHTML = buildCopilotAnswer(cq.dataset.copilot, enriched);
+      answerCopilotWith(cq.dataset.copilot, ctx);
+      return;
+    }
+    if (hit('#copilotAsk')) {
+      const input = document.querySelector('#copilotInput');
+      if (input) submitCopilotInput(input);
       return;
     }
     // chip 多选：只切类名，提交时按 .on 收集（不再维护 _sel 状态）
     const chipBtn = hit('.chip-btn[data-v]');
     if (chipBtn && chipBtn.closest('.chips')) chipBtn.classList.toggle('on');
+  });
+  // 决策助手自由输入：Enter 直接提交（与提问按钮同路径）
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target && e.target.id === 'copilotInput') { e.preventDefault(); submitCopilotInput(e.target); }
   });
 }

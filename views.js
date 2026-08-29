@@ -216,9 +216,12 @@ export function renderStructure(ctx) {
       (bd ? '<div class="bd">' + bd + '</div>' : '') + '</div>';
   }).join('');
 
-  const themes = (s.themes || []).slice(0, 15).map((t, i) =>
-    '<div class="rank-row"><span class="idx">' + (i + 1) + '</span><span class="nm">' + esc(t.name) + '</span><span class="cnt">' + t.score + '分 · ' + t.limitUpCount + '家</span></div>'
-  ).join('');
+  const themes = (s.themes || []).slice(0, 15).map((t, i) => {
+    // 题材升降：昨日同题材强度对比（±5 阈值出方向），无昨日数据时不渲染箭头
+    const chg = t.direction == null ? '' : '<span class="chg ' + (t.direction === 'up' ? 'up-c' : t.direction === 'down' ? 'down-c' : 'flat-c') + '">' +
+      (t.direction === 'up' ? '↑' : t.direction === 'down' ? '↓' : '→') + (t.scoreChange != null ? Math.abs(t.scoreChange) : '') + '</span>';
+    return '<div class="rank-row"><span class="idx">' + (i + 1) + '</span><span class="nm">' + esc(t.name) + '</span><span class="cnt">' + t.score + '分 · ' + t.limitUpCount + '家</span>' + chg + '</div>';
+  }).join('');
 
   let similar = '';
   if (s.history && s.history.length >= 2) {

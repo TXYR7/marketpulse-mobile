@@ -1,0 +1,8 @@
+{
+  "name": "marketpulse-mobile",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules scripts/smoke.mjs"
+  }
+}

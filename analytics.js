@@ -337,6 +337,20 @@ function calculateEmotionState(input) {
   return { available: true, phase, level, advice, reasons, confidence, emotionIndex, indicators };
 }
 
+// G9 昨日涨停今日开盘溢价：首板/高位两组均值（百分点）。
+// 口径说明：与桌面 analytics.js yesterdayPremium 同名同义，但移动端历史记录不含收盘价，
+// 故吃 loadGap 已算好的开盘涨幅 map（(open-prevClose)/prevClose*100）。
+function yesterdayPremium(previousStocks = [], openPctMap = {}) {
+  const firstBoard = [], high = [];
+  for (const s of previousStocks || []) {
+    const pct = finiteNumber(openPctMap[s.code]);
+    if (pct === null) continue;
+    (Math.max(1, finiteNumber(s.boards) || 1) > 1 ? high : firstBoard).push(pct);
+  }
+  const avg = (arr) => arr.length ? round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+  return { firstBoardPremium: avg(firstBoard), highBoardPremium: avg(high) };
+}
+
 /* ---------- 机会评分 ---------- */
 const CORE_LEADER_ROLES = ['市场总龙头', '高度龙头', '板块龙头', '板块中军', '容量核心', '趋势核心', '补涨龙', '情绪核心'];
 const RULES = {
@@ -1389,9 +1403,9 @@ function contextNotes(ctx = {}) {
 export {
   finiteNumber, round, calculateBreakRate, summarizeTheme, groupThemes, buildThemeRanking,
   rankCoreLeaders, leaderScore, calculatePromotionStats, calculateRollingPromotion, buildModeMonitor, aggregateModeRates,
-  calculateEmotionState, indicator, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
+  calculateEmotionState, indicator, yesterdayPremium, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
-  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer,
+  buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
   PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes
 };

@@ -18,6 +18,7 @@
     <link rel="modulepreload" href="analytics.js" />
     <link rel="modulepreload" href="views.js" />
     <link rel="modulepreload" href="views-extra.js" />
+    <link rel="modulepreload" href="version.js" />
   </head>
   <body>
     <header class="topbar">
@@ -177,7 +178,7 @@
           <button class="btn" id="clearBtn" style="flex:0 0 auto;padding:0 14px;height:36px">清空自选</button>
         </div>
         <div class="about">
-          MarketPulse 手机版 · 数据来自东方财富公开接口，由手机浏览器直接获取，无后端服务器。<br />
+          版本 <span id="aboutVersion">--</span> · MarketPulse 手机版 · 数据来自东方财富公开接口，由手机浏览器直接获取，无后端服务器。<br />
           行情有延迟，仅供信息展示，不构成投资建议。<br />
           封单/成交额/市值单位为元；涨停池价格为厘(÷1000)。非交易时段显示最近交易日快照。
         </div>

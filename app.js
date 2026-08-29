@@ -2,13 +2,14 @@
 import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
-  calculateEmotionState, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
+  calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList, BD_LABELS } from './views.js';
 import { renderMarket, renderTrades, renderReview, renderAI } from './views-extra.js';
+import { APP_VERSION } from './version.js';
 
 const state = {
   pools: null, quotes: {}, watch: [], view: 'intraday',
@@ -17,7 +18,7 @@ const state = {
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
   trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
-  allMarket: null, marketPage: 1, gap: null,
+  allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
 };
@@ -39,12 +40,14 @@ async function mapWithConcurrency(items, limit, fn) {
 /* ---------------- 派生计算 ---------------- */
 // state.history 恒为按日期升序（init/loadHistory 写入前已排序），派生结果按 history+交易日 缓存，
 // 盘中每 tick 不再重复全量重算晋级率/昨板映射。
-let histMemo = { key: '', promo: null, prevBoards: null };
+let histMemo = { key: '', promo: null, prevBoards: null, prevStocks: [] };
 function historyDerived(poolsDate) {
   const h = state.history || [];
   const key = h.length + ':' + (h.length ? h[h.length - 1].date : '') + '|' + (poolsDate || '');
   if (histMemo.key !== key) {
-    histMemo = { key, promo: computePromotionFromHistory(h, poolsDate), prevBoards: prevDayBoards(h, poolsDate) };
+    // prevStocks 取严格早于今日的最后一条（无兜底：无更早历史时宁缺毋滥，不拿今日自比得 flat）
+    const prevRec = h.filter((x) => poolsDate && String(x.date) < String(poolsDate)).pop();
+    histMemo = { key, promo: computePromotionFromHistory(h, poolsDate), prevBoards: prevDayBoards(h, poolsDate), prevStocks: prevRec?.stocks || [] };
   }
   return histMemo;
 }
@@ -86,13 +89,18 @@ function deriveSig(pools) {
   const up = pools.up || [];
   const hist = state.history || [];
   const hk = hist.length ? (hist[hist.length - 1].date + ':' + hist.length) : '-';
-  const codes = up.map((s) => s.code + ':' + (s.boards || 1)).sort().join(',');
-  return pools.date + '|' + up.length + '|' + codes + '|' + hk;
+  // 含 breakCount：断板率/市场断板率依赖池内个股的炸板次数，回封（breakCount 0→N）不改变成员但改变指标，须入签名
+  const codes = up.map((s) => s.code + ':' + (s.boards || 1) + ':' + (s.breakCount || 0)).sort().join(',');
+  // 昨日溢价指纹：loadGap 报价到达后触发一次重算（此前 premium 为空 → 指标诚实显示 —）
+  const prem = state.prevPremium && state.prevPremium.date === pools.date
+    ? (state.prevPremium.firstBoardPremium + '/' + state.prevPremium.highBoardPremium) : '';
+  return pools.date + '|' + up.length + '|' + codes + '|' + hk + '|' + prem;
 }
 function computeDerived(pools) {
   // M4 结构签名记忆化：结构字段(boards/成员/日期/历史)日内稳定，派生结果恒定，跳过重算省 CPU（不碰实时价）
+  // 返回布尔：true=完成（或早退但派生已有），false=签名相同早退——loadGap 溢价就绪后据此决定是否重渲染
   const sig = deriveSig(pools);
-  if (sig === state.derivedSig && state.derived) { state.lastPayload = state.derived.lastPayload; return; }
+  if (sig === state.derivedSig && state.derived) { state.lastPayload = state.derived.lastPayload; return false; }
   const up = pools.up || [];
   const upCount = pools.upCount ?? up.length;
   const downCount = pools.downCount ?? (pools.down || []).length;
@@ -102,13 +110,19 @@ function computeDerived(pools) {
   const breakRate = calculateBreakRate({ limitUpCount: upCount, brokenCount, available: true });
   const memo = historyDerived(pools.date);
   const promo = memo.promo;
+  // G9 情绪三指标：市场断板率同步可算（池内炸板回封占比）；昨首板/昨高位溢价读 loadGap 落位的缓存（date 不匹配则诚实显示 —）
+  const marketBreakRate = up.length ? Math.round(up.filter((s) => Number(s.breakCount) > 0).length / up.length * 100) : null;
+  const premium = state.prevPremium && state.prevPremium.date === pools.date ? state.prevPremium : null;
   const emotion = calculateEmotionState({
     limitUpCount: upCount, limitDownCount: downCount, multiBoardCount, maxBoard, breakRate,
     firstBoardPromotionRate: promo.firstBoardRate, multiBoardPromotionRate: promo.multiBoardRate,
     previousMaxBoard: promo.prevMaxBoard, previousMultiBoardCount: promo.prevMultiBoardCount,
+    marketBreakRate,
+    firstBoardPremium: premium?.firstBoardPremium ?? null,
+    highBoardPremium: premium?.highBoardPremium ?? null,
   });
   const phase = emotion.phase;
-  const themes = buildThemeRanking(up);
+  const themes = buildThemeRanking(up, memo.prevStocks || []);
   const leaders = rankCoreLeaders(up, themes);
   const prevBoards = memo.prevBoards;
   up.forEach((s) => { s.buyType = buyTypeOf({ boards: s.boards, previousBoard: prevBoards[s.code] ?? null }); });
@@ -154,6 +168,7 @@ function computeDerived(pools) {
   };
   state.derivedSig = sig;
   state.derived = { lastPayload: state.lastPayload };
+  return true;
 }
 
 /* ---------------- 渲染：状态条 ---------------- */
@@ -343,7 +358,11 @@ async function loadGap(force = false) {
     if (mySeq !== gapSeq) return;
     state.gap = nextGap;
     state.gapDate = state.pools.date;
+    // G9：同一份开盘报价顺手算昨日涨停溢价（首板/高位两组均值）→ 情绪驾驶舱两指标
+    state.prevPremium = { ...yesterdayPremium(candidates, actualMap), date: state.pools.date };
     renderGap(state.gap);
+    // 溢价就绪 → 重算派生并刷新（签名含溢价指纹，此前已算过的会触发本轮重算；无递归：loadGap 同日缓存早退）
+    if (computeDerived(state.pools)) { renderStatus(); renderView(state.view); }
   } catch (e) { /* 静默：预期差属增强信息 */ }
 }
 
@@ -874,6 +893,8 @@ async function init() {
   // SW 注册放最前：弱网首访不至于等几十秒的网络超时后才装上
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   window.addEventListener('unhandledrejection', (e) => { console.warn('[mp] 未处理的 Promise 拒绝：', e.reason); });
+  const verEl = $('#aboutVersion');
+  if (verEl) verEl.textContent = APP_VERSION; // 设置页展示当前版本（与 SW CACHE 同源，发布自动递增）
   try {
     // 设置/快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
     const [theme, refreshMs, snap, hist, warm] = await Promise.all([

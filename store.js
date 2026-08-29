@@ -138,15 +138,6 @@ export async function delReview(date) {
 }
 
 /* ---------- 历史涨停池缓存（晋级率 / 模式监控 / 相似行情） ---------- */
-export async function getHistory(date) {
-  const db = await open();
-  return new Promise((res, rej) => {
-    const tx = db.transaction('history', 'readonly');
-    const r = tx.objectStore('history').get(date);
-    r.onsuccess = () => res(r.result ?? null);
-    r.onerror = () => rej(r.error);
-  });
-}
 export async function putHistory(item) {
   const db = await open();
   return new Promise((res, rej) => {

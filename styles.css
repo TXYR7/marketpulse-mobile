@@ -255,6 +255,7 @@ main {
 .rank-row .idx { width: 20px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .rank-row .nm { font-weight: 600; }
 .rank-row .cnt { margin-left: auto; color: var(--teal); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rank-row .chg { min-width: 38px; text-align: right; font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* 空状态 / 加载 */
 .empty { text-align: center; color: var(--muted); padding: 30px 14px; font-size: 13px; line-height: 1.7; }
@@ -524,6 +525,12 @@ main {
 .copilot-question.on { background: var(--fill-teal); color: #fff; border-color: var(--fill-teal); }
 .copilot-question:active { transform: scale(0.94); }
 .copilot-verdict { font-size: 14px; margin: 4px 0; }
+.copilot-input-row { display: flex; gap: 8px; margin: 8px 0; }
+.copilot-input-row input { flex: 1; min-width: 0; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 13px; font-family: inherit; }
+.copilot-input-row input::placeholder { color: var(--muted); }
+.copilot-input-row input:focus { outline: none; border-color: var(--teal); }
+.copilot-input-row .btn { flex: 0 0 auto; padding: 0 16px; height: 40px; }
+.all-empty { display: grid; min-height: 140px; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 0 12px; }
 .review-card .rv-head { display: flex; align-items: baseline; justify-content: space-between; }
 .review-card .rv-body { font-size: 12px; color: var(--muted); margin-top: 6px; white-space: pre-wrap; }
 .review-card .rv-body.note { color: var(--ink); font-size: 13px; }

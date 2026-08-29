@@ -1,11 +1,18 @@
 // data.js — 东方财富公开接口客户端封装（零后端，手机浏览器直连）
 // 复用 D:\codex\server.js 的接口参数与字段口径；改为手机端直连 + 前端计算。
 
+// B6:token 存取器——设置页可改且即时生效（免重启）。优先级：localStorage → MP_CONFIG → 内置默认。
+let emaToken = (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token'))
+  || (typeof window !== 'undefined' && window.MP_CONFIG && window.MP_CONFIG.emaToken)
+  || '7eea3edcaed734bea9cbfc24409ed989';
+export function setEmaToken(value) {
+  const v = String(value || '').trim();
+  emaToken = v
+    || (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token'))
+    || '7eea3edcaed734bea9cbfc24409ed989';
+}
 const EMA = {
-  // 东方财富公开 push2 token（非密钥）。可用 localStorage['mp_ema_token'] 或 window.MP_CONFIG.emaToken 覆盖。
-  token: (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token'))
-    || (typeof window !== 'undefined' && window.MP_CONFIG && window.MP_CONFIG.emaToken)
-    || '7eea3edcaed734bea9cbfc24409ed989',
+  get token() { return emaToken; },
   pool(kind, date) {
     const ep = kind === 'up' ? 'getTopicZTPool' : kind === 'down' ? 'getTopicDTPool' : 'getTopicZBPool';
     const sort = kind === 'down' ? 'fund:asc' : 'fbt:asc';
@@ -41,6 +48,14 @@ export function fmtTime(n) {
   if (n == null) return '--';
   const s = String(n).padStart(6, '0');
   return `${s.slice(0, 2)}:${s.slice(2, 4)}:${s.slice(4, 6)}`;
+}
+
+// B1:手动刷新是否需要重拉预期差报价。开盘价 09:25 集合竞价定型后同日缓存永有效；
+// 仅 09:30 前手动刷才作废（此前 gap 可能基于昨收/缺开盘价）；回看历史日(manualDate)数据不变，永不作废。
+export function shouldRefetchGap(now, manualDate) {
+  if (manualDate) return false;
+  const h = now.getHours();
+  return h < 9 || (h === 9 && now.getMinutes() < 30);
 }
 
 async function getJSON(url, tries = 3) {
@@ -243,13 +258,18 @@ export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sor
   return { total, page, pageSize, rows, market };
 }
 
-// 按名称/代码搜索（轻量；用于全市场搜索框）
-export async function searchStock(q) {
-  const url = `https://push2.eastmoney.com/api/qt/search/get?fltt=2&key=${encodeURIComponent(q)}&fields=f12,f13,f14&ut=${EMA.token}`;
-  const data = await getJSON(url);
-  return (data?.data?.diff || []).map((row) => ({
+// 按名称/代码搜索（轻量；用于全市场搜索框）。B5:f2/f3 现价与涨跌幅——停牌 '-' 转 null 优雅降级
+export function mapSearchRow(row) {
+  return {
     code: String(row.f12),
     market: row.f13,
     name: row.f14,
-  }));
+    price: Number.isFinite(Number(row.f2)) ? Number(row.f2) : null,
+    changePct: Number.isFinite(Number(row.f3)) ? Number(row.f3) : null,
+  };
+}
+export async function searchStock(q) {
+  const url = `https://push2.eastmoney.com/api/qt/search/get?fltt=2&key=${encodeURIComponent(q)}&fields=f12,f13,f14,f2,f3&ut=${EMA.token}`;
+  const data = await getJSON(url);
+  return (data?.data?.diff || []).map(mapSearchRow);
 }

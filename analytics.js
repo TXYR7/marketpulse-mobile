@@ -130,7 +130,13 @@ function leaderScore(stock, theme, themeRank) {
     breakdown.breaks = round(Math.max(0, 5 - finiteNumber(stock.breakCount) * 1.5));
     earned += breakdown.breaks;
   }
-  return { score: round(possible ? earned / possible * 100 : 0), confidence: Math.round(possible), breakdown, weights: { height: 35, theme: 20, position: 15, coordination: 5, turnover: 8, seal: 10, firstSeal: 7, breaks: 5 } };
+  const weights = { height: 35, theme: 20, position: 15, coordination: 5, turnover: 8, seal: 10, firstSeal: 7, breaks: 5 };
+  return {
+    score: round(possible ? earned / possible * 100 : 0),
+    confidence: Math.round(possible),
+    breakdown,
+    weights
+  };
 }
 
 function rankCoreLeaders(stocks = [], themes = []) {
@@ -222,10 +228,14 @@ function calculateRollingPromotion(snapshots, windowSize = 20) {
 }
 
 // 模式监控：按买点模式聚合近 windowFull 对交易日的晋级率，并对比近 windowRecent 对
+const MODE_BY_BOARD = { 1: '一进二', 2: '二进三', 3: '三进四' };
+
+function modeKey(board) {
+  return MODE_BY_BOARD[Number(board)] || '高位加速';
+}
+
 function aggregateModeRates(pairResults = [], windowRecent = 5) {
   const acc = new Map();
-  const MODE_BY_BOARD = { 1: '一进二', 2: '二进三', 3: '三进四' };
-  const modeKey = (board) => MODE_BY_BOARD[Number(board)] || '高位加速';
   pairResults.forEach((byBoard, index) => {
     const inRecent = pairResults.length - index <= windowRecent;
     for (const group of byBoard || []) {
@@ -241,7 +251,9 @@ function aggregateModeRates(pairResults = [], windowRecent = 5) {
   const modes = [...acc.values()].map((entry) => {
     const rateFull = ratioOf(entry.full);
     const rateRecent = ratioOf(entry.recent);
-    let trend = 'stable', alert = false, message = '';
+    let trend = 'stable';
+    let alert = false;
+    let message = '';
     if (entry.recent.denominator < 3) { trend = 'low_sample'; message = '近期样本不足'; }
     else if (rateRecent >= rateFull + 5) trend = 'improving';
     else if (rateRecent <= rateFull - 10 || rateRecent < 25) { trend = 'declining'; alert = true; message = `近期明显弱化（${rateRecent}% vs ${rateFull}%）`; }
@@ -279,7 +291,8 @@ function calculateEmotionState(input) {
   const firstBoardPremium = finiteNumber(input.firstBoardPremium);
   const highBoardPremium = finiteNumber(input.highBoardPremium);
   const availableCount = [limitUp, limitDown, multiBoard, maxBoard, breakRate, firstPromotion, multiPromotion, marketBreakRate, firstBoardPremium, highBoardPremium].filter((value) => value !== null).length;
-  const confidence = Math.round(availableCount / PARAM_MANIFEST.emotion.confidenceDenominator * 100);
+  const EMOTION_CONFIDENCE_DENOMINATOR = PARAM_MANIFEST.emotion.confidenceDenominator;
+  const confidence = Math.round(availableCount / EMOTION_CONFIDENCE_DENOMINATOR * 100);
   const indicators = [
     indicator('limitUp', '涨停家数', limitUp, limitUp >= 80 ? 'green' : limitUp >= 40 ? 'yellow' : 'red', limitUp !== null),
     indicator('limitDown', '跌停家数', limitDown, limitDown <= 10 ? 'green' : limitDown <= 20 ? 'yellow' : 'red', limitDown !== null),
@@ -304,7 +317,9 @@ function calculateEmotionState(input) {
   const heightCollapse = previousMax !== null && previousMulti !== null && previousMax - maxBoard >= 2 && multiBoard <= previousMulti * 0.7;
   const breakSurge = input.breakRate?.available && ((breakRate >= 30) || finiteNumber(input.breakRate.change) >= 10);
   const promotionWeak = multiPromotion !== null && multiPromotion < 30;
-  let phase, level, advice;
+  let phase;
+  let level;
+  let advice;
   const reasons = [];
 
   if ((limitUp <= 20 && maxBoard <= 2 && multiBoard <= 5) || (limitDown !== null && limitUp <= 30 && limitDown >= 15)) {
@@ -1400,6 +1415,25 @@ function contextNotes(ctx = {}) {
   return scored.slice(0, Math.max(1, Number(ctx.limit) || 3)).map((x) => x.note);
 }
 
+// D3:信号快照对比——两份 { byCode: { code: { tier, verdict } } } 之间的正向变化列表
+// （新入 S 级、tier 升级、verdict 观望/规避→可打），用于前台本地通知。prev 为 null 返回空(冷启动首刷不打扰)。
+function diffSignalSnapshot(prev, next) {
+  const changes = [];
+  if (!prev || !next) return changes;
+  const TIER_ORDER = { S: 3, A: 2, B: 1 };
+  for (const [code, cur] of Object.entries(next.byCode || {})) {
+    const old = prev.byCode?.[code];
+    const name = cur.name || code;
+    if (!old) {
+      if (cur.tier === 'S') changes.push(`${name} 新入 S 级`);
+      continue;
+    }
+    if (TIER_ORDER[cur.tier] > TIER_ORDER[old.tier]) changes.push(`${name} ${old.tier}→${cur.tier} 升级`);
+    if (old.verdict !== '可接力' && cur.verdict === '可接力') changes.push(`${name} 检查表转可接力`);
+  }
+  return changes;
+}
+
 export {
   finiteNumber, round, calculateBreakRate, summarizeTheme, groupThemes, buildThemeRanking,
   rankCoreLeaders, leaderScore, calculatePromotionStats, calculateRollingPromotion, buildModeMonitor, aggregateModeRates,
@@ -1407,5 +1441,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes
+  PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot
 };

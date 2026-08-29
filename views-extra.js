@@ -43,7 +43,7 @@ export function renderMarket(ctx) {
       const q = search.value.trim();
       if (q) {
         const rows = await searchStock(q);
-        ctx.state.allMarket = { rows: rows.map((r) => ({ ...r, price: null, changePct: null })), total: rows.length, page: 1, market: '' };
+        ctx.state.allMarket = { rows, total: rows.length, page: 1, market: '' }; // B5:搜索结果自带现价/涨跌幅
       } else {
         const market = mkt.value;
         const page = ctx.state.marketPage || 1;

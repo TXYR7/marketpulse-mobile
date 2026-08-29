@@ -196,12 +196,15 @@ main {
 .subtab button:active { transform: scale(0.94); }
 
 /* ===== 股票卡片 ===== */
-.list { display: flex; flex-direction: column; gap: 8px; content-visibility: auto; contain-intrinsic-size: auto 480px; }
+/* B2:content-visibility 下沉到卡片级——滚动容器(.list)永远部分在视口,声明在容器上无效;
+   卡片级才让视口外的单卡跳过渲染(300+ 卡长列表滚动帧率) */
+.list { display: flex; flex-direction: column; gap: 8px; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 10px 12px; display: flex; align-items: center; gap: 10px;
   box-shadow: var(--shadow-1);
   transition: transform 0.08s ease;
+  content-visibility: auto; contain-intrinsic-size: auto 74px;
 }
 .card:active { transform: scale(0.985); }
 .card .name { font-weight: 700; font-size: 15px; }
@@ -536,7 +539,7 @@ main {
 .review-card .rv-body.note { color: var(--ink); font-size: 13px; }
 
 /* 全市场 */
-.market-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 6px; }
+.market-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 6px; content-visibility: auto; contain-intrinsic-size: auto 54px; }
 .market-row .nm { font-weight: 700; font-size: 14px; }
 .market-row .code { color: var(--muted); font-size: 11px; }
 .market-row .right { margin-left: auto; text-align: right; }

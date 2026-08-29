@@ -6,9 +6,13 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
-  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery
+  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot
 } from '../analytics.js';
-import { shanghaiNow, todayStr, mergePools, sealQuality } from '../data.js';
+import {
+  shanghaiNow, todayStr, mergePools, sealQuality,
+  shouldRefetchGap, mapSearchRow, setEmaToken,
+  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache
+} from '../data.js';
 
 let pass = 0;
 function ok(name, cond) {
@@ -166,6 +170,48 @@ console.log('[B9] 整文件语法护栏（vm.SourceTextModule 只编译不执行
   }
   if (broken.length) console.error('  语法错误明细：\n    ' + broken.join('\n    '));
   ok('7 个运行时 JS 文件全部通过模块语法编译', broken.length === 0);
+}
+
+console.log('[B10] 批B/D3 优化项（gap 缓存策略 / K线缓存复用 / 搜索价格 / token / 信号通知）');
+{
+  const at = (h, m) => new Date(2026, 0, 1, h, m);
+  ok('B1 shouldRefetchGap：09:25 前 true / 09:31 后 false / 回看历史日 false',
+    shouldRefetchGap(at(9, 25), '') === true && shouldRefetchGap(at(9, 31), '') === false
+    && shouldRefetchGap(at(8, 0), '') === true && shouldRefetchGap(at(10, 0), '') === false
+    && shouldRefetchGap(at(9, 25), '20260101') === false);
+}
+{
+  const bars = Array.from({ length: 60 }, (_, i) => ({ date: '2026-01-' + String(i + 1).padStart(2, '0'), open: 1, close: 1 + i }));
+  storeKlineBars('600001', '20260829', bars);
+  const hit = cachedKlineBars('600001', '20260829');
+  ok('B3 K线缓存 roundtrip：store 后可命中', hit && hit.length === 60 && hit[59].close === 60);
+  ok('B3 dateKey 变更后 miss（隔日数据不串用）', cachedKlineBars('600001', '20260830') === null);
+  const exported = exportKlineCache();
+  const cap = Object.keys(exported || {}).length;
+  ok('B3 export/hydrate 往返', cap >= 1 && (() => { hydrateKlineCache(exported); return cachedKlineBars('600001', '20260829')?.length === 60; })());
+}
+{
+  const row = mapSearchRow({ f12: '600000', f13: 1, f14: '浦发银行', f2: 10.5, f3: 2.3 });
+  const halted = mapSearchRow({ f12: '600001', f13: 1, f14: '某股', f2: '-', f3: '-' });
+  ok('B5 mapSearchRow：正常值映射、停牌 - 转 null', row.price === 10.5 && row.changePct === 2.3 && halted.price === null && halted.changePct === null);
+}
+{
+  setEmaToken('test-token-xyz');
+  ok('B6 setEmaToken：覆盖后可恢复默认', setEmaToken('x') === undefined);
+  setEmaToken(''); // 清空 → 回落内置默认
+  ok('B6 清空 token 回落默认不炸', true);
+}
+{
+  const prev = { byCode: { '600001': { tier: 'A', verdict: '观望', name: '甲' }, '600002': { tier: 'B', verdict: '规避', name: '乙' } } };
+  const next = { byCode: {
+    '600001': { tier: 'S', verdict: '可接力', name: '甲' },
+    '600002': { tier: 'B', verdict: '规避', name: '乙' },
+    '600003': { tier: 'S', verdict: '观望', name: '丙' },
+  } };
+  const changes = diffSignalSnapshot(prev, next);
+  ok('D3 diffSignalSnapshot：升级+新入S+转可接力 三类正向变化', changes.length === 3
+    && changes.some((c) => c.includes('A→S')) && changes.some((c) => c.includes('新入 S 级')) && changes.some((c) => c.includes('可接力')));
+  ok('D3 无变化/prev为null 返回空', diffSignalSnapshot(prev, prev).length === 0 && diffSignalSnapshot(null, next).length === 0);
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

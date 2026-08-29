@@ -13,6 +13,9 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="icon" href="icons/icon-192.png" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://push2ex.eastmoney.com" />
+    <link rel="preconnect" href="https://push2.eastmoney.com" />
+    <link rel="preconnect" href="https://push2his.eastmoney.com" />
     <link rel="modulepreload" href="data.js" />
     <link rel="modulepreload" href="store.js" />
     <link rel="modulepreload" href="analytics.js" />
@@ -172,6 +175,14 @@
         <div class="set-row">
           <label for="setDate">行情日期 (YYYYMMDD)</label>
           <input id="setDate" type="number" inputmode="numeric" placeholder="留空=今日" />
+        </div>
+        <div class="set-row">
+          <label for="setToken">数据接口 Token</label>
+          <input id="setToken" type="text" autocomplete="off" placeholder="留空=内置默认" />
+        </div>
+        <div class="set-row">
+          <label for="setNotify">信号变化通知（前台运行时）</label>
+          <input id="setNotify" type="checkbox" style="flex:0 0 auto;width:20px;height:20px" />
         </div>
         <div class="set-row">
           <label>清空本地数据</label>

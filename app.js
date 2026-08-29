@@ -1,9 +1,9 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
-  buildExpectationGap, buildSignal, applyGate,
+  buildExpectationGap, buildSignal, applyGate, diffSignalSnapshot,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
@@ -21,6 +21,7 @@ const state = {
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
+  lastSignalSnapshot: null, notifySignals: false, // D3:信号变化通知
 };
 
 const $ = (s) => document.querySelector(s);
@@ -290,8 +291,10 @@ function patchDownCard(node, x) {
 function showOfflineEmpty(err) {
   // 冷启动拉不到数据且无任何池（含快照水合失败）：清掉骨架屏给显式离线态，替代无限 shimmer
   const msg = err && err.message ? String(err.message) : '网络不可用或接口暂不可达';
-  setHTML($('#ztList'), '<div class="empty">暂无行情数据<br /><span class="muted">' + esc(msg) + '</span><br />' +
-    '<button class="btn" id="retryBtn" style="flex:0 0 auto;margin:14px auto 0;padding:0 22px">↻ 重试</button></div>');
+  const tokenIssue = err && (err.status === 401 || err.status === 403); // getJSON 抛错带 .status
+  setHTML($('#ztList'), '<div class="empty">暂无行情数据<br /><span class="muted">' + esc(msg) + '</span>' +
+    (tokenIssue ? '<br /><span style="color:var(--orange,#e6a23c)">Token 可能失效：设置 → 数据接口 Token 更换后重试</span>' : '') +
+    '<br /><button class="btn" id="retryBtn" style="flex:0 0 auto;margin:14px auto 0;padding:0 22px">↻ 重试</button></div>');
   $('#ztList').__seq = '';
   $('#ztHint').textContent = '--';
 }
@@ -521,8 +524,15 @@ function closeSheet() { $('#scrim').classList.remove('show'); $('#sheet').classL
 async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');
   if (!el) return;
-  let bars;
-  try { bars = await fetchKlineLite(code, 60); } catch (e) { bars = null; }
+  // B3:先查 K 线缓存（enrichPromo 只存 8 根，不够滑窗须重拉）；拉到 60 根后入缓存——
+  // 同一只票二次开抽屉秒出相似案例，且当日 enrichPromo 的 missing 直接消失
+  const dateKey = state.pools?.date || todayStr();
+  let bars = cachedKlineBars(code, dateKey);
+  if (bars && bars.length < 26) bars = null;
+  if (!bars) {
+    try { bars = await fetchKlineLite(code, 60); } catch (e) { bars = null; }
+    if (bars && bars.length) storeKlineBars(code, dateKey, bars);
+  }
   if (!bars || bars.length < 26) { el.innerHTML = '<div class="muted">暂无足够历史日K，无法匹配相似形态</div>'; return; }
   const r = stockSimilarCases(bars, { window: 20, horizon: 5, limit: 3 });
   if (!r.available || !r.similar.length) { el.innerHTML = '<div class="muted">暂未匹配到相似历史形态</div>'; return; }
@@ -571,7 +581,8 @@ let refreshing = false;
 async function refresh(force = false) {
   if (refreshing) return;
   refreshing = true;
-  if (force) state.gapDate = null; // 手动刷新才重新拉预期差
+  // B1:手动刷新不再无条件作废预期差缓存(省 1-5 个报价请求)——09:30 后开盘价已定型
+  if (force && shouldRefetchGap(shanghaiNow(), state.manualDate)) state.gapDate = null;
   $('#refreshBtn').classList.add('spin');
   try {
     const date = state.manualDate || todayStr();
@@ -587,7 +598,7 @@ async function refresh(force = false) {
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});
-    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(persistWarmCache).catch(() => {});
+    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); notifySignalChanges(); }).catch(() => {});
   } catch (e) {
     state.lastErrorAt = Date.now();
     renderStatus();
@@ -598,6 +609,27 @@ async function refresh(force = false) {
 }
 function persistLastGood(pools) {
   setKV('lastGood', { date: pools.date, pools, savedAt: Date.now() }).catch(() => {});
+}
+
+// D3:信号变化本地通知（前台运行时;零后端约束下 PeriodicSync/Web Push 均不可行,这是唯一务实方案）
+function buildSignalSnapshot() {
+  const byCode = {};
+  for (const s of (state.pools?.up || [])) {
+    if (!s.tier && !s.promo?.verdict) continue;
+    byCode[s.code] = { tier: s.tier || null, verdict: s.promo?.verdict || null, name: s.name || s.code };
+  }
+  return { byCode };
+}
+async function notifySignalChanges() {
+  try {
+    const next = buildSignalSnapshot();
+    const changes = diffSignalSnapshot(state.lastSignalSnapshot, next);
+    state.lastSignalSnapshot = next; // 冷启动首刷 prev=null → changes 空，不打扰
+    if (!changes.length) return;
+    if (!state.notifySignals || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification('MarketPulse 信号变化', { body: changes.slice(0, 3).join('；') + (changes.length > 3 ? ` 等 ${changes.length} 项` : ''), tag: 'mp-signals' });
+  } catch { /* 通知失败静默 */ }
 }
 // M1 预热持久化：把当日 K线 + 竞价缓存写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热
 let warmPersistTimer = null;
@@ -661,7 +693,8 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
       let feats = {};
       if (tierCodes.has(s.code)) {
         const bars = cachedKlineBars(s.code, pools.date);
-        if (bars && bars.length >= 2) feats = klineFeatures(bars);
+        // B3:缓存可能是抽屉拉的 60 根(数据超集)，统一取尾部 8 根喂特征
+        if (bars && bars.length >= 2) feats = klineFeatures(bars.slice(-8));
         else if (!bars) missing.push(s.code);
       }
       s.promo = assessPromotion(s, {
@@ -695,7 +728,7 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
       for (const code of tierCodes) {
         const s = byCode[code]; if (!s) continue;
         const bars = cachedKlineBars(code, pools.date);
-        const feats = bars && bars.length >= 2 ? klineFeatures(bars) : {};
+        const feats = bars && bars.length >= 2 ? klineFeatures(bars.slice(-8)) : {}; // B3:同上,尾部 8 根统一口径
         s.promo = assessPromotion(s, {
           ...promoContextOf(s, pools),
           volChg: feats.volChg1d ?? null,
@@ -862,6 +895,30 @@ function bind() {
   $('#setTheme').addEventListener('change', (e) => { state.theme = e.target.value; document.documentElement.setAttribute('data-theme', state.theme); applyThemeMeta(); setKV('theme', state.theme); });
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
   $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });
+  // B6:接口 token 设置——手机 PWA 无控制台，这是 token 失效时的救命通道（改后即时生效，免重启）
+  const tokenInput = $('#setToken');
+  if (tokenInput) {
+    tokenInput.value = (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token')) || '';
+    tokenInput.addEventListener('change', (e) => {
+      const v = e.target.value.trim();
+      if (v) localStorage.setItem('mp_ema_token', v); else localStorage.removeItem('mp_ema_token');
+      setEmaToken(v);
+      toast(v ? 'Token 已保存并即时生效' : '已恢复默认 Token');
+    });
+  }
+  // D3:信号变化通知开关（前台本地通知；权限请求绑在打开开关的手势上——浏览器策略要求用户手势）
+  const notifyToggle = $('#setNotify');
+  if (notifyToggle) {
+    notifyToggle.checked = Boolean(state.notifySignals);
+    notifyToggle.addEventListener('change', async (e) => {
+      state.notifySignals = e.target.checked;
+      setKV('notifySignals', e.target.checked);
+      if (e.target.checked && 'Notification' in window && Notification.permission === 'default') {
+        try { await Notification.requestPermission(); } catch { /* 拒绝则静默不通知 */ }
+      }
+      toast(e.target.checked ? '信号通知已开启' : '信号通知已关闭');
+    });
+  }
   $('#clearBtn').addEventListener('click', async () => {
     await clearWatch(); // 单事务清空
     state.watch = []; renderWatch(); toast('已清空自选');
@@ -897,17 +954,19 @@ async function init() {
   if (verEl) verEl.textContent = APP_VERSION; // 设置页展示当前版本（与 SW CACHE 同源，发布自动递增）
   try {
     // 设置/快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
-    const [theme, refreshMs, snap, hist, warm] = await Promise.all([
+    const [theme, refreshMs, snap, hist, warm, notifySignals] = await Promise.all([
       getKV('theme', 'dark'),
       getKV('refreshMs', 15000),
       getKV('lastGood', null).catch(() => null),
       getAllHistory().catch(() => []),
       getKV('warmCache', null).catch(() => null),
+      getKV('notifySignals', false).catch(() => false),
     ]);
     if (warm && warm.kline) hydrateKlineCache(warm.kline); // 当日 K线命中 → enrichPromo 免重抓
     if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
     state.theme = theme || 'dark';
     state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
+    state.notifySignals = Boolean(notifySignals); // D3:信号变化通知开关（默认关）
     document.documentElement.setAttribute('data-theme', state.theme);
     applyThemeMeta();
     $('#setTheme').value = state.theme;

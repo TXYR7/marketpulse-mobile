@@ -164,7 +164,7 @@ export function renderLadder(ctx) {
       histHtml = '<div class="muted">历史样本不足（需 ≥2 个交易日）。点「补录历史」拉取近 30 交易日涨停池。</div>';
     }
   } else {
-    histHtml = '<div class="muted">尚未缓存历史涨停池。点下方按钮拉取近 30 个交易日（手机直连东方财富，按交易日去重，约需一分钟）。</div>';
+    histHtml = '<div class="muted">尚未缓存历史涨停池。点下方按钮拉取近 30 个交易日（手机直连东方财富，按交易日去重，约需半分钟）。</div>';
   }
 
   const html =

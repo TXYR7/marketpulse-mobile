@@ -58,24 +58,35 @@ export function shouldRefetchGap(now, manualDate) {
   return h < 9 || (h === 9 && now.getMinutes() < 30);
 }
 
-async function getJSON(url, tries = 3) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fetch(url, {
-        headers: { accept: 'application/json,text/plain,*/*' },
-        signal: AbortSignal.timeout(9000),
-      });
-      if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
-      return res.json();
-    } catch (e) {
-      lastErr = e;
-      // 4xx（除 429 限流）重试无意义，直接失败；网络/超时/5xx 用带抖动的退避重试
-      if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1) + Math.floor(Math.random() * 250)));
+// 在途请求共享：同 URL 并发请求只外呼一次（首刷期间切视图/开抽屉时，loadGap/fetchOpenPct/
+// loadWatch/openSheet 的批量报价不再重复打同一接口）；settle 即出表，不缓存结果，不会吃到陈旧数据。
+const inflightGetJSON = new Map();
+async function getJSON(url, tries = 3, timeoutMs = 9000) {
+  const existing = inflightGetJSON.get(url);
+  if (existing) return existing;
+  const promise = (async () => {
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      try {
+        const res = await fetch(url, {
+          headers: { accept: 'application/json,text/plain,*/*' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+        return res.json();
+      } catch (e) {
+        lastErr = e;
+        // 4xx（除 429 限流）重试无意义，直接失败；网络/超时/5xx 用带抖动的退避重试
+        if (e.status && e.status >= 400 && e.status < 500 && e.status !== 429) break;
+        if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1) + Math.floor(Math.random() * 250)));
+      }
     }
-  }
-  throw lastErr;
+    throw lastErr;
+  })();
+  inflightGetJSON.set(url, promise);
+  const release = () => inflightGetJSON.delete(url);
+  promise.then(release, release);
+  return promise;
 }
 
 // 封单质量：与桌面 server.js:sealQuality 保持同步（平行副本同步义务），供评分引擎读取 sealStars。
@@ -159,11 +170,15 @@ export function mergePools(date, settled) {
   };
 }
 
-export async function fetchPools(date) {
+// opts.tries / opts.timeoutMs 供调用方按场景调节：冷启动（无任何本地数据可先渲染）用
+// fail-fast 配置快速给出离线态，热刷新（SWR 有旧数据垫底）保持完整重试韧性。
+export async function fetchPools(date, opts = {}) {
+  const tries = opts.tries ?? 3;
+  const timeoutMs = opts.timeoutMs ?? 9000;
   const settled = await Promise.allSettled([
-    getJSON(EMA.pool('up', date)),
-    getJSON(EMA.pool('down', date)),
-    getJSON(EMA.pool('broken', date)),
+    getJSON(EMA.pool('up', date), tries, timeoutMs),
+    getJSON(EMA.pool('down', date), tries, timeoutMs),
+    getJSON(EMA.pool('broken', date), tries, timeoutMs),
   ]);
   return mergePools(date, settled);
 }

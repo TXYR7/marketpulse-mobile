@@ -587,7 +587,9 @@ async function refresh(force = false) {
   try {
     const date = state.manualDate || todayStr();
     if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
-    const pools = await fetchPools(date);
+    // 冷启动（无本地数据垫底）用 fail-fast 配置：挂起/离线时最坏 ~13s 落到离线态（此前 3×9s≈28s）；
+    // 热刷新保持完整重试韧性（有 SWR 旧数据在屏，慢点无妨）
+    const pools = await fetchPools(date, state.pools ? {} : { tries: 2, timeoutMs: 6000 });
     state.fromSnapshot = false;
     state.lastSuccessAt = Date.now();
     persistLastGood(pools); // 先落原始池（未挂派生字段，体积小），失败静默
@@ -607,9 +609,28 @@ async function refresh(force = false) {
   }
   finally { $('#refreshBtn').classList.remove('spin'); refreshing = false; }
 }
-function persistLastGood(pools) {
-  setKV('lastGood', { date: pools.date, pools, savedAt: Date.now() }).catch(() => {});
+// lastGood 落盘节流：此前每 15s tick 全量直写 IDB（整池结构克隆+写盘，低端机可感知卡顿）；
+// 收敛为至多 30s 一次，隐藏/关闭时立即冲刷，离线快照最多旧 30s（冷启动 SWR 完全可接受）。
+const LAST_GOOD_MIN_INTERVAL = 30_000;
+let lastGoodLastWrite = 0;
+let lastGoodTimer = null;
+let lastGoodPending = null;
+function flushLastGood() {
+  if (lastGoodTimer) { clearTimeout(lastGoodTimer); lastGoodTimer = null; }
+  if (!lastGoodPending) return;
+  const payload = lastGoodPending;
+  lastGoodPending = null;
+  lastGoodLastWrite = Date.now();
+  setKV('lastGood', payload).catch(() => {});
 }
+function persistLastGood(pools) {
+  lastGoodPending = { date: pools.date, pools, savedAt: Date.now() };
+  const wait = lastGoodLastWrite + LAST_GOOD_MIN_INTERVAL - Date.now();
+  if (wait <= 0) return flushLastGood();
+  if (!lastGoodTimer) lastGoodTimer = setTimeout(flushLastGood, wait);
+}
+document.addEventListener('pagehide', flushLastGood);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushLastGood(); });
 
 // D3:信号变化本地通知（前台运行时;零后端约束下 PeriodicSync/Web Push 均不可行,这是唯一务实方案）
 function buildSignalSnapshot() {
@@ -800,29 +821,39 @@ async function loadHistory() {
     const dates = tradingDatesBack(45);
     let count = map.size;
     let failRun = 0;
-    for (const dt of dates) {
-      if (map.has(dt) || emptySet.has(dt)) continue;
-      let p;
-      try {
-        p = await fetchPools(dt);
-        failRun = 0;
-      } catch (e) {
-        // 失败退避后继续；连续 3 天失败视为接口异常，中止本轮
-        failRun += 1;
+    // 历史日期彼此独立——按 3 并发分块补录（此前逐日串行 + sleep，30 交易日约一分钟，现约 1/3 时长）；
+    // 失败语义保持：整块全失败连续累计 3 次即中止，部分失败退避后继续
+    const CONC = 3;
+    let aborted = false;
+    for (let start = 0; start < dates.length && !aborted; start += CONC) {
+      const batch = dates.slice(start, start + CONC).filter((dt) => !map.has(dt) && !emptySet.has(dt));
+      if (!batch.length) continue;
+      const results = await Promise.allSettled(batch.map((dt) => fetchPools(dt)));
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures === batch.length) {
+        failRun += failures;
         if (failRun >= 3) { toast('历史补录中止：接口连续失败'); break; }
-        await sleep(800 * failRun + Math.floor(Math.random() * 300));
+        await sleep(800 * failures + Math.floor(Math.random() * 300));
         continue;
       }
-      if (p.upCount > 0) {
-        // breaks/turnoverRate 供弱转强判定的「昨日烂板」维度（旧记录缺字段时评估器诚实标 na）
-        const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
-        await putHistory(rec); map.set(dt, rec); count += 1;
-      } else {
-        // 空池（节假日/无数据）也记档，之后不再重复拉同一天
-        emptySet.add(dt);
+      failRun = 0;
+      if (failures) await sleep(800 * failures + Math.floor(Math.random() * 300));
+      for (let i = 0; i < batch.length && !aborted; i++) {
+        const r = results[i];
+        if (r.status !== 'fulfilled') continue;
+        const dt = batch[i];
+        const p = r.value;
+        if (p.upCount > 0) {
+          // breaks/turnoverRate 供弱转强判定的「昨日烂板」维度（旧记录缺字段时评估器诚实标 na）
+          const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
+          await putHistory(rec); map.set(dt, rec); count += 1;
+        } else {
+          // 空池（节假日/无数据）也记档，之后不再重复拉同一天
+          emptySet.add(dt);
+        }
+        if (count >= 30) aborted = true;
       }
-      if (count >= 30) break;
-      await sleep(150);
+      if (!aborted) await sleep(150);
     }
     if (emptySet.size !== emptyDates.length || [...emptySet].some((d2) => !emptyDates.includes(d2))) {
       setKV('emptyDates', [...emptySet].slice(-200)).catch(() => {});

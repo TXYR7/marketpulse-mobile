@@ -11,7 +11,7 @@ import {
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
   shouldRefetchGap, mapSearchRow, setEmaToken,
-  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache
+  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools
 } from '../data.js';
 
 let pass = 0;
@@ -212,6 +212,35 @@ console.log('[B10] 批B/D3 优化项（gap 缓存策略 / K线缓存复用 / 搜
   ok('D3 diffSignalSnapshot：升级+新入S+转可接力 三类正向变化', changes.length === 3
     && changes.some((c) => c.includes('A→S')) && changes.some((c) => c.includes('新入 S 级')) && changes.some((c) => c.includes('可接力')));
   ok('D3 无变化/prev为null 返回空', diffSignalSnapshot(prev, prev).length === 0 && diffSignalSnapshot(null, next).length === 0);
+}
+
+console.log('[B11] 响应速度批：getJSON 在途去重 / fetchPools fail-fast 透传');
+{
+  const realFetch = globalThis.fetch;
+  let calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); return { ok: true, json: async () => ({ data: { pool: [], tc: 0 } }) }; };
+  try {
+    const [a, b] = await Promise.all([fetchPools('20260101'), fetchPools('20260101')]);
+    ok('并发两次同日期三池 → 在途去重只外呼 3 次（非 6 次）', calls.length === 3);
+    ok('两次调用均正常返回（共享同一在途结果）', a.upCount === 0 && b.upCount === 0 && a.partial === false && b.partial === false);
+    calls = [];
+    await fetchPools('20260101');
+    await fetchPools('20260101');
+    ok('串行两次 → 各自外呼（settle 即出表，不缓存结果不返陈旧数据）', calls.length === 6);
+    let aborts = 0;
+    globalThis.fetch = (url, opts) => new Promise((resolve, reject) => {
+      if (opts?.signal) opts.signal.addEventListener('abort', () => { aborts += 1; reject(new Error('aborted')); });
+    });
+    const t0 = Date.now();
+    let threw = false;
+    // Node 的 AbortSignal.timeout 内部 timer 为 unref（不保活事件循环），挂一个 ref timer 才等得到超时
+    const keepAlive = setTimeout(() => {}, 500);
+    try { await fetchPools('20260102', { tries: 1, timeoutMs: 30 }); } catch (e) { threw = true; }
+    clearTimeout(keepAlive);
+    ok('fail-fast 透传：挂起请求按超时中止、tries=1 不重试、三池全败抛错', threw && aborts === 3 && Date.now() - t0 < 2000);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

@@ -1,31 +1,31 @@
-/* styles.css — MarketPulse 手机版（移动优先 · THS 深色终端唯一主题）
-   原则：深蓝黑底+THS 蓝强调（与桌面端同一套 token 值）；动画只动 transform/opacity；数字全局 tabular-nums
-   浅色主题与 data-theme 切换机制已移除（2026-08 THS 终端化） */
+/* styles.css — MarketPulse 手机版（移动优先 · 经典同花顺电脑版浅色唯一主题）
+   原则：经典蓝顶栏+白底内容（与桌面端同一套 token 值）；动画只动 transform/opacity；数字全局 tabular-nums
+   深色主题与 data-theme 切换机制已移除（2026-08 经典浅色化） */
 :root {
-  color-scheme: dark;
-  --bg: #0c1017;
-  --surface: #131a26;
-  --surface-2: #1a2333;
-  --surface-raised: #212c40;
-  --line: #232d42;
-  --line-soft: #1b2336;
-  --ink: #dde5f2;
-  --muted: #8a94ab;
-  --teal: #3d7eff;
-  --teal-strong: #5c94ff;
-  --teal-soft: rgba(61, 126, 255, 0.16);
+  color-scheme: light;
+  --bg: #eef1f6;
+  --surface: #ffffff;
+  --surface-2: #f2f5fa;
+  --surface-raised: #f7f9fd;
+  --line: #d9dfe8;
+  --line-soft: #e6ebf3;
+  --ink: #1c2430;
+  --muted: #5b6b84;
+  --teal: #1c5ed8;
+  --teal-strong: #16459c;
+  --teal-soft: rgba(28, 94, 216, 0.10);
   /* 填充态专用深蓝/深红：保证白字 ≥4.5:1（普通 --teal/--red 只用于文字与浅底） */
-  --fill-teal: #2f6ae0;
-  --fill-red: #d63c3c;
-  --red: #ff5252;
-  --green: #26c281;
-  --amber: #f5a623;
-  --up-tint: rgba(255, 82, 82, 0.13);
-  --down-tint: rgba(38, 194, 126, 0.12);
-  --amber-tint: rgba(245, 166, 35, 0.14);
-  --danger-tint: rgba(255, 82, 82, 0.16);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-2: 0 8px 22px rgba(3, 8, 18, 0.55);
+  --fill-teal: #1c52c9;
+  --fill-red: #c9302c;
+  --red: #d32027;
+  --green: #007a3e;
+  --amber: #a16207;
+  --up-tint: rgba(211, 32, 39, 0.10);
+  --down-tint: rgba(0, 122, 62, 0.10);
+  --amber-tint: rgba(161, 98, 7, 0.10);
+  --danger-tint: rgba(201, 48, 44, 0.10);
+  --shadow-1: 0 1px 2px rgba(23, 43, 82, 0.10);
+  --shadow-2: 0 8px 22px rgba(23, 43, 82, 0.18);
   --r-s: 4px; --r-m: 6px; --r-l: 8px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --safe-t: env(safe-area-inset-top, 0px);
@@ -48,33 +48,36 @@ body {
 button { font-family: inherit; cursor: pointer; }
 .hide { display: none !important; }
 
-/* ===== 顶部状态条 ===== */
+/* ===== 顶部状态条（经典 THS 蓝带 + 白行情条） ===== */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  padding: calc(var(--safe-t) + 8px) 12px 8px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-  box-shadow: var(--shadow-1);
+  padding: calc(var(--safe-t) + 8px) 0 0;
+  background: linear-gradient(135deg, #1a4a9c, #2e6bd0);
+  border-bottom: 1px solid #16408c;
 }
-.topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; letter-spacing: 0.3px; }
+.topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; }
+.topbar .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; letter-spacing: 0.3px; color: #fff; }
 .brand .dot {
   width: 10px; height: 10px; border-radius: 3px; display: inline-block;
-  background: linear-gradient(135deg, var(--teal), var(--teal-strong));
-  box-shadow: 0 0 8px var(--teal-soft);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
 }
-.date { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.refresh-btn {
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+.topbar .date { color: rgba(255, 255, 255, 0.78); font-size: 12px; font-variant-numeric: tabular-nums; }
+.topbar .phase-badge {
+  background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.30);
+}
+.topbar .refresh-btn {
+  border: 1px solid rgba(255, 255, 255, 0.30); background: rgba(255, 255, 255, 0.14); color: #fff;
   border-radius: var(--r-s); width: 44px; height: 38px; font-size: 17px;
   transition: transform 0.1s ease;
 }
-.refresh-btn:active { transform: scale(0.92); }
+.topbar .refresh-btn:active { transform: scale(0.92); }
 .refresh-btn.spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .status-strip {
-  display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; padding-bottom: 2px;
+  display: flex; gap: 6px; margin: 8px -12px 0; padding: 0 12px 8px;
+  background: var(--surface); overflow-x: auto;
   scrollbar-width: none;
 }
 .status-strip::-webkit-scrollbar { display: none; }
@@ -104,13 +107,13 @@ button { font-family: inherit; cursor: pointer; }
 
 /* 汉堡菜单 / 侧滑面板 */
 .hamburger {
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.30); background: rgba(255, 255, 255, 0.14); color: #fff;
   border-radius: var(--r-s); width: 42px; height: 36px; font-size: 17px; margin-right: 8px;
   transition: transform 0.1s ease;
 }
 .hamburger:active { transform: scale(0.92); }
 .menu-scrim {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
 }
 .menu-scrim.show { opacity: 1; pointer-events: auto; }
 .menu-panel {
@@ -222,7 +225,7 @@ main {
 .bar-row .lab { width: 46px; color: var(--muted); font-size: 12px; flex: 0 0 auto; }
 .bar-track {
   flex: 1; height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18);
+  box-shadow: inset 0 1px 2px rgba(23, 43, 82, 0.10);
 }
 .bar-fill {
   height: 100%; width: 100%; background: linear-gradient(90deg, var(--teal), var(--teal-strong)); border-radius: 6px;
@@ -251,7 +254,7 @@ main {
 .sk { display: block; height: 12px; border-radius: 6px; background: var(--surface-2); position: relative; overflow: hidden; }
 .sk::after {
   content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+  background: linear-gradient(90deg, transparent, rgba(23, 43, 82, 0.06), transparent);
   animation: shimmer 1.3s infinite;
 }
 @keyframes shimmer { to { transform: translateX(100%); } }
@@ -280,7 +283,7 @@ main {
 
 /* ===== 详情底部抽屉 ===== */
 .scrim {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40; opacity: 0;
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 40; opacity: 0;
   pointer-events: none; transition: opacity 0.2s ease;
 }
 .scrim.show { opacity: 1; pointer-events: auto; }
@@ -336,7 +339,7 @@ main {
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--nav-h) + var(--safe-b) + 16px);
   transform: translateX(-50%) translateY(20px); z-index: 50;
-  background: rgba(0,0,0,0.85); color: #fff; padding: 9px 16px; border-radius: var(--r-m);
+  background: rgba(17, 27, 46, 0.92); color: #fff; padding: 9px 16px; border-radius: var(--r-m);
   font-size: 13px; opacity: 0; transition: all 0.25s var(--ease-out); pointer-events: none; max-width: 86vw; text-align: center;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -354,7 +357,6 @@ main {
 .emo-top { display: flex; align-items: center; gap: 14px; }
 .emo-index {
   font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 22px currentColor;
 }
 .emo-index.green { color: var(--green); }
 .emo-index.yellow { color: var(--amber); }
@@ -384,7 +386,7 @@ main {
   border-radius: 7px; font-weight: 800; font-size: 12px; flex: 0 0 auto;
 }
 .tier-badge.S { background: var(--fill-red); color: #fff; }
-.tier-badge.A { background: var(--amber); color: #14161c; }
+.tier-badge.A { background: var(--amber); color: #fff; }
 .tier-badge.B { background: var(--fill-teal); color: #fff; }
 .tier-badge.淘汰 { background: var(--surface-2); color: var(--muted); }
 .signal-tag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-s); flex: 0 0 auto; }

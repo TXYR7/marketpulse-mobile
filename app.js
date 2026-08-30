@@ -1022,7 +1022,7 @@ function setupPTR() {
   let startY = null;
   main.addEventListener('touchstart', (e) => { if (main.scrollTop <= 0) startY = e.touches[0].clientY; }, { passive: true });
   main.addEventListener('touchmove', (e) => {
-    if (startY == null) return;
+    if (startY == null || main.scrollTop > 0) return; // 双保险:手势中途已滚离顶部则不触发(守卫在 main 成为滚动容器后真实生效)
     if (e.touches[0].clientY - startY > 60) $('#ptr').classList.add('show');
   }, { passive: true });
   main.addEventListener('touchend', () => {

@@ -29,15 +29,19 @@
   --r-s: 4px; --r-m: 6px; --r-l: 8px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --safe-t: env(safe-area-inset-top, 0px);
-  --safe-b: env(safe-area-inset-bottom, 0px);
+  /* Android Chrome(standalone PWA 手势导航)下 env() 常报 0,12px 下限兜底:
+     底部导航文字/抽屉按钮不再贴着手势条(误触发上滑回家/返回) */
+  --safe-b: max(env(safe-area-inset-bottom, 0px), 12px);
   --nav-h: 56px;
-  --top-h: 104px;
   --fs: 14px;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; height: 100%; }
 body {
+  height: 100dvh; /* 键盘弹出时收矮;不支持 dvh 的老浏览器忽略本行回落 100% */
+  display: flex; flex-direction: column;
+  overflow: hidden; /* App 壳:文档级永不滚动,顶栏/底栏钉死,只有 main 滚(治「一动整页跟着动」) */
   background: var(--bg);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -50,7 +54,8 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ===== 顶部状态条（经典 THS 蓝带 + 白行情条） ===== */
 .topbar {
-  position: sticky; top: 0; z-index: 20;
+  position: static; z-index: 20; /* App 壳内钉死(原 sticky 依赖文档滚动,已废) */
+  flex: none;
   padding: calc(var(--safe-t) + 8px) 0 0;
   background: linear-gradient(135deg, #1a4a9c, #2e6bd0);
   border-bottom: 1px solid #16408c;
@@ -120,7 +125,7 @@ button { font-family: inherit; cursor: pointer; }
   position: fixed; top: 0; left: 0; bottom: 0; width: 74%; max-width: 320px; z-index: 36;
   background: var(--surface); box-shadow: var(--shadow-2);
   padding: calc(var(--safe-t) + 14px) 14px 20px;
-  transform: translateX(-100%); transition: transform 0.24s var(--ease-out); overflow-y: auto;
+  transform: translateX(-100%); transition: transform 0.24s var(--ease-out); overflow-y: auto; overscroll-behavior: contain;
 }
 .menu-panel.show { transform: translateX(0); }
 .menu-panel h3 { font-size: 11px; color: var(--muted); margin: 18px 4px 6px; letter-spacing: 2px; }
@@ -138,8 +143,12 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ===== 主区域 ===== */
 main {
+  flex: 1 1 auto;
+  min-height: 0; /* 关键:flex 子项默认 min-height:auto 会撑爆壳,必须 0 才能让 overflow-y 生效 */
+  overflow-y: auto;
+  overscroll-behavior-y: contain; /* 新滚动容器承接原 body 的防链/禁原生下拉语义 */
+  -webkit-overflow-scrolling: touch;
   padding: 10px 10px calc(var(--nav-h) + var(--safe-b) + 14px);
-  min-height: calc(100vh - var(--top-h) - var(--nav-h));
 }
 .view { display: none; }
 .view.active { display: block; animation: viewin 0.18s var(--ease-out); }
@@ -297,7 +306,7 @@ main {
   background: var(--surface); border-top-left-radius: var(--r-l); border-top-right-radius: var(--r-l);
   box-shadow: var(--shadow-2);
   padding: 8px 16px calc(20px + var(--safe-b)); transform: translateY(100%);
-  transition: transform 0.28s var(--ease-out); max-height: 82vh; overflow-y: auto;
+  transition: transform 0.28s var(--ease-out); max-height: 82vh; overflow-y: auto; overscroll-behavior: contain;
 }
 .sheet.show { transform: translateY(0); }
 .sheet .grip { width: 48px; height: 5px; background: var(--line); border-radius: 999px; margin: 6px auto 10px; }
@@ -335,8 +344,9 @@ main {
 .set-row input:focus { border-color: var(--teal); outline: none; }
 .about { color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 14px; }
 
-/* 下拉刷新 */
+/* 下拉刷新(壳内 flex 条目:展开时 main 视口收窄 40px,内容视觉下移与旧行为一致) */
 .ptr {
+  flex: none;
   text-align: center; color: var(--teal); font-size: 12px; height: 0; overflow: hidden;
   transition: height 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 6px;
 }

@@ -21,6 +21,7 @@ const state = {
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
+  sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
   lastSignalSnapshot: null, notifySignals: false, // D3:信号变化通知
 };
 
@@ -431,31 +432,43 @@ async function loadWatch() {
   const fresh = Date.now() - state.quotesAt < Math.min(state.refreshMs || 15000, 15000);
   if (needQuote.length && !fresh) {
     const q = await fetchQuotes(needQuote).catch(() => ({}));
-    if (Object.keys(q).length) { state.quotes = Object.assign({}, state.quotes, q); state.quotesAt = Date.now(); }
+    if (Object.keys(q).length) { mergeQuotes(q); state.quotesAt = Date.now(); }
   }
   renderWatch();
 }
 
 /* ---------------- 详情抽屉 ---------------- */
+// 报价新鲜度按只计时（mergeQuotes 盖章 t；无 t 的旧条目回退全局 quotesAt）。
+// 报价来源：fetchOpenPct 每日首刷回流全池、openSheet 后台补价成功后入缓存 → 周期内重开抽屉零网络。
+// 池内股即使报价过期，抽屉也先用池价（15s 刷新本身即新鲜）立即弹出，报价只补主力/超大单维度。
+function freshQuote(code) {
+  const q = state.quotes[code];
+  if (!q) return null;
+  const ttl = Math.min(state.refreshMs || 15000, 15000);
+  return Date.now() - (q.t ?? state.quotesAt ?? 0) < ttl ? q : null;
+}
+function mergeQuotes(q) {
+  for (const [c, x] of Object.entries(q || {})) {
+    if (x && x.price != null) state.quotes[c] = Object.assign({}, x, { t: Date.now() });
+  }
+}
 async function openSheet(code) {
   const scrim = $('#scrim'), sheet = $('#sheet');
   let stock = null;
   if (state.pools) stock = state.pools.up.find((x) => x.code === code) || state.pools.down.find((x) => x.code === code) || state.pools.broken.find((x) => x.code === code);
   if (!stock) { const w = state.watch.find((x) => x.code === code); if (w) stock = { code, name: w.name || code, boards: 1, industry: '—', changePct: null, price: null }; }
   if (!stock) return;
-  // 已有新鲜报价直接用（点开/自选切换不再每次一个往返），过期才拉
-  let d = (Date.now() - state.quotesAt < 10000 && state.quotes[code]) || null;
-  if (!d) {
-    const q = await fetchQuotes([code]).catch(() => ({}));
-    d = q[code] || {};
-    if (d.price != null) state.quotes[code] = d; // 缓存供下次秒开（不动 quotesAt，避免拉长全局 TTL）
-  }
+  state.sheetCode = code;
+  // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
+  //（旧版渲染前 await 报价，弱网下最坏 3×9s 抽屉不出现，体感「点了没反应」）
+  let d = freshQuote(code) || {};
+  if (d.price == null && stock.price == null && state.quotes[code]) d = state.quotes[code]; // 池外自选股：回退最近缓存报价展示，后台再刷
   const isWatch = state.watch.some((w) => w.code === code);
   const pct = d.price != null && d.prevClose ? ((d.price - d.prevClose) / d.prevClose * 100) : (stock.changePct != null ? stock.changePct : null);
   const body = $('#sheetBody');
   let head = '<div class="s-head"><div><div class="s-name">' + esc(stock.name || code) + '</div>' +
     '<div class="s-code">' + code + ' · ' + esc(stock.industry || '—') + (stock.boards ? ' · ' + stock.boards + '板' : '') + '</div></div>' +
-    '<div class="s-price"><b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
+    '<div class="s-price" id="sheetPrice"><b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
     '<small class="' + pctClass(pct) + '">' + pctText(pct) + '</small></div></div>';
 
   let tierHtml = '';
@@ -489,7 +502,8 @@ async function openSheet(code) {
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
   body.innerHTML = head + tierHtml + signalHtml + promoHtml +
-    kvGrid(stock, d) +
+    '<div id="sheetKv">' + kvGrid(stock, d) + '</div>' +
+    '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetWatch">' + (isWatch ? '取消自选' : '★ 加自选') + '</button>' +
     '<button class="btn" id="sheetClose">关闭</button></div>';
@@ -502,6 +516,25 @@ async function openSheet(code) {
     openSheet(code);
   });
   $('#sheetClose').addEventListener('click', closeSheet);
+  // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
+  // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出
+  if (!freshQuote(code)) {
+    const q = await fetchQuotes([code], { tries: 2, timeoutMs: 5000 }).catch(() => ({}));
+    const nd = q[code];
+    if (nd && nd.price != null) mergeQuotes(q);
+    if (state.sheetCode !== code) return; // 已关抽屉/切到别的股：丢弃补数
+    if (nd && nd.price != null) patchSheetQuote(stock, nd);
+    else { const err = $('#sheetQuoteErr'); if (err) err.textContent = '实时报价获取失败，展示最近数据'; }
+  }
+}
+// 原地补数：只重写价格区与 kvGrid（主力/超大单净流入随行更新），不打扰相似案例异步填充区
+function patchSheetQuote(stock, d) {
+  const pct = d.price != null && d.prevClose ? ((d.price - d.prevClose) / d.prevClose * 100) : (stock.changePct != null ? stock.changePct : null);
+  const el = $('#sheetPrice');
+  if (el) el.innerHTML = '<b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
+    '<small class="' + pctClass(pct) + '">' + pctText(pct) + '</small>';
+  const kv = $('#sheetKv');
+  if (kv) kv.innerHTML = kvGrid(stock, d);
 }
 function kvGrid(s, d) {
   const rows = [
@@ -517,7 +550,7 @@ function kvGrid(s, d) {
   ];
   return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
-function closeSheet() { $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); }
+function closeSheet() { state.sheetCode = null; $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); }
 
 // 个股相似案例（对齐桌面 G24）：拉取更长日K（≥26 根才能滑窗匹配），复用 analytics.stockSimilarCases，
 // 展示 top-3 相似形态 + 六维特征 delta + 后续表现按相似度加权。仅在打开抽屉时按需拉取。
@@ -691,6 +724,7 @@ async function fetchOpenPct(pools) {
   if (!codes.length) return;
   if (state.openPctDate === pools.date && Object.keys(state.openPctByCode).length >= Math.min(codes.length, 30)) return;
   const quotes = await fetchQuotes(codes).catch(() => ({}));
+  mergeQuotes(quotes); // 全池报价回流 state.quotes（fetchOpenPct 每日只跑一次）：当日首刷后 15s 内点开抽屉命中缓存零网络
   const map = {};
   for (const [code, q] of Object.entries(quotes)) {
     if (q && q.open != null && q.prevClose) map[code] = Number(((q.open - q.prevClose) / q.prevClose * 100).toFixed(2));
@@ -780,6 +814,10 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
         });
       }
       renderZt(); // 徽标随行级 diff 原地更新
+      // 抽屉正开着池内涨停股时同步重渲染：promo 刚定稿立即回填检查表
+      //（此前只刷 renderZt，开着抽屉点开的股检查表永不出现）。
+      // 此时报价已被 fetchOpenPct 回流、K线在缓存 → 重渲染零网络、瞬时完成。
+      if (state.sheetCode && byCode[state.sheetCode]) openSheet(state.sheetCode);
     }
   } finally { state.promoInFlight = false; }
 }

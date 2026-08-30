@@ -11,7 +11,7 @@ import {
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
   shouldRefetchGap, mapSearchRow, setEmaToken,
-  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools
+  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes
 } from '../data.js';
 
 let pass = 0;
@@ -238,6 +238,40 @@ console.log('[B11] 响应速度批：getJSON 在途去重 / fetchPools fail-fast
     try { await fetchPools('20260102', { tries: 1, timeoutMs: 30 }); } catch (e) { threw = true; }
     clearTimeout(keepAlive);
     ok('fail-fast 透传：挂起请求按超时中止、tries=1 不重试、三池全败抛错', threw && aborts === 3 && Date.now() - t0 < 2000);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+console.log('[B13] 详情抽屉提速批：fetchQuotes 数值清洗（停牌 -）/ fail-fast 透传');
+{
+  const realFetch = globalThis.fetch;
+  // 停牌股 ulist 返回 '-' 字符串：清洗成 null，下游 toFixed/fmtMoney 只判 null（曾致抽屉抛错打不开）
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ data: { diff: [
+      { f12: '600001', f14: '正常甲', f2: 10.5, f17: 10.2, f18: 9.9, f62: 1234567, f66: 800000 },
+      { f12: '600002', f14: '停牌乙', f2: '-', f17: '-', f18: '-', f62: '-', f66: '-' },
+    ] } }),
+  });
+  try {
+    const q = await fetchQuotes(['600001', '600002']);
+    ok('正常股字段映射完整', q['600001'].price === 10.5 && q['600001'].open === 10.2 && q['600001'].prevClose === 9.9
+      && q['600001'].main === 1234567 && q['600001'].super === 800000);
+    ok('停牌股 "-" 全部清洗为 null（非字符串，不炸 toFixed）', q['600002'].price === null && q['600002'].open === null
+      && q['600002'].prevClose === null && q['600002'].main === null && q['600002'].super === null);
+
+    let aborts = 0;
+    globalThis.fetch = (url, opts) => new Promise((resolve, reject) => {
+      if (opts?.signal) opts.signal.addEventListener('abort', () => { aborts += 1; reject(new Error('aborted')); });
+    });
+    const t0 = Date.now();
+    // Node 的 AbortSignal.timeout 内部 timer 为 unref（不保活事件循环），挂一个 ref timer 才等得到超时
+    const keepAlive = setTimeout(() => {}, 500);
+    const q2 = await fetchQuotes(['600001'], { tries: 1, timeoutMs: 30 });
+    clearTimeout(keepAlive);
+    ok('fail-fast 透传：抽屉补价参数(tries=1/30ms)直达 getJSON，单块中止且单块失败不抛错',
+      aborts === 1 && Object.keys(q2).length === 0 && Date.now() - t0 < 2000);
   } finally {
     globalThis.fetch = realFetch;
   }

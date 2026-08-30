@@ -185,7 +185,10 @@ export async function fetchPools(date, opts = {}) {
 
 const ULIST_CHUNK = 60; // 单次 ulist secids 上限，超出的分块
 // 分块后并发拉取（并发上限 6），避免 300+ 代码串行往返拖慢首屏；单块失败仅缺失该块，其余正常返回。
-export async function fetchQuotes(codes) {
+// opts 透传 fail-fast 参数（tries/timeoutMs）给 getJSON——抽屉后台补价等「有本地数据兜底」的调用方应传短超时。
+// 停牌/缺字段时东财返回 '-'（字符串）：统一清洗成 null，下游 toFixed/fmtMoney 只判 null（曾致抽屉 toFixed 抛错打不开）。
+const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+export async function fetchQuotes(codes, opts = {}) {
   const list = (codes || []).map(String);
   if (!list.length) return {};
   const chunks = [];
@@ -196,16 +199,16 @@ export async function fetchQuotes(codes) {
     while (idx < chunks.length) {
       const ch = chunks[idx++];
       try {
-        const data = await getJSON(EMA.ulist(ch));
+        const data = await getJSON(EMA.ulist(ch), opts.tries ?? 3, opts.timeoutMs ?? 9000);
         for (const row of data?.data?.diff || []) {
           out[String(row.f12)] = {
             code: String(row.f12),
             name: row.f14,
-            price: row.f2,
-            open: row.f17,
-            prevClose: row.f18,
-            main: row.f62, // 主力净流入
-            super: row.f66, // 超大单净流入
+            price: toNum(row.f2),
+            open: toNum(row.f17),
+            prevClose: toNum(row.f18),
+            main: toNum(row.f62), // 主力净流入
+            super: toNum(row.f66), // 超大单净流入
           };
         }
       } catch (e) { /* 单块失败仅缺失该块数据，调用方按缺值降级 */ }

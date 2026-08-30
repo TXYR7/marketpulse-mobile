@@ -578,12 +578,34 @@ function closeMenu() { $('#menuScrim').classList.remove('show'); $('#menuPanel')
 
 /* ---------------- 刷新 ---------------- */
 let refreshing = false;
+// 图标旋转走 WAAPI:按钮是 44×38 非正方形,转按钮会晃;只转内层 .ic(inline-block 可 transform)。
+// 停止时从当前角度 ease-out 滑完本圈归位(360°≡0°),避免直接摘 class 瞬间跳回 0° 的急停感。
+let spinAnim = null;
+function spinStart() {
+  const icon = $('#refreshBtn .ic');
+  if (!icon?.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  icon.getAnimations().forEach(a => a.cancel()); // 清理上次减速尾动画,防快速连点角度跳变
+  spinAnim = icon.animate(
+    [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
+    { duration: 800, iterations: Infinity, easing: 'linear' }
+  );
+}
+function spinStop() {
+  if (!spinAnim) return;
+  const t = spinAnim.currentTime % 800;
+  const angle = (t / 800) * 360;
+  spinAnim.cancel(); spinAnim = null;
+  $('#refreshBtn .ic').animate(
+    [{ transform: `rotate(${angle}deg)` }, { transform: 'rotate(360deg)' }],
+    { duration: Math.max((360 - angle) / 360 * 800, 260), easing: 'cubic-bezier(0.3, 0, 0.2, 1)' }
+  );
+}
 async function refresh(force = false) {
   if (refreshing) return;
   refreshing = true;
   // B1:手动刷新不再无条件作废预期差缓存(省 1-5 个报价请求)——09:30 后开盘价已定型
   if (force && shouldRefetchGap(shanghaiNow(), state.manualDate)) state.gapDate = null;
-  $('#refreshBtn').classList.add('spin');
+  spinStart();
   try {
     const date = state.manualDate || todayStr();
     if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
@@ -607,7 +629,7 @@ async function refresh(force = false) {
     if (!state.pools) showOfflineEmpty(e); // 无任何可用数据（含快照）：清骨架屏给显式离线态
     toast('刷新失败：' + e.message);
   }
-  finally { $('#refreshBtn').classList.remove('spin'); refreshing = false; }
+  finally { spinStop(); refreshing = false; }
 }
 // lastGood 落盘节流：此前每 15s tick 全量直写 IDB（整池结构克隆+写盘，低端机可感知卡顿）；
 // 收敛为至多 30s 一次，隐藏/关闭时立即冲刷，离线快照最多旧 30s（冷启动 SWR 完全可接受）。

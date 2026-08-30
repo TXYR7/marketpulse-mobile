@@ -66,13 +66,13 @@ button { font-family: inherit; cursor: pointer; }
 .topbar .phase-badge {
   background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.30);
 }
+/* 纯图标按钮:无框无底(THS 手机版顶栏风格),与左侧 ☰ 对称;旋转动画转内层 .ic,见 app.js spinStart */
 .topbar .refresh-btn {
-  border: 1px solid rgba(255, 255, 255, 0.30); background: rgba(255, 255, 255, 0.14); color: #fff;
-  border-radius: var(--r-s); width: 44px; height: 38px; font-size: 17px;
+  border: 0; background: none; color: #fff;
+  width: 44px; height: 38px; font-size: 17px;
   transition: transform 0.1s ease;
 }
-.topbar .refresh-btn:active { transform: scale(0.92); }
-.refresh-btn.spin { animation: spin 0.8s linear infinite; }
+.topbar .refresh-btn:active { transform: scale(0.92); opacity: .7; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .status-strip {
@@ -107,11 +107,11 @@ button { font-family: inherit; cursor: pointer; }
 
 /* 汉堡菜单 / 侧滑面板 */
 .hamburger {
-  border: 1px solid rgba(255, 255, 255, 0.30); background: rgba(255, 255, 255, 0.14); color: #fff;
-  border-radius: var(--r-s); width: 42px; height: 36px; font-size: 17px; margin-right: 8px;
+  border: 0; background: none; color: #fff;
+  width: 42px; height: 36px; font-size: 17px; margin-right: 8px;
   transition: transform 0.1s ease;
 }
-.hamburger:active { transform: scale(0.92); }
+.hamburger:active { transform: scale(0.92); opacity: .7; }
 .menu-scrim {
   position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
 }

@@ -1,8 +1,8 @@
 {
-  "name": "MarketPulse 手机版",
-  "short_name": "MPulse",
+  "name": "MarketPulse 市场脉搏",
+  "short_name": "脉搏",
   "id": "./",
-  "description": "A股情绪与连板行情看板（手机版）",
+  "description": "A股情绪与连板行情看板 · MarketPulse 市场脉搏",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

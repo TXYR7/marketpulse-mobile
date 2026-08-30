@@ -649,7 +649,7 @@ async function notifySignalChanges() {
     if (!changes.length) return;
     if (!state.notifySignals || !('Notification' in window) || Notification.permission !== 'granted') return;
     const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification('MarketPulse 信号变化', { body: changes.slice(0, 3).join('；') + (changes.length > 3 ? ` 等 ${changes.length} 项` : ''), tag: 'mp-signals' });
+    await reg.showNotification('脉搏 · 信号变化', { body: changes.slice(0, 3).join('；') + (changes.length > 3 ? ` 等 ${changes.length} 项` : ''), tag: 'mp-signals' });
   } catch { /* 通知失败静默 */ }
 }
 // M1 预热持久化：把当日 K线 + 竞价缓存写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热

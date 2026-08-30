@@ -243,4 +243,24 @@ console.log('[B11] 响应速度批：getJSON 在途去重 / fetchPools fail-fast
   }
 }
 
+console.log('[B12] 品牌批：命名三处一致 + 图标 PNG 尺寸与 manifest 声明匹配');
+{
+  const manifest = JSON.parse(readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const appleTitle = (html.match(/apple-mobile-web-app-title" content="([^"]*)"/) || [])[1];
+  ok('short_name === apple-mobile-web-app-title ===「脉搏」', manifest.short_name === '脉搏' && appleTitle === '脉搏');
+  ok('name 含主名 MarketPulse', /MarketPulse/.test(manifest.name));
+  const pngSize = (file) => {
+    const b = readFileSync(new URL('../' + file, import.meta.url));
+    if (b.readUInt32BE(0) !== 0x89504e47) return null; // PNG 魔数
+    return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  };
+  for (const icon of manifest.icons) {
+    const dims = pngSize(icon.src);
+    const declared = icon.sizes.split('x').map(Number);
+    ok(`图标 ${icon.src} 为合法 PNG 且尺寸 ${icon.sizes} 与文件一致（purpose ${icon.purpose}）`,
+      Boolean(dims) && dims.w === declared[0] && dims.h === declared[1]);
+  }
+}
+
 console.log(`\nAll ${pass} smoke checks passed.`);

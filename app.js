@@ -19,7 +19,7 @@ const state = {
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
   trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
-  fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
+  fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0, lastFetchMs: null,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
   auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
@@ -174,7 +174,7 @@ function computeDerived(pools) {
         if (state.auction && state.auction.available && (state.auction.items || []).length) sources['集合竞价'] = { ok: true, missing: [] };
         return sources;
       })(),
-      latencyMs: null,
+      latencyMs: state.lastFetchMs, // 本轮 fetchPools 实测耗时（降延迟批：从恒 null 改为真实值，诊断页可见）
     },
   };
   state.derivedSig = sig;
@@ -184,18 +184,20 @@ function computeDerived(pools) {
 
 /* ---------------- 渲染：状态条 ---------------- */
 function hhmm(ts) { const d = shanghaiOf(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function hhmmss(ts) { const d = shanghaiOf(ts); return hhmm(ts) + ':' + String(d.getSeconds()).padStart(2, '0'); }
 function renderStatus() {
   const s = $('#statusStrip');
   if (!state.pools) { setHTML(s, '<div class="chip"><span>状态</span><strong>连接中</strong></div>'); return; }
   const p = state.pools;
   const maxBoard = p.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const em = state.emotion || {};
-  // 数据新鲜度：正常显示更新时间；只有快照时标注「快照」；最近一次刷新失败且无更新则提示
+  // 数据新鲜度：正常显示更新时间(到秒)；只有快照时标注「快照」；最近一次刷新失败且无更新则提示
   const failed = state.lastErrorAt > state.lastSuccessAt;
+  const fetchNote = state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : '';
   const freshChip = failed
     ? '<div class="chip risk-high"><span>状态</span><strong>刷新失败</strong></div>'
     : (state.lastSuccessAt
-      ? '<div class="chip sent"><span>更新</span><strong>' + hhmm(state.lastSuccessAt) + '</strong></div>'
+      ? `<div class="chip sent" title="${esc('更新于 ' + hhmmss(state.lastSuccessAt) + fetchNote)}"><span>更新</span><strong>` + hhmmss(state.lastSuccessAt) + '</strong></div>'
       : (state.lastGoodAt ? '<div class="chip risk-mid"><span>快照</span><strong>' + hhmm(state.lastGoodAt) + '</strong></div>' : ''));
   const partialChip = p.partial && p.partialMissing && p.partialMissing.length
     ? '<div class="chip risk-mid"><span>缺源</span><strong>' + esc(p.partialMissing.join('/')) + '</strong></div>'
@@ -746,12 +748,14 @@ async function refresh(force = false) {
   // B1:手动刷新不再无条件作废预期差缓存(省 1-5 个报价请求)——09:30 后开盘价已定型
   if (force && shouldRefetchGap(shanghaiNow(), state.manualDate)) state.gapDate = null;
   spinStart();
+  const fetchStart = performance.now();
   try {
     const date = state.manualDate || todayStr();
     if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
     // 冷启动（无本地数据垫底）用 fail-fast 配置：挂起/离线时最坏 ~13s 落到离线态（此前 3×9s≈28s）；
     // 热刷新保持完整重试韧性（有 SWR 旧数据在屏，慢点无妨）
     const pools = await fetchPools(date, state.pools ? {} : { tries: 2, timeoutMs: 6000 });
+    state.lastFetchMs = Math.round(performance.now() - fetchStart);
     state.fromSnapshot = false;
     state.lastSuccessAt = Date.now();
     persistLastGood(pools); // 先落原始池（未挂派生字段，体积小），失败静默

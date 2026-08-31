@@ -11,7 +11,7 @@ import {
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
   shouldRefetchGap, mapSearchRow, setEmaToken,
-  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes,
+  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes, fetchKlineLite,
   parseAuctionTrend, collectAuctionSnapshot, auctionVolRatio, pickAuctionCoreCodes
 } from '../data.js';
 
@@ -272,7 +272,7 @@ console.log('[B13] 详情抽屉提速批：fetchQuotes 数值清洗（停牌 -�
     const q2 = await fetchQuotes(['600001'], { tries: 1, timeoutMs: 30 });
     clearTimeout(keepAlive);
     ok('fail-fast 透传：抽屉补价参数(tries=1/30ms)直达 getJSON，单块中止且单块失败不抛错',
-      aborts === 1 && Object.keys(q2).length === 0 && Date.now() - t0 < 2000);
+      aborts === 1 && q2.__failedChunks === 1 && Object.keys(q2).length === 1 && Date.now() - t0 < 2000);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -372,6 +372,55 @@ console.log('[B14] 集合竞价：parseAuctionTrend / auctionVolRatio / pickAuct
   } finally {
     globalThis.fetch = realFetch;
   }
+}
+
+console.log('[B15] 降延迟批：ulist 缓存穿透 / fetchQuotes 失败块计数 / push2his 并发闸 / 更新 chip 秒级+抓取耗时');
+{
+  const realFetch = globalThis.fetch;
+  // 1) ulist URL 带 `_` 缓存穿透 + getJSON fetch 带 cache:'no-store'（防 CDN/浏览器陈旧响应冻结资金流）
+  let lastUrl = ''; let lastOpts = null;
+  globalThis.fetch = async (url, opts) => {
+    lastUrl = String(url); lastOpts = opts;
+    return { ok: true, json: async () => ({ data: { diff: [{ f12: '600001', f14: '甲', f2: 10, f17: 10, f18: 10, f62: 1, f66: 1 }] } }) };
+  };
+  try {
+    const q = await fetchQuotes(['600001']);
+    ok('ulist URL 带 `_` 缓存穿透参数（防陈旧缓存冻结资金流）', /&_=\d+/.test(lastUrl));
+    ok('getJSON fetch 带 cache:no-store（不吃浏览器 HTTP 缓存）', lastOpts?.cache === 'no-store');
+    ok('成功路径 __failedChunks === 0 且不混入行情对象', q.__failedChunks === 0 && q['600001']?.price === 10);
+
+    // 2) 61 只 = 2 块，一块失败：计数 1，另一块数据完好（按 URL 内容定向失败，避免 worker 调度竞态）
+    globalThis.fetch = async (url) => {
+      const secids = new URL(String(url)).searchParams.get('secids') || '';
+      const codes = secids.split(',').map((s) => s.slice(2));
+      if (codes.includes('600000')) throw new Error('chunk reset'); // 第一块(前 60 只)失败
+      return { ok: true, json: async () => ({ data: { diff: codes.map((c) => ({ f12: c, f14: 'n', f2: 1, f17: 1, f18: 1, f62: 1, f66: 1 })) } }) };
+    };
+    const codes = [];
+    for (let i = 0; i < 61; i++) codes.push(String(600000 + i));
+    const q2 = await fetchQuotes(codes);
+    ok('失败块计数可见（__failedChunks === 1），成功块 1 只数据完好', q2.__failedChunks === 1 && q2['600060']?.price === 1 && !q2['600000']);
+
+    // 3) push2his 共享并发闸：12 个并发 K 线请求，最大同时外呼 ≤5（闸上限），且全部完成
+    let active = 0; let maxActive = 0; let done = 0;
+    globalThis.fetch = async () => {
+      active += 1; maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 40));
+      active -= 1; done += 1;
+      return { ok: true, json: async () => ({ data: { klines: ['2026-08-28,10,10,10,10,100'] } }) };
+    };
+    const klineCodes = [];
+    for (let i = 0; i < 12; i++) klineCodes.push(String(600100 + i));
+    const bars = await Promise.all(klineCodes.map((c) => fetchKlineLite(c, 8).catch(() => null)));
+    ok('push2his 并发闸：12 并发 K 线最大同时外呼 ≤5（闸=5），全部完成', maxActive <= 5 && done === 12 && bars.filter(Boolean).length === 12);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // 4) app.js 接线（源码形状）：更新 chip 秒级 + 抓取耗时 telemetry
+  const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  ok('更新 chip 用 hhmmss 秒级展示', /hhmmss\(state\.lastSuccessAt\)/.test(appSrc));
+  ok('refresh() 实测 fetchPools 耗时并存 lastFetchMs', /lastFetchMs = Math\.round\(performance\.now\(\) - fetchStart\)/.test(appSrc));
+  ok('health.latencyMs 接真实抓取耗时（不再恒 null）', /latencyMs: state\.lastFetchMs/.test(appSrc));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

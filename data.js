@@ -20,7 +20,8 @@ const EMA = {
   },
   ulist(codes) {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
-    return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66`;
+    // `_` 缓存穿透：与桌面 server.js 口径一致——不加则 CDN/浏览器 HTTP 缓存可返回陈旧响应（主力/超大单冻结的根因之一）
+    return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66&_=${Date.now()}`;
   }
 };
 
@@ -71,6 +72,7 @@ async function getJSON(url, tries = 3, timeoutMs = 9000) {
         const res = await fetch(url, {
           headers: { accept: 'application/json,text/plain,*/*' },
           signal: AbortSignal.timeout(timeoutMs),
+          cache: 'no-store', // 行情接口不吃任何层缓存：URL 已带 `_` 穿透 CDN，这里再禁浏览器 HTTP 缓存
         });
         if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
         return res.json();
@@ -194,6 +196,7 @@ export async function fetchQuotes(codes, opts = {}) {
   const chunks = [];
   for (let i = 0; i < list.length; i += ULIST_CHUNK) chunks.push(list.slice(i, i + ULIST_CHUNK));
   const out = {};
+  let failedChunks = 0; // 单块失败不再纯静默：计数+warn，调用方(状态条/health)可见，避免资金流大面积缺失不可知
   let idx = 0;
   const worker = async () => {
     while (idx < chunks.length) {
@@ -211,20 +214,45 @@ export async function fetchQuotes(codes, opts = {}) {
             super: toNum(row.f66), // 超大单净流入
           };
         }
-      } catch (e) { /* 单块失败仅缺失该块数据，调用方按缺值降级 */ }
+      } catch (e) {
+        failedChunks += 1;
+        console.warn('fetchQuotes 块失败(该块资金流缺失):', e?.message || e);
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(6, chunks.length) }, () => worker()));
+  out.__failedChunks = failedChunks;
   return out;
 }
 
 // 轻量日K（仅供 S/A/B 梯队股的晋级评估：量能阶变/缺口保护维度），取近 lmt 根日线
+// push2his 并发闸：竞价采集(9:15-9:30 与 K 线预热同窗)与 K 线预热都打 push2his，叠加会超浏览器单 host 6 连接上限
+// → 排队/重置。模块级信号量共享上限 5，两类请求合流过闸。
+const PUSH2HIS_MAX_CONCURRENCY = 5;
+let push2hisActive = 0;
+const push2hisQueue = [];
+function withPush2HisSlot(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      push2hisActive += 1;
+      Promise.resolve().then(fn).then(
+        (value) => { push2hisActive -= 1; nextPush2His(); resolve(value); },
+        (error) => { push2hisActive -= 1; nextPush2His(); reject(error); }
+      );
+    };
+    if (push2hisActive < PUSH2HIS_MAX_CONCURRENCY) run();
+    else push2hisQueue.push(run);
+  });
+}
+function nextPush2His() {
+  if (push2hisActive < PUSH2HIS_MAX_CONCURRENCY && push2hisQueue.length) push2hisQueue.shift()();
+}
 const klineCacheByDate = new Map(); // code -> { dateKey, bars }
 const KLINE_CACHE_CAP = 200; // 会话内防膨胀（抽屉 60 根日K 也进缓存，容量放宽避免翻页清缓存导致会话内重抓）
 export async function fetchKlineLite(code, lmt = 8) {
   const secid = marketPrefix(code) + code;
   const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=${lmt}`;
-  const data = await getJSON(url);
+  const data = await withPush2HisSlot(() => getJSON(url));
   const bars = (data?.data?.klines || []).map((line) => {
     const p = String(line).split(',');
     return { date: p[0], open: Number(p[1]), close: Number(p[2]), high: Number(p[3]), low: Number(p[4]), volume: Number(p[5]) };
@@ -337,7 +365,7 @@ export function parseAuctionTrend(payload, todayCompact = todayStr()) {
 export async function fetchAuctionTrend(code, opts = {}) {
   const secid = marketPrefix(code) + code;
   const url = `https://push2his.eastmoney.com/api/qt/stock/trends/get?ut=${EMA.token}&fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&secid=${secid}&_=${Date.now()}`;
-  const payload = await getJSON(url, opts.tries ?? 2, opts.timeoutMs ?? 8000);
+  const payload = await withPush2HisSlot(() => getJSON(url, opts.tries ?? 2, opts.timeoutMs ?? 8000));
   return parseAuctionTrend(payload);
 }
 

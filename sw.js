@@ -1,6 +1,6 @@
 // sw.js — 缓存 app 外壳（离线可启动）；行情接口直连不缓存
 // 版本号由 scripts/bump-sw.mjs 自动递增（发布到手机.cmd 会调用），无需手动改。
-const CACHE = 'mp-mobile-v25';
+const CACHE = 'mp-mobile-v26';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data.js', './store.js',
   './analytics.js', './views.js', './views-extra.js', './version.js',

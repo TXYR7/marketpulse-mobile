@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, fetchAuctionTrend, collectAuctionSnapshot, pickAuctionCoreCodes } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -21,6 +21,7 @@ const state = {
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
+  auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
   lastSignalSnapshot: null, notifySignals: false, // D3:信号变化通知
 };
@@ -96,7 +97,10 @@ function deriveSig(pools) {
   // 昨日溢价指纹：loadGap 报价到达后触发一次重算（此前 premium 为空 → 指标诚实显示 —）
   const prem = state.prevPremium && state.prevPremium.date === pools.date
     ? (state.prevPremium.firstBoardPremium + '/' + state.prevPremium.highBoardPremium) : '';
-  return pools.date + '|' + up.length + '|' + codes + '|' + hk + '|' + prem;
+  // 竞价指纹：live→final 相变 / 撮合数据首落位时重算派生（health 竞价源、预期差/晋级评估吃撮合口径）
+  const auc = state.auction && state.auction.available
+    ? (state.auction.phase + ':' + state.auction.items.length + ':' + Object.keys(state.auctionPctByCode || {}).length) : '';
+  return pools.date + '|' + up.length + '|' + codes + '|' + hk + '|' + prem + '|' + auc;
 }
 function computeDerived(pools) {
   // M4 结构签名记忆化：结构字段(boards/成员/日期/历史)日内稳定，派生结果恒定，跳过重算省 CPU（不碰实时价）
@@ -164,7 +168,12 @@ function computeDerived(pools) {
     stats: { breakRate }, themes, leaders, riskRadar, opportunities,
     health: {
       ok: !pools.partial,
-      sources: { '东方财富行情': { ok: !pools.partial, missing: pools.partialMissing || [] } },
+      sources: (() => {
+        // 集合竞价：增强源，仅在已有数据时列出（非竞价窗口不显示，避免决策助手误报「异常」）
+        const sources = { '东方财富行情': { ok: !pools.partial, missing: pools.partialMissing || [] } };
+        if (state.auction && state.auction.available && (state.auction.items || []).length) sources['集合竞价'] = { ok: true, missing: [] };
+        return sources;
+      })(),
       latencyMs: null,
     },
   };
@@ -217,16 +226,26 @@ function chip(cls, label, val) {
 }
 
 /* ---------------- 渲染：盘中涨停池 ---------------- */
+// 竞价信息（卡片行/抽屉共用）：撮合口径优先，竞价中用虚拟价；回看历史日不显示（竞价仅当日有效）
+function aucInfoOf(code) {
+  if (state.manualDate || !state.auction?.available || !state.auctionByCode) return null;
+  const it = state.auctionByCode.get(code);
+  if (!it) return null;
+  const pct = it.matched ? it.matchPct : (it.livePct ?? null);
+  return pct == null ? null : { pct, matched: !!it.matched };
+}
 function ztCard(x) {
   const starred = state.watch.some((w) => w.code === x.code);
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   const pv = x.promo && x.promo.available !== false ? x.promo : null;
   const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
   const pvTip = pv ? esc(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
+  const auc = aucInfoOf(x.code);
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
-    '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div></div>' +
+    '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
+    (auc ? '<div class="auc">竞价 <b class="' + pctClass(auc.pct) + '">' + pctText(auc.pct) + '</b><em>' + (auc.matched ? '撮合' : '虚拟') + '</em></div>' : '') + '</div>' +
     '<div class="right">' +
     (pv ? '<span class="promo-badge ' + pvc + '" title="' + pvTip + '">' + esc(pv.verdict) + '</span> ' : '') +
     (x.tier ? tierBadge(x.tier) : '') + (x.signal ? '<div style="margin-top:4px">' + signalTag(x.signal.state) + '</div>' : '') +
@@ -251,10 +270,12 @@ function filterZt() {
   });
   return rows;
 }
-// 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星/晋级结论）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
+// 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星/晋级结论/竞价行）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
 function ztStructSig(x) {
   const pv = x.promo && x.promo.available !== false ? x.promo.verdict : '';
-  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0, pv].join('|');
+  const auc = aucInfoOf(x.code);
+  const aucKey = auc ? (auc.pct + (auc.matched ? 'm' : 'v')) : '';
+  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0, pv, aucKey].join('|');
 }
 function pctFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.seal ?? '', x.turnover ?? ''].join('|'); }
 function downFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.turnover ?? ''].join('|'); }
@@ -327,7 +348,7 @@ function renderDowns() {
 function renderGap(gap) {
   const sum = $('#gapSummary');
   const c = gap.counts || { beat: 0, meet: 0, miss: 0 };
-  sum.textContent = `超 ${c.beat} / 符 ${c.meet} / 不及 ${c.miss}`;
+  sum.textContent = `超 ${c.beat} / 符 ${c.meet} / 不及 ${c.miss}` + (state.auction?.phase === 'live' ? ' · 竞价进行中' : '');
   setHTML($('#gapRows'), gap.candidates.length ? gap.candidates.map((g) => {
     const cls = g.status === '超预期' ? 'up-c' : g.status === '不及预期' ? 'down-c' : '';
     return '<div class="ledger-row"><div><div class="nm">' + esc(g.name) + ' <span class="pill">' + g.buyType + '</span></div>' +
@@ -357,6 +378,10 @@ async function loadGap(force = false) {
     if (mySeq !== gapSeq) return; // 过期响应，丢弃
     const actualMap = {};
     candidates.forEach((c) => { const q = quotes[c.code]; if (q && q.open != null && q.prevClose) actualMap[c.code] = (q.open - q.prevClose) / q.prevClose * 100; });
+    // 竞价撮合涨幅优先（9:26 即有真值；9:30 后与今开相等无缝衔接；非当日回落开盘价代理）——对齐桌面 previousOpenMap 口径
+    for (const [code, pct] of Object.entries(state.auctionPctByCode || {})) {
+      if (Number.isFinite(pct) && candidates.some((c) => c.code === code)) actualMap[code] = pct;
+    }
     const ctx = { ctxFor: (s) => { const ld = state.leaders.find((l) => l.code === s.code); return { buyType: buyTypeOf({ boards: s.boards, previousBoard: null }), phase: state.phase, role: ld?.role || '板块龙头', themeScore: ld?.themeScore ?? null }; } };
     const nextGap = buildExpectationGap(candidates, actualMap, ctx);
     if (mySeq !== gapSeq) return;
@@ -502,6 +527,7 @@ async function openSheet(code) {
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
   body.innerHTML = head + tierHtml + signalHtml + promoHtml +
+    (state.manualDate ? '' : '<div class="s-auction" id="detailAuction"><div class="s-auc-head">集合竞价 · 09:15-09:25</div><div class="muted">竞价数据加载中…</div></div>') +
     '<div id="sheetKv">' + kvGrid(stock, d) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
@@ -509,6 +535,7 @@ async function openSheet(code) {
     '<button class="btn" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code);
+  if (!state.manualDate) loadAuctionDetail(code);
   $('#sheetWatch').addEventListener('click', async () => {
     if (isWatch) { await delWatch(code); state.watch = state.watch.filter((w) => w.code !== code); }
     else { await putWatch({ code, name: stock.name || code, addedAt: Date.now() }); state.watch.push({ code, name: stock.name || code, addedAt: Date.now() }); }
@@ -580,6 +607,86 @@ async function loadSimilarCases(code) {
   const o = r.outcome || {};
   const outBar = '<div class="outcome">后续表现（按相似度加权）：<b class="up-c">涨 ' + (o.up ?? 0) + '%</b> / <b>平 ' + (o.flat ?? 0) + '%</b> / <b class="down-c">跌 ' + (o.down ?? 0) + '%</b></div>';
   el.innerHTML = sim + outBar + '<div class="muted" style="font-size:11px;margin-top:6px">' + esc(r.vectorNote) + '</div>';
+}
+
+/* ---------------- 详情抽屉：集合竞价区 ---------------- */
+// 申报量（股）人类可读：亿股/万股
+function fmtShares(v) {
+  if (v == null || !Number.isFinite(Number(v))) return '--';
+  const n = Number(v), a = Math.abs(n);
+  if (a >= 1e8) return (n / 1e8).toFixed(2) + '亿股';
+  if (a >= 1e4) return (n / 1e4).toFixed(0) + '万股';
+  return n + '股';
+}
+// 竞价价格走势内联 SVG（零依赖 sparkline）：虚拟撮合价折线 + 昨收虚线基线
+function auctionSparkline(minutes, refPrice) {
+  const pts = (minutes || []).filter((m) => m.price != null);
+  if (pts.length < 2) return '';
+  const w = 260, h = 56, pad = 5;
+  const prices = pts.map((m) => m.price).concat(refPrice != null ? [refPrice] : []);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const span = (max - min) || 1;
+  const x = (i) => pad + (i * (w - 2 * pad)) / (pts.length - 1);
+  const y = (p) => h - pad - ((p - min) / span) * (h - 2 * pad);
+  const line = pts.map((m, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(m.price).toFixed(1)).join('');
+  const ref = refPrice != null && refPrice >= min && refPrice <= max
+    ? '<line class="ref" x1="' + pad + '" y1="' + y(refPrice).toFixed(1) + '" x2="' + (w - pad) + '" y2="' + y(refPrice).toFixed(1) + '"/>' : '';
+  const lastDot = '<circle cx="' + x(pts.length - 1).toFixed(1) + '" cy="' + y(pts[pts.length - 1].price).toFixed(1) + '" r="2.5"/>';
+  return '<svg class="auc-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' + ref + '<path class="line" d="' + line + '"/>' + lastDot + '</svg>';
+}
+// 竞价区主体：minutes（核心票过程）或 item（全池快照行）二选一，至少给其一
+function renderAuctionBody(minutes = [], matched = null, item = null) {
+  const preClose = minutes[0]?.refPrice ?? item?.preClose ?? null;
+  const lastPrice = matched?.price ?? minutes[minutes.length - 1]?.price ?? null;
+  const pct = lastPrice && preClose ? Number(((lastPrice / preClose - 1) * 100).toFixed(2)) : null;
+  const rows = [];
+  if (matched?.amount != null) rows.push(['竞价额', fmtMoney(matched.amount)]);
+  if (matched?.volumeHands != null) rows.push(['竞价量', matched.volumeHands + ' 手']);
+  if (item?.volRatio != null) rows.push(['量比', item.volRatio]);
+  if (matched?.sealedBuyShares > 0) rows.push(['一字封单', fmtShares(matched.sealedBuyShares)]);
+  const last = minutes[minutes.length - 1];
+  if (last && (last.bidShares != null || last.askShares != null)) {
+    rows.push(['末点申报', '买 ' + fmtShares(last.bidShares) + ' / 卖 ' + fmtShares(last.askShares)]);
+  }
+  const head = '<div class="auc-summary"><b>' + (matched ? '撮合' : '虚拟') + ' ' + (lastPrice != null ? lastPrice.toFixed(2) : '--') + '</b>' +
+    (pct != null ? '<span class="' + pctClass(pct) + '">' + pctText(pct) + '</span>' : '') + '</div>';
+  return head + auctionSparkline(minutes, preClose) +
+    (rows.length ? '<div class="auc-kv">' + rows.map((r) => '<span>' + r[0] + ' <b>' + r[1] + '</b></span>').join('') + '</div>' : '');
+}
+// 本地可得（核心票过程 / 快照行）→ 渲染；否则 null（调用方走 adhoc 单票拉取）
+function auctionDetailHtml(code) {
+  const a = state.auction;
+  if (!a?.available || state.manualDate) return null;
+  const core = (a.core || []).find((c) => c.code === code);
+  const item = state.auctionByCode?.get(code);
+  if (!core && !item) return null;
+  if (core) return renderAuctionBody(core.minutes || [], core.matched, item || null);
+  const matched = item && item.matched ? { price: item.matchPrice, amount: item.auctionAmount, volumeHands: item.volumeHands, sealedBuyShares: item.sealedBuyShares } : null;
+  return renderAuctionBody([], matched, item);
+}
+const AUC_HEAD = '<div class="s-auc-head">集合竞价 · 09:15-09:25</div>';
+async function loadAuctionDetail(code) {
+  const el = $('#detailAuction');
+  if (!el || state.sheetCode !== code) return;
+  const local = auctionDetailHtml(code);
+  if (local) { el.innerHTML = AUC_HEAD + local; return; }
+  // 非核心/池外股：adhoc 单票拉取（trends/get 全天含竞价段，任意时点可取当日竞价）
+  try {
+    const trend = await fetchAuctionTrend(code, { tries: 2, timeoutMs: 6000 });
+    if (state.sheetCode !== code || !$('#detailAuction')) return;
+    if (!trend.minutes.length && !trend.matched) { el.innerHTML = AUC_HEAD + '<div class="muted">今日无竞价数据（非交易日或未开始）</div>'; return; }
+    el.innerHTML = AUC_HEAD + renderAuctionBody(trend.minutes, trend.matched, null);
+  } catch (e) {
+    if (state.sheetCode === code) el.innerHTML = AUC_HEAD + '<div class="muted">竞价数据获取失败</div>';
+  }
+}
+// 竞价采集落位后：若抽屉正开着该股且有本地数据，原地刷新竞价区（不覆盖 adhoc 进行中的加载态）
+function refreshAuctionDetail() {
+  if (!state.sheetCode || state.manualDate) return;
+  const el = $('#detailAuction');
+  if (!el) return;
+  const local = auctionDetailHtml(state.sheetCode);
+  if (local) el.innerHTML = AUC_HEAD + local;
 }
 
 /* ---------------- 导航 ---------------- */
@@ -707,12 +814,13 @@ async function notifySignalChanges() {
     await reg.showNotification('脉搏 · 信号变化', { body: changes.slice(0, 3).join('；') + (changes.length > 3 ? ` 等 ${changes.length} 项` : ''), tag: 'mp-signals' });
   } catch { /* 通知失败静默 */ }
 }
-// M1 预热持久化：把当日 K线 + 竞价缓存写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热
+// M1 预热持久化：把当日 K线 + 竞价代理 + 竞价终态写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热
+// 竞价终态当日定型（hydrate 端按 date === 今日校验），重开 app 不再重抓全池
 let warmPersistTimer = null;
 function persistWarmCache() {
   clearTimeout(warmPersistTimer);
   warmPersistTimer = setTimeout(() => {
-    setKV('warmCache', { kline: exportKlineCache(), openPct: state.openPctByCode, openPctDate: state.openPctDate }).catch(() => {});
+    setKV('warmCache', { kline: exportKlineCache(), openPct: state.openPctByCode, openPctDate: state.openPctDate, auction: state.auction && state.auction.available ? state.auction : null }).catch(() => {});
   }, 2000);
 }
 
@@ -731,6 +839,85 @@ async function fetchOpenPct(pools) {
   }
   if (Object.keys(map).length) { state.openPctByCode = map; state.openPctDate = pools.date; }
 }
+
+/* ---------------- 集合竞价（真实竞价源，对齐桌面 2026-08-31 过程版） ---------------- */
+// 采集对象=昨日涨停池（竞价窗口内今日池尚未生成，与桌面 runAuctionCollection 同口径）。
+// 与主刷新完全解耦：refreshTick 触发、单飞封装、失败静默（增强源，不拦截信号不弹错）。
+// live=核心 12 只逐分钟过程（60s 节流，9:15-9:30）；final=全池撮合终态一次（9:31 后，当日定型入预热缓存）。
+let auctionInflight = null;
+let auctionLiveAt = 0;
+let auctionFinalTries = 0;
+function applyAuctionPayload(payload) {
+  state.auction = payload;
+  state.auctionByCode = payload?.available ? new Map((payload.items || []).map((i) => [i.code, i])) : new Map();
+  // 撮合涨幅 map：仅 matched 项（对齐桌面 auctionPctByCode；竞价中的虚拟价只用于展示，不进评估链路）
+  const pct = {};
+  for (const it of (payload?.items || [])) if (it.matched && Number.isFinite(it.matchPct)) pct[it.code] = it.matchPct;
+  state.auctionPctByCode = pct;
+}
+let auctionPoolFallback = null; // { fetchedFor, date, stocks }：无历史记录时直抓的最近交易日池（当日缓存）
+async function yesterdayPoolForAuction() {
+  const today = todayStr();
+  const rec = (state.history || []).filter((h) => String(h.date) < today).pop();
+  if (rec && rec.stocks?.length) return rec;
+  // 盘前兜底：今日池尚未生成，state.pools 即昨日池（qdate 早于今日）
+  if (state.pools && String(state.pools.date) < today && state.pools.up?.length) return { date: state.pools.date, stocks: state.pools.up };
+  // 全新安装无任何历史（盘中首开 app）：直抓最近交易日涨停池，当日缓存防重复外呼
+  if (auctionPoolFallback && auctionPoolFallback.fetchedFor === today && auctionPoolFallback.stocks?.length) return auctionPoolFallback;
+  for (const dt of tradingDatesBack(5).slice(0, 3)) { // 最多回看 3 个工作日（防节假日空池），首个有涨停的即用
+    try {
+      const p = await fetchPools(dt);
+      if (p.upCount > 0) {
+        auctionPoolFallback = { fetchedFor: today, date: dt, stocks: p.up };
+        return auctionPoolFallback;
+      }
+    } catch (e) { /* 单日失败试下一日 */ }
+  }
+  return null;
+}
+async function runAuctionCollect(mode) {
+  const rec = await yesterdayPoolForAuction();
+  if (!rec) return null;
+  const today = todayStr();
+  const result = await collectAuctionSnapshot(mode, rec.stocks, pickAuctionCoreCodes(rec.stocks), today);
+  if (!(result.items || []).some((i) => i.matched) && !(result.core || []).length) return result; // 无可用数据：不落位（final 会重试）
+  applyAuctionPayload({ available: true, phase: mode === 'live' ? 'live' : 'final', date: today, ...result });
+  // 撮合数据首落位/扩量：预期差按撮合口径重算（作废同日缓存）、晋级评估立即定稿、终态入预热缓存
+  const matchedCount = Object.keys(state.auctionPctByCode).length;
+  if (matchedCount > state.auctionMatchedSeen) {
+    state.auctionMatchedSeen = matchedCount;
+    state.gapDate = null;
+    if (state.view === 'intraday') { renderZt(); loadGap(true); }
+    if (state.pools) enrichPromo(state.pools).catch(() => {});
+    if (mode === 'final') persistWarmCache();
+  } else if (state.view === 'intraday') {
+    renderZt(); // 竞价行（虚拟价逐分钟更新）随结构签名行级重建
+  }
+  refreshAuctionDetail();
+  return result;
+}
+function triggerAuction(mode) {
+  if (auctionInflight) return auctionInflight;
+  auctionInflight = runAuctionCollect(mode)
+    .catch(() => null) // 竞价为增强源：失败静默，不打断主链路（对齐桌面「不触发 pausesSignals」纪律）
+    .finally(() => { auctionInflight = null; });
+  return auctionInflight;
+}
+// 竞价调度（refreshTick 每 15s 顺带检查；窗口判定与桌面 scheduler DAILY_WINDOWS 同口径）：
+// live 窗口 555-570（9:15-9:30）60s 节流；final 窗口 571 起当日单次（trends/get 全天含竞价段，
+// 午后首开 app 也能补抓当日竞价），无数据重试至多 8 次防打转。
+function maybeAuctionTick() {
+  if (state.manualDate || document.hidden) return;
+  const d = shanghaiNow();
+  if (d.getDay() === 0 || d.getDay() === 6) return;
+  const t = d.getHours() * 60 + d.getMinutes();
+  if (t >= 555 && t < 571) {
+    if (Date.now() - auctionLiveAt >= 60_000) { auctionLiveAt = Date.now(); triggerAuction('live'); }
+  } else if (t >= 571 && t <= 900) {
+    const done = state.auction && String(state.auction.date) === todayStr() && (state.auction.items || []).some((i) => i.matched);
+    if (!done && auctionFinalTries < 8) { auctionFinalTries += 1; triggerAuction('final'); }
+  }
+}
 // 组装评估 ctx：昨日同码（烂板/换手，历史记录含 breaks/turnoverRate 才有）
 function promoContextOf(s, pools) {
   let prevDay = null;
@@ -742,7 +929,8 @@ function promoContextOf(s, pools) {
     phase: state.phase,
     themeSize: Number.isFinite(Number(s.themeSize)) ? Number(s.themeSize) : null,
     role: s.role,
-    openPct: state.openPctByCode[s.code] ?? null,
+    // 竞价撮合%优先（9:26 即有真值，对齐桌面 todayOpenByCode），今开代理兜底
+    openPct: state.auctionPctByCode[s.code] ?? state.openPctByCode[s.code] ?? null,
     prevDay: prevDay ? { boards: prevDay.boards, breakCount: prevDay.breaks, turnoverRate: prevDay.turnoverRate } : null,
   };
 }
@@ -853,6 +1041,7 @@ function refreshTick() {
   if (!tradingNow()) return;
   // 回看历史交易日：数据已是该日就不再重拉不变的历史，手动 ↻ 才强制
   if (state.manualDate && state.pools && String(state.pools.date) === String(state.manualDate)) return;
+  maybeAuctionTick(); // 竞价采集独立节流（live 60s / final 当日单次），不阻塞主刷新
   refresh();
 }
 
@@ -952,6 +1141,7 @@ function bind() {
   // 回前台立即补一次刷新（数据过期才拉），后台期间定时器已由 refreshTick 跳过
   document.addEventListener('visibilitychange', () => {
     if (document.hidden || !tradingNow()) return;
+    maybeAuctionTick(); // 回前台落在竞价窗口内时立即补采集
     const age = Date.now() - state.lastSuccessAt;
     if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
   });
@@ -1049,6 +1239,8 @@ async function init() {
     ]);
     if (warm && warm.kline) hydrateKlineCache(warm.kline); // 当日 K线命中 → enrichPromo 免重抓
     if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
+    // 竞价终态水合（date 校验当日有效）：重开 app 免重抓全池，promo/预期差/抽屉立即有撮合口径
+    if (warm && warm.auction && warm.auction.available && String(warm.auction.date) === todayStr()) applyAuctionPayload(warm.auction);
     state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
     state.notifySignals = Boolean(notifySignals); // D3:信号变化通知开关（默认关）
     $('#setRefresh').value = String(state.refreshMs);
@@ -1066,6 +1258,7 @@ async function init() {
     }
     await refresh();
     applyRefreshTimer();
+    maybeAuctionTick(); // 冷启动落在竞价窗口内时立即采集（不等首个 15s tick）
   } catch (e) {
     console.error('[mp] 启动失败：', e);
     try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }

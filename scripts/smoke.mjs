@@ -11,7 +11,8 @@ import {
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
   shouldRefetchGap, mapSearchRow, setEmaToken,
-  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes
+  cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes,
+  parseAuctionTrend, collectAuctionSnapshot, auctionVolRatio, pickAuctionCoreCodes
 } from '../data.js';
 
 let pass = 0;
@@ -294,6 +295,82 @@ console.log('[B12] 品牌批：命名三处一致 + 图标 PNG 尺寸与 manifes
     const declared = icon.sizes.split('x').map(Number);
     ok(`图标 ${icon.src} 为合法 PNG 且尺寸 ${icon.sizes} 与文件一致（purpose ${icon.purpose}）`,
       Boolean(dims) && dims.w === declared[0] && dims.h === declared[1]);
+  }
+}
+
+console.log('[B14] 集合竞价：parseAuctionTrend / auctionVolRatio / pickAuctionCoreCodes / collectAuctionSnapshot');
+{
+  // 对象形态（实测主形态）：f2=YYMMDDHHMM、f3=价格×100、f8=参考价×1000、f14/f15=申报量(股)、f9=竞价额(元)、f10=竞价量(手)
+  const mk = (hhmm, f3, f8, f14, f15, f9, f10) => ({ f2: '260831' + hhmm, f3, f8, f14, f15, f9, f10 });
+  const payload = { data: [
+    mk('0915', 1010, 9950, 500000, 800000),
+    mk('0916', 1020, 9950, 600000, 700000),
+    { f2: '2608300915', f3: 1000, f8: 9950, f14: 1, f15: 1 }, // 跨日点：应被过滤
+    mk('0926', 1030, 10300, 134000000, 0, 15330000, 24041),   // 撮合终态点：不出现在 minutes
+  ] };
+  const r = parseAuctionTrend(payload, '20260831');
+  ok('minutes 只含 0915/0916（跨日点被滤、0926 不入列）', r.minutes.length === 2 && r.minutes[0].hhmm === '0915' && r.minutes[1].hhmm === '0916');
+  ok('价格/参考价单位换算 ×100 / ×1000', r.minutes[0].price === 10.10 && r.minutes[0].refPrice === 9.95);
+  ok('申报量原样保留（股）', r.minutes[0].bidShares === 500000 && r.minutes[0].askShares === 800000);
+  ok('撮合终态提取：价/额/量/一字封单', r.matched && r.matched.price === 10.30 && r.matched.amount === 15330000
+    && r.matched.volumeHands === 24041 && r.matched.sealedBuyShares === 134000000);
+  const legacy = parseAuctionTrend({ data: { trends: ['09:15,10.10,100,200', '09:16,10.20,120,240'] } }, '20260831');
+  ok('trends 字符串降级形态可解析（时间+价）', legacy.minutes.length === 2 && legacy.minutes[0].price === 10.10 && legacy.matched === null);
+  const none = parseAuctionTrend({ data: [] }, '20260831');
+  ok('空数据 → minutes 空 + matched null 不抛', none.minutes.length === 0 && none.matched === null);
+  ok('非对象入参不抛', parseAuctionTrend(null, '20260831').minutes.length === 0);
+}
+{
+  // 竞价量比：竞价量(手) / (近5日均量(手)/240)
+  const bars = Array.from({ length: 5 }, (_, i) => ({ date: '2026-08-' + String(25 + i), volume: 2400 }));
+  ok('均量 2400 手 → 量比 24.0', auctionVolRatio(bars, 240) === 24);
+  ok('量比不足 3 根 → null', auctionVolRatio(bars.slice(0, 2), 240) === null);
+  ok('无竞价量 → null', auctionVolRatio(bars, null) === null);
+  ok('当日未定型 bar 剔除后不足 → null', auctionVolRatio([{ date: '2026-08-31', volume: 9999 }], 240) === null);
+}
+{
+  const stocks = [
+    { code: '600001', boards: 5 }, { code: '600002', boards: 5 }, { code: '000003', boards: 3 }, { code: '000004', boards: 1 },
+  ];
+  const core = pickAuctionCoreCodes(stocks, 2);
+  ok('核心票按连板数降序取前 N（同板按代码稳定排序）', core.length === 2 && core[0] === '600001' && core[1] === '600002');
+  ok('limit 至少为 1', pickAuctionCoreCodes(stocks, 0).length === 1);
+}
+{
+  // collectAuctionSnapshot：stub fetch，验证 live/final 两模式与 matchPct/volRatio 装配
+  const realFetch = globalThis.fetch;
+  let calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const code = (String(url).match(/secid=(?:0|1)\.(\d{6})/) || [])[1] || '600001';
+    // 每票同一份形态：昨收 9.95，虚拟价 10.10→10.20，9:26 撮合 10.30（+3.52%）、竞价额 1533 万、24041 手
+    return { ok: true, json: async () => ({ data: [
+      { f2: '2608310915', f3: 1010, f8: 9950, f14: 500000, f15: 800000 },
+      { f2: '2608310916', f3: 1020, f8: 9950, f14: 600000, f15: 700000 },
+      { f2: '2608310926', f3: 1030, f8: 10300, f14: 134000000, f15: 0, f9: 15330000, f10: 24041 },
+    ] }) };
+  };
+  try {
+    // 预置 K 线缓存：600001 有 5 根均量 2400 → volRatio 24；其余票无缓存 → null（诚实降级）
+    storeKlineBars('600001', '20260830', Array.from({ length: 5 }, (_, i) => ({ date: '2026-08-' + String(25 + i), open: 9, close: 9.5, volume: 2400 })));
+    const stocks = [
+      { code: '600001', name: '甲', boards: 5 }, { code: '600002', name: '乙', boards: 4 }, { code: '000003', name: '丙', boards: 2 },
+    ];
+    const coreCodes = ['600001', '600002'];
+    calls = [];
+    const live = await collectAuctionSnapshot('live', stocks, coreCodes, '20260831');
+    ok('live 模式只抓核心票（3 只池只外呼 2 次）', calls.length === 2 && live.items.length === 2);
+    ok('live 撮合数据齐：matchPct 3.52 / volRatio 有缓存票 2404.1 无缓存票 null',
+      live.items.every((i) => i.matched && i.matchPct === 3.52 && i.matchPrice === 10.30 && i.volumeHands === 24041)
+      && live.items.find((i) => i.code === '600001').volRatio === 2404.1 && live.items.find((i) => i.code === '600002').volRatio === null);
+    ok('core 携带逐分钟过程与撮合终态', live.core.length === 2 && live.core[0].minutes.length === 2 && live.core[0].matched.price === 10.30);
+    calls = [];
+    const fin = await collectAuctionSnapshot('final', stocks, coreCodes, '20260831');
+    ok('final 模式抓全池（3 只）', calls.length === 3 && fin.items.length === 3 && fin.mode === 'final');
+    ok('一字封单排队量入 items（134000000 股）', fin.items.every((i) => i.sealedBuyShares === 134000000));
+    ok('无核心票额外补抓：coreCodes 已在池内不再加外呼', fin.core.length === 2);
+  } finally {
+    globalThis.fetch = realFetch;
   }
 }
 

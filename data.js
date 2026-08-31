@@ -291,3 +291,119 @@ export async function searchStock(q) {
   const data = await getJSON(url);
   return (data?.data?.diff || []).map(mapSearchRow);
 }
+
+/* ---------------- 集合竞价（push2his trends/get 免费源，与桌面 server.js 同口径） ---------------- */
+// 字段口径（2026-08-31 实测）：f2=YYMMDDHHMM；f3=价格×100；f8=参考价×1000（竞价段=昨收）；
+// f14/f15=买卖未成交申报量（股；一字板撮合后 f14=涨停价真实排队买盘=9:25 真实封单）；f9=竞价成交额（元）；f10=竞价量（手）。
+const AUCTION_CHUNK_SIZE = 4;      // push2his 对突发并发敏感（同 K 线结论），小批量+轮次间隔
+const AUCTION_CHUNK_GAP_MS = 150;
+const AUCTION_SNAPSHOT_MAX = 150;  // 昨日池上限（极端爆量日截断并诚实标注）
+const AUCTION_CORE_MAX = 12;       // 核心票逐分钟过程采集上限
+
+// 纯函数：trends/get 响应 → { minutes, matched }。按 f2 过滤当日 0915-0926 并升序（防御乱序/跨日段）。
+// 与桌面 server.js:parseAuctionTrend 逐行同体（平行副本同步义务）。
+export function parseAuctionTrend(payload, todayCompact = todayStr()) {
+  const raw = Array.isArray(payload?.data) ? payload.data
+    : Array.isArray(payload?.data?.trends) ? payload.data.trends.map((line) => {
+      // trends 字符串形态 "09:15,价,vol,amount" 与对象形态不同源，仅取时间+价两列作降级
+      const parts = String(line).split(',');
+      const hhmm = String(parts[0] || '').replace(':', '');
+      return { f2: `${todayCompact.slice(2)}${hhmm}`, f3: Number(parts[1]) * 100 };
+    }) : [];
+  const dayKey = String(todayCompact).slice(2); // YYMMDD
+  const points = raw
+    .map((row) => ({ f2: String(row.f2 || ''), f3: Number(row.f3), f8: Number(row.f8), f9: Number(row.f9), f10: Number(row.f10), f14: Number(row.f14), f15: Number(row.f15) }))
+    .filter((p) => p.f2.length >= 10 && p.f2.slice(0, 6) === dayKey)
+    .map((p) => ({ ...p, hhmm: p.f2.slice(-4) }))
+    .filter((p) => p.hhmm >= '0915' && p.hhmm <= '0926')
+    .sort((a, b) => (a.hhmm < b.hhmm ? -1 : a.hhmm > b.hhmm ? 1 : 0));
+  const minutes = [];
+  let matched = null;
+  for (const p of points) {
+    const row = {
+      hhmm: p.hhmm,
+      price: Number.isFinite(p.f3) ? p.f3 / 100 : null,
+      refPrice: Number.isFinite(p.f8) ? p.f8 / 1000 : null,
+      bidShares: Number.isFinite(p.f14) ? p.f14 : null,
+      askShares: Number.isFinite(p.f15) ? p.f15 : null
+    };
+    if (p.hhmm === '0926') matched = { price: row.price, amount: Number.isFinite(p.f9) ? p.f9 : null, volumeHands: Number.isFinite(p.f10) ? p.f10 : null, sealedBuyShares: row.bidShares };
+    else minutes.push(row);
+  }
+  return { minutes, matched };
+}
+
+// 单票竞价趋势（抽屉 adhoc 亦用：trends/get 全天含竞价段，任意时点可取当日竞价过程）
+export async function fetchAuctionTrend(code, opts = {}) {
+  const secid = marketPrefix(code) + code;
+  const url = `https://push2his.eastmoney.com/api/qt/stock/trends/get?ut=${EMA.token}&fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&secid=${secid}&_=${Date.now()}`;
+  const payload = await getJSON(url, opts.tries ?? 2, opts.timeoutMs ?? 8000);
+  return parseAuctionTrend(payload);
+}
+
+// 近 N 根日K（任意 dateKey 缓存均可：日K 不可变，昨日缓存的 bar 今日依旧有效），剔除当日未定型 bar
+export function lastBarsFor(code, todayCompact, n = 8) {
+  const hit = klineCacheByDate.get(String(code));
+  if (!hit) return [];
+  const today = String(todayCompact).replace(/-/g, '');
+  return hit.bars.filter((b) => String(b.date).replace(/-/g, '') !== today).slice(-n);
+}
+
+// 竞价量比：竞价量(手) / (近5日均量(手)/240)；K线与竞价量同为手，口径一致；缺 K 线返 null（诚实降级）
+export function auctionVolRatio(bars = [], volumeHands = null) {
+  if (!Number.isFinite(Number(volumeHands)) || Number(volumeHands) <= 0) return null;
+  const vols = (bars || []).map((bar) => Number(bar.volume)).filter((v) => Number.isFinite(v) && v > 0);
+  if (vols.length < 3) return null;
+  const avg = vols.reduce((sum, v) => sum + v, 0) / vols.length;
+  if (!avg) return null;
+  return Number((Number(volumeHands) / (avg / 240)).toFixed(2));
+}
+
+// 核心票挑选：昨日池按连板数降序（移动端历史记录无封单额，同板按代码稳定排序），取前 N
+export function pickAuctionCoreCodes(stocks = [], limit = AUCTION_CORE_MAX) {
+  return [...stocks]
+    .sort((a, b) => (Number(b.boards) || 1) - (Number(a.boards) || 1) || String(a.code).localeCompare(String(b.code)))
+    .slice(0, Math.max(1, limit))
+    .map((stock) => stock.code);
+}
+
+// 批量采集：mode='live' 只抓核心票逐分钟过程（≤12 只）；mode='final' 抓全池撮合终态（≤150 只）
+// 与桌面 collectAuctionSnapshot 同体，仅量比数据源从 DB K线换为本地 K线缓存。
+export async function collectAuctionSnapshot(mode = 'final', stocks = [], coreCodes = [], todayCompact = todayStr()) {
+  const targets = mode === 'live'
+    ? stocks.filter((stock) => coreCodes.includes(stock.code))
+    : stocks.slice(0, AUCTION_SNAPSHOT_MAX);
+  const byCode = new Map(targets.map((stock) => [stock.code, stock]));
+  if (coreCodes.length && mode === 'final') for (const code of coreCodes) if (!byCode.has(code)) byCode.set(code, { code });
+  const codes = [...byCode.keys()];
+  const trends = new Map();
+  let failed = 0;
+  for (let offset = 0; offset < codes.length; offset += AUCTION_CHUNK_SIZE) {
+    if (offset > 0) await new Promise((resolve) => setTimeout(resolve, AUCTION_CHUNK_GAP_MS));
+    const chunk = codes.slice(offset, offset + AUCTION_CHUNK_SIZE);
+    const settled = await Promise.allSettled(chunk.map((code) => fetchAuctionTrend(code)));
+    settled.forEach((result, index) => {
+      if (result.status === 'fulfilled') trends.set(chunk[index], result.value);
+      else failed += 1;
+    });
+  }
+  const items = [];
+  const core = [];
+  for (const [code, trend] of trends) {
+    const stock = byCode.get(code) || {};
+    const preClose = (trend.minutes[0]?.refPrice ?? trend.minutes[trend.minutes.length - 1]?.refPrice) ?? null;
+    const matched = trend.matched;
+    const livePrice = matched?.price ?? trend.minutes[trend.minutes.length - 1]?.price ?? null;
+    const matchPct = matched?.price && preClose ? Number(((matched.price / preClose - 1) * 100).toFixed(2)) : null;
+    const livePct = livePrice && preClose ? Number(((livePrice / preClose - 1) * 100).toFixed(2)) : null;
+    const volRatio = auctionVolRatio(lastBarsFor(code, todayCompact), matched?.volumeHands ?? null);
+    items.push({
+      code, name: stock.name || null, boards: Number(stock.boards) || null,
+      matched: Boolean(matched), matchPrice: matched?.price ?? null, matchPct, livePct,
+      preClose, auctionAmount: matched?.amount ?? null, volumeHands: matched?.volumeHands ?? null,
+      volRatio, sealedBuyShares: matched?.sealedBuyShares ?? null
+    });
+    if (coreCodes.includes(code)) core.push({ code, name: stock.name || null, boards: Number(stock.boards) || null, minutes: trend.minutes, matched });
+  }
+  return { date: String(todayCompact), mode, count: items.length, failed, truncated: mode === 'final' && stocks.length > AUCTION_SNAPSHOT_MAX, items, core };
+}

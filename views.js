@@ -67,7 +67,7 @@ export function fmtMoney(v) {
   return String(Math.round(v));
 }
 export function pctClass(p) { return p > 0 ? 'up-c' : p < 0 ? 'down-c' : 'flat-c'; }
-export function pctText(p) { if (p == null) return '--'; return (p > 0 ? '+' : '') + Number(p).toFixed(2) + '%'; }
+export function pctText(p) { const n = Number(p); if (p == null || !Number.isFinite(n)) return '--'; return (n > 0 ? '+' : '') + n.toFixed(2) + '%'; }
 // 评分维度 breakdown 的英文字键 → 中文标签（展示层用；未知键回退原值，新增维度不消失）。
 export const BD_LABELS = {
   height: '高度', theme: '题材', position: '地位', coordination: '协同', turnover: '换手',

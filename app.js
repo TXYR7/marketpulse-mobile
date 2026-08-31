@@ -461,6 +461,11 @@ async function loadWatch() {
     const q = await fetchQuotes(needQuote).catch(() => ({}));
     if (Object.keys(q).length) { mergeQuotes(q); state.quotesAt = Date.now(); }
   }
+  // 早期按代码加入的自选（名字存成了代码）：报价带回了名字就回填存储，列表/抽屉不再显示纯代码
+  for (const w of state.watch) {
+    const n = state.quotes[w.code] && state.quotes[w.code].name;
+    if (n && n !== w.code && (!w.name || w.name === w.code)) { w.name = n; putWatch(w).catch(() => {}); }
+  }
   renderWatch();
 }
 
@@ -483,7 +488,7 @@ async function openSheet(code) {
   const scrim = $('#scrim'), sheet = $('#sheet');
   let stock = null;
   if (state.pools) stock = state.pools.up.find((x) => x.code === code) || state.pools.down.find((x) => x.code === code) || state.pools.broken.find((x) => x.code === code);
-  if (!stock) { const w = state.watch.find((x) => x.code === code); if (w) stock = { code, name: w.name || code, boards: 1, industry: '—', changePct: null, price: null }; }
+  if (!stock) { const w = state.watch.find((x) => x.code === code); if (w) stock = { code, name: (state.quotes[code] && state.quotes[code].name) || w.name || code, boards: 1, industry: '—', changePct: null, price: null }; }
   if (!stock) return;
   state.sheetCode = code;
   // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
@@ -1173,6 +1178,8 @@ function bind() {
     if (state.watch.some((w) => w.code === code)) { toast('已在自选'); return; }
     let name = code;
     if (state.pools) { const s = [...state.pools.up, ...state.pools.down, ...state.pools.broken].find((x) => x.code === code); if (s) name = s.name; }
+    // 池外票：报价缓存（fetchQuotes 带 f14 名字）里有的话直接用，别把代码存成名字
+    if (name === code && state.quotes[code] && state.quotes[code].name) name = state.quotes[code].name;
     await putWatch({ code, name, addedAt: Date.now() });
     state.watch.push({ code, name, addedAt: Date.now() });
     e.target.value = ''; toast('已加入自选'); loadWatch();

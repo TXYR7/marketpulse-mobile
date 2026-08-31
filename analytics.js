@@ -27,6 +27,18 @@ function parseSealTime(value) {
   return hour * 3600 + minute * 60 + second;
 }
 
+// 东财 fbt 原始形态是 92500 这类数字，直显会渲染成「首封 92500」；展示前统一转成 09:25:00。
+// 已是 HH:MM:SS 的输入原样返回；解析失败回退原始字符串。（与桌面 analytics.js 平行副本保持同步）
+function fmtSealTime(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const digits = String(value).replace(/\D/g, '').padStart(6, '0').slice(-6);
+  const hour = Number(digits.slice(0, 2));
+  const minute = Number(digits.slice(2, 4));
+  const second = Number(digits.slice(4, 6));
+  if (!digits || hour > 23 || minute > 59 || second > 59) return String(value);
+  return `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)}`;
+}
+
 /* ---------- 炸板率 ---------- */
 function calculateBreakRate({ limitUpCount, brokenCount, available, previousRate = null }) {
   const sealedCount = finiteNumber(limitUpCount);
@@ -682,6 +694,8 @@ function approximatePhaseOf(limitUp, multiBoard, maxBoard) {
   if (limitUp >= 80) return 4;
   return 2;
 }
+// approximatePhaseOf 序数 → 中文阶段名（与桌面 analytics.js PHASE_NAMES 同表同步）
+const PHASE_NAMES = ['冰点', '退潮初期', '修复', '修复', '分歧期', '主升期', '高潮'];
 function vectorOfStocks(stocks = []) {
   const boards = stocks.map((stock) => Number(stock.boards) || 1);
   const limitUp = stocks.length;
@@ -741,7 +755,7 @@ function buildSimilarDays(days = [], todayStocks = [], limit = 3) {
           { label: '最高板', cur: today.maxBoard, hist: hist.maxBoard },
           { label: '连板数', cur: today.multiBoard, hist: hist.multiBoard },
           { label: '题材宽度', cur: today.themeBreadth, hist: hist.themeBreadth },
-          { label: '情绪阶段', cur: today.phase, hist: hist.phase }
+          { label: '情绪阶段', cur: PHASE_NAMES[today.phase] ?? today.phase, hist: PHASE_NAMES[hist.phase] ?? hist.phase }
         ]
       };
     })
@@ -1119,7 +1133,10 @@ function buildCopilotAnswer(key, payload) {
     const strategy = phaseStrategy(status.phase) || {};
     fact = `当前阶段：<b>${esc(status.phase || '--')}</b>`;
     infer = spans(['明日方向取决于竞价与开盘确认']);
-    advise = spans([('可参与：' + (strategy.allowed || []).join(' / ') || '等待方向选择'), ('禁止：' + (strategy.forbidden || []).join(' / ') || '无')]);
+    // 先拼列表再拼前缀：此前 '可参与：' + 空数组 恒为真值，兜底文案「等待方向选择」永不生效
+    const allowedText = (strategy.allowed || []).join(' / ') || '等待方向选择';
+    const forbiddenText = (strategy.forbidden || []).join(' / ') || '无';
+    advise = spans([`可参与：${allowedText}`, `禁止：${forbiddenText}`]);
   } else if (key === 'health') {
     const h = payload.health;
     if (!h) { fact = '健康数据缺失'; infer = '无法评估数据源可信度'; advise = '以快照/缓存为准，谨慎决策'; }
@@ -1271,10 +1288,10 @@ function assessPromotion(stock, ctx = {}) {
   // ② 封板时间（20）
   const sealSec = parseSealTime(stock.firstSealTime);
   if (sealSec === null) push('seal', '封板时间', 'na', '首封时间缺失');
-  else if (sealSec <= PROMO_RULES.sealTopBefore) { scoreDim(20, undefined, 1); push('seal', '封板时间', 'pass', `${stock.firstSealTime} 秒板级——做多意愿极致坚决`); }
-  else if (sealSec <= PROMO_RULES.sealGoodBefore) { scoreDim(20, undefined, 0.75); push('seal', '封板时间', 'pass', `${stock.firstSealTime} 早盘硬板（10:30 前），主力意图明确`); }
-  else if (sealSec >= PROMO_RULES.sealWeakAfter) { scoreDim(20, undefined, 0); push('seal', '封板时间', 'fail', `${stock.firstSealTime} 尾盘偷袭板——资金信心不足，次日炸板断板概率极高`); }
-  else { scoreDim(20, undefined, 0.3); push('seal', '封板时间', 'warn', `${stock.firstSealTime} 午后封板，合力偏弱`); }
+  else if (sealSec <= PROMO_RULES.sealTopBefore) { scoreDim(20, undefined, 1); push('seal', '封板时间', 'pass', `${fmtSealTime(stock.firstSealTime)} 秒板级——做多意愿极致坚决`); }
+  else if (sealSec <= PROMO_RULES.sealGoodBefore) { scoreDim(20, undefined, 0.75); push('seal', '封板时间', 'pass', `${fmtSealTime(stock.firstSealTime)} 早盘硬板（10:30 前），主力意图明确`); }
+  else if (sealSec >= PROMO_RULES.sealWeakAfter) { scoreDim(20, undefined, 0); push('seal', '封板时间', 'fail', `${fmtSealTime(stock.firstSealTime)} 尾盘偷袭板——资金信心不足，次日炸板断板概率极高`); }
+  else { scoreDim(20, undefined, 0.3); push('seal', '封板时间', 'warn', `${fmtSealTime(stock.firstSealTime)} 午后封板，合力偏弱`); }
 
   // ③ 竞价承接（15）
   const av = auctionVerdict(stock, ctx);

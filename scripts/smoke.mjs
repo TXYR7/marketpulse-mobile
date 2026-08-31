@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
-  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot
+  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays
 } from '../analytics.js';
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
@@ -149,6 +149,33 @@ console.log('[B7] routeCopilotQuery 自由文本路由（G25 输入框）');
   ok('『现在该上几成仓位』→ position', routeCopilotQuery('现在该上几成仓位', COPILOT_QUESTIONS) === 'position');
   ok('『炸板率有点高』→ breakrate（移动端 key 为小写）', routeCopilotQuery('炸板率有点高', COPILOT_QUESTIONS) === 'breakrate');
   ok('无匹配 → null', routeCopilotQuery('xyz乱码', COPILOT_QUESTIONS) === null);
+}
+
+console.log('[B16] 渲染卫生批：封板时间格式化 / 阶段中文 / 停牌横线清洗 / copilot 空档兜底');
+{
+  // fbt 原始数字 → 检查表注记 HH:MM:SS（曾直显「93500 秒板级」）
+  const promo = assessPromotion({ code: '300001', boards: 2, firstSealTime: 93500, breakCount: 0 }, { phase: '主升期', themeSize: 5, role: '板块龙头', openPct: 2.1 });
+  const sealNote = promo.checklist.find((c) => c.label === '封板时间');
+  ok('封板时间注记 09:35:00（不再直显 93500）', sealNote.note.includes('09:35:00') && !sealNote.note.includes('93500'));
+  // 相似行情「情绪阶段」中文阶段名（不再直显 0-6 序数）
+  const days = [
+    { date: '20260810', stocks: [{ code: 'A', boards: 2 }, { code: 'B', boards: 1 }] },
+    { date: '20260811', stocks: [{ code: 'A', boards: 3 }, { code: 'B', boards: 1 }, { code: 'C', boards: 1 }] }
+  ];
+  const sim = buildSimilarDays(days, days[1].stocks);
+  const dim = sim.similar[0].dimensions.find((d) => d.label === '情绪阶段');
+  ok('相似行情情绪阶段为中文名', typeof dim.cur === 'string' && !/^\d$/.test(dim.cur) && typeof dim.hist === 'string' && !/^\d$/.test(dim.hist));
+  // 停牌行 '-' 清洗：changePct/turnover→null（不再 NaN%/toFixed 崩），fbt→09:25:00
+  const merged = mergePools('20260831', [
+    { status: 'fulfilled', value: { data: { qdate: '20260831', pool: [{ c: '000001', n: '测试', p: 10000, zdp: '-', fund: '-', hs: '-', zbc: 0, ltsz: '-', amount: '-', fbt: 92500 }] } } },
+    { status: 'fulfilled', value: { data: { pool: [] } } },
+    { status: 'fulfilled', value: { data: { pool: [] } } }
+  ]);
+  ok('停牌 \'-\' 清洗为 null', merged.up[0].changePct === null && merged.up[0].turnover === null && merged.up[0].seal === null);
+  ok('mapPool fbt 92500 → firstSealTime 09:25:00', merged.up[0].firstSealTime === '09:25:00');
+  // copilot 明天重点：未知阶段不再渲染空「可参与： / 禁止：」
+  const ans = buildCopilotAnswer('tomorrow', { status: { phase: '数据不足' } });
+  ok('未知阶段 → 等待方向选择 兜底生效', ans.includes('等待方向选择') && !ans.includes('可参与：</span>') );
 }
 
 console.log('[B8] 版本一致性（sw.js CACHE ↔ version.js APP_VERSION）');

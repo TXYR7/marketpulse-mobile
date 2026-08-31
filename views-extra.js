@@ -119,7 +119,9 @@ export function renderTrades(ctx) {
 
     const ledger = trades.length ? trades.map((t) => {
       const at = attributionOf(t);
-      return '<div class="ledger-row"><div><div class="nm">' + esc(t.name || t.code) + ' <span class="pill">' + esc(t.strategy || '') + '</span></div>' +
+      // 旧记录可能只存了代码：报价缓存有名字就显示名字
+      const nameOf = (t) => (t.name && t.name !== t.code) ? t.name : ((ctx.state && ctx.state.quotes && ctx.state.quotes[t.code] && ctx.state.quotes[t.code].name) || t.name || t.code);
+      return '<div class="ledger-row"><div><div class="nm">' + esc(nameOf(t)) + ' <span class="pill">' + esc(t.strategy || '') + '</span></div>' +
         '<div class="meta">' + (t.date || '') + ' · ' + esc((t.buyReasons || []).join('/')) + '</div>' +
         '<div class="meta">盘面 ' + at.market + ' / 题材 ' + at.theme + ' / 个股 ' + at.stock + ' / 买卖 ' + (at.buy + at.sell).toFixed(2) + '</div></div>' +
         '<div style="text-align:right"><div class="pnl ' + (t.pnl >= 0 ? 'up-c' : 'down-c') + '">' + (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(2) + '</div>' +
@@ -212,7 +214,13 @@ if (typeof document !== 'undefined') {
     const pnl = parseFloat(q('#tfPnl').value);
     if (isNaN(pnl)) { ctx.toast('请输入盈亏'); return; }
     const groups = selGroups(container);
-    const name = q('#tfName').value.trim() || code;
+    // 名字留空时：池/报价缓存里有中文名就用它，别把代码存成名字（台账要给人看）
+    let name = q('#tfName').value.trim();
+    if (!name) {
+      const st = ctx.state || {};
+      const pool = st.pools && [].concat(st.pools.up, st.pools.down, st.pools.broken).find((x) => x.code === code);
+      name = (pool && pool.name) || (st.quotes && st.quotes[code] && st.quotes[code].name) || code;
+    }
     const trade = {
       id: Date.now() + '-' + code, code, name,
       date: q('#tfDate').value || new Date().toISOString().slice(0, 10),

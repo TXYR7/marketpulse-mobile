@@ -107,11 +107,12 @@ export function sealQuality({ sealAmount, circulatingValue, breakCount = 0 }) {
 // 字段口径与桌面 server.js:mapStocks 对齐，确保同一只股票在两端的归一化输入一致（否则评分分层会漂移）。
 function mapPool(row) {
   const boards = Number(row.lbc || row.zttj?.ct || 1); // 与桌面一致：缺 lbc 时回退 zttj.ct，且 0 也视为有效
-  const zdp = row.zdp;
-  const fund = row.fund ?? null;
-  const hs = row.hs;
-  const zbc = row.zbc ?? 0;
-  const ltsz = row.ltsz ?? null;
+  // 停牌/缺字段时东财可能返回 '-'：统一 toNum 清洗成 null，下游 toFixed/pctText 只判 null（fetchQuotes 已同口径）
+  const zdp = toNum(row.zdp);
+  const fund = toNum(row.fund);
+  const hs = toNum(row.hs);
+  const zbc = toNum(row.zbc) ?? 0;
+  const ltsz = toNum(row.ltsz);
   const seal = sealQuality({ sealAmount: fund, circulatingValue: ltsz, breakCount: zbc });
   return {
     code: String(row.c),
@@ -122,7 +123,8 @@ function mapPool(row) {
     changePercent: zdp,
     boards,
     firstSeal: row.fbt,
-    firstSealTime: row.fbt,
+    // fbt 是 92500 这类数字，直显会渲染成「92500」；统一转 HH:MM:SS（fmtTime 与桌面 fmtSealTime 同口径）
+    firstSealTime: row.fbt != null && row.fbt !== '' ? fmtTime(row.fbt) : '',
     lastSeal: row.lbt,
     breaks: zbc,
     breakCount: zbc,
@@ -133,10 +135,10 @@ function mapPool(row) {
     sealStars: seal ? seal.stars : null, // 桌面 mapStocks 计算，移动端此前缺失 → 封单维度被静默清零
     sealRatio: seal ? seal.ratio : null,
     sealLabel: seal ? seal.label : null,
-    amount: row.amount ?? null, // 成交额(元)
+    amount: toNum(row.amount), // 成交额(元)
     circ: ltsz,
     circulatingValue: ltsz, // 流通市值(元)
-    total: row.tshare ?? null,
+    total: toNum(row.tshare),
     industry: row.hybk || '未分类',
     zttj: row.zttj || null,
   };
@@ -294,10 +296,11 @@ export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sor
     code: String(row.f12),
     market: row.f13,
     name: row.f14,
-    price: row.f2,
-    changePct: row.f3,
-    volume: row.f5, // 手
-    amount: row.f6, // 元
+    // 停牌/缺字段时东财返回 '-'：清洗成 null，否则 r.price.toFixed 直接抛错、pctText 渲染 NaN%
+    price: toNum(row.f2),
+    changePct: toNum(row.f3),
+    volume: toNum(row.f5), // 手
+    amount: toNum(row.f6), // 元
     industry: row.f100 || '—',
     update: row.f124,
   }));

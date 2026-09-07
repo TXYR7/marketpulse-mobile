@@ -305,6 +305,10 @@ main {
 .btag-cy { color: #fb923c; background: rgba(249, 115, 22, 0.12); border: 1px solid rgba(249, 115, 22, 0.25); }
 .btag-kc { color: #22d3ee; background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.25); }
 .btag-bj { color: #c084fc; background: rgba(192, 132, 252, 0.12); border: 1px solid rgba(192, 132, 252, 0.25); }
+/* 浅色变体：亮底彩字加深保对比（同桌面 2026-09-07 补齐） */
+html[data-theme="light"] .btag-cy { color: #c2600d; background: rgba(194, 96, 13, 0.10); border-color: rgba(194, 96, 13, 0.28); }
+html[data-theme="light"] .btag-kc { color: #0e7490; background: rgba(14, 116, 144, 0.10); border-color: rgba(14, 116, 144, 0.28); }
+html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 237, 0.10); border-color: rgba(124, 58, 237, 0.28); }
 .muted { color: var(--muted); font-size: 12px; }
 
 /* 骨架屏（首屏加载占位） */

@@ -1159,6 +1159,14 @@ function bind() {
   $('#menuBtn').addEventListener('click', openMenu);
   $('#menuScrim').addEventListener('click', closeMenu);
   $('#refreshBtn').addEventListener('click', () => refresh(true));
+  // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
+  $('#themeBtn').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = next;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', next === 'light' ? '#ffffff' : '#18181b');
+    try { localStorage.setItem('mp-theme', next); } catch {}
+  });
   // 涨停池搜索防抖（共享 views.js 的 debounce），避免逐键全列表重建
   $('#ztSearch').addEventListener('input', debounce((e) => { state.ztFilterText = e.target.value; renderZt(); }, 250));
   // 折叠池首次展开才渲染

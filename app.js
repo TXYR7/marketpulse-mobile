@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, fetchAuctionTrend, collectAuctionSnapshot, pickAuctionCoreCodes } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, fetchAuctionTrend, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -245,7 +245,7 @@ function ztCard(x) {
   const auc = aucInfoOf(x.code);
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
-    '<div><div class="name">' + esc(x.name) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
+    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
     (auc ? '<div class="auc">竞价 <b class="' + pctClass(auc.pct) + '">' + pctText(auc.pct) + '</b><em>' + (auc.matched ? '撮合' : '虚拟') + '</em></div>' : '') + '</div>' +
     '<div class="right">' +

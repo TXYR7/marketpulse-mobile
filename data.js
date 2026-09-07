@@ -390,6 +390,15 @@ export function auctionVolRatio(bars = [], volumeHands = null) {
   return Number((Number(volumeHands) / (avg / 240)).toFixed(2));
 }
 
+// 板块徽章（TSP stock-table 同款，与桌面 app.js boardTagHtml 平行副本）：创/科/北 一眼区分交易规则，纯样式
+export function boardTag(code = '') {
+  const c = String(code);
+  if (/^(300|301)/.test(c)) return '<i class="btag btag-cy" title="创业板">创</i>';
+  if (/^688/.test(c)) return '<i class="btag btag-kc" title="科创板">科</i>';
+  if (/^(43|8[3-9]|92)/.test(c)) return '<i class="btag btag-bj" title="北交所">北</i>';
+  return '';
+}
+
 // 核心票挑选：昨日池按连板数降序（移动端历史记录无封单额，同板按代码稳定排序），取前 N
 export function pickAuctionCoreCodes(stocks = [], limit = AUCTION_CORE_MAX) {
   return [...stocks]

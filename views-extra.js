@@ -1,5 +1,5 @@
 // views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
-import { fetchAllMarket, searchStock } from './data.js';
+import { fetchAllMarket, searchStock, boardTag } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, routeCopilotQuery } from './analytics.js';
 import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
@@ -15,7 +15,7 @@ export function renderMarket(ctx) {
 
   function marketRow(r) {
     const pc = r.changePct > 0 ? 'up-c' : r.changePct < 0 ? 'down-c' : 'flat-c';
-    return '<div class="market-row" data-code="' + r.code + '"><div><div class="nm">' + esc(r.name) + '</div><div class="code">' + r.code + ' · ' + (r.industry || '—') + '</div></div>' +
+    return '<div class="market-row" data-code="' + r.code + '"><div><div class="nm">' + esc(r.name) + boardTag(r.code) + '</div><div class="code">' + r.code + ' · ' + (r.industry || '—') + '</div></div>' +
       '<div class="right"><div class="price ' + pc + '">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
       '<div class="amt">' + (r.changePct != null ? pctText(r.changePct) : '') + '</div></div></div>';
   }

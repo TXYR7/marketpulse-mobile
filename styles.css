@@ -110,7 +110,7 @@ button { font-family: inherit; cursor: pointer; }
 .topbar .refresh-btn {
   border: 0; background: none; color: var(--ink);
   width: 44px; height: 38px; font-size: 17px;
-  transition: transform 0.1s ease;
+  transition: transform 0.1s var(--ease-out);
 }
 .topbar .refresh-btn:active { transform: scale(0.92); opacity: .7; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -149,11 +149,11 @@ button { font-family: inherit; cursor: pointer; }
 .hamburger {
   border: 0; background: none; color: var(--ink);
   width: 42px; height: 36px; font-size: 17px; margin-right: 8px;
-  transition: transform 0.1s ease;
+  transition: transform 0.1s var(--ease-out);
 }
 .hamburger:active { transform: scale(0.92); opacity: .7; }
 .menu-scrim {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s var(--ease-out);
 }
 .menu-scrim.show { opacity: 1; pointer-events: auto; }
 .menu-panel {
@@ -167,7 +167,7 @@ button { font-family: inherit; cursor: pointer; }
 .menu-panel .menu-item {
   display: flex; align-items: center; gap: 10px; padding: 12px 10px; margin-bottom: 2px;
   border-radius: var(--r-m); font-size: 15px; font-weight: 600; cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s var(--ease-out);
   /* button 重置（原为 div，改为可聚焦元素后清掉浏览器默认样式） */
   width: 100%; text-align: left; border: 0; background: none; color: inherit; font-family: inherit;
 }
@@ -201,7 +201,7 @@ main {
 .search {
   flex: 1; display: flex; align-items: center; gap: 6px; background: var(--surface);
   border: 1px solid var(--line); border-radius: var(--r-s); padding: 0 10px; height: 40px;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s var(--ease-out);
 }
 .search:focus-within { border-color: var(--teal); }
 .search input { flex: 1; border: 0; background: transparent; color: var(--ink); font-size: 14px; outline: none; }
@@ -209,7 +209,7 @@ main {
 .seg button {
   border: 0; background: var(--surface-2); color: var(--muted);
   border-radius: var(--r-s); padding: 0 12px; height: 40px; font-size: 13px;
-  transition: background 0.15s ease, transform 0.08s ease;
+  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
 }
 .seg button.on { background: var(--fill-teal); color: #fff; }
 .seg button:active { transform: scale(0.94); }
@@ -217,7 +217,7 @@ main {
 .subtab button {
   border: 0; background: var(--surface-2); color: var(--muted);
   border-radius: var(--r-s); padding: 10px 15px; font-size: 13px;
-  transition: background 0.15s ease, transform 0.08s ease;
+  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
 }
 .subtab button.on { background: var(--fill-teal); color: #fff; }
 .subtab button:active { transform: scale(0.94); }
@@ -230,7 +230,7 @@ main {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 10px 12px; display: flex; align-items: center; gap: 10px;
   box-shadow: var(--shadow-1);
-  transition: transform 0.08s ease;
+  transition: transform 0.08s var(--ease-out);
   content-visibility: auto; contain-intrinsic-size: auto 74px;
 }
 .card:active { transform: scale(0.985); }
@@ -261,7 +261,7 @@ main {
   list-style: none; padding: 11px 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
 }
 .fold > summary::-webkit-details-marker { display: none; }
-.fold > summary::before { content: "▸"; color: var(--muted); font-size: 12px; margin-right: 8px; transition: transform 0.15s ease; }
+.fold > summary::before { content: "▸"; color: var(--muted); font-size: 12px; margin-right: 8px; transition: transform 0.15s var(--ease-out); }
 .fold[open] > summary::before { transform: rotate(90deg); }
 .fold > summary .fold-title { flex: 1; }
 .fold[open] > :not(summary) { animation: viewin 0.18s ease-out; } /* 展开内容淡入,代替原生 details 硬跳 */
@@ -293,6 +293,18 @@ main {
 
 /* 空状态 / 加载 */
 .empty { text-align: center; color: var(--muted); padding: 30px 14px; font-size: 13px; line-height: 1.7; }
+/* TSP §6.0.5 空状态：图示 + 文案引导 */
+.empty::before { content: ''; display: block; width: 36px; height: 36px; margin: 0 auto 10px; opacity: .8; background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a9b4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16v13H4z'/%3E%3Cpath d='M4 7l2-3h12l2 3'/%3E%3Cpath d='M4 12h5a3 3 0 0 0 6 0h5'/%3E%3C/svg%3E"); }
+.all-empty { display: grid; min-height: 140px; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 0 12px; }
+
+/* TSP 遮罩毛玻璃：抽屉/底部弹层打开时背景轻微虚化 */
+.scrim, .menu-scrim { backdrop-filter: blur(2px); }
+
+/* 板块徽章（创/科/北 · TSP stock-table 同款：彩字 + 12% 底 + 25% 描边，两主题通用） */
+.btag { display: inline-block; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; font-style: normal; line-height: 13px; vertical-align: 1px; }
+.btag-cy { color: #fb923c; background: rgba(249, 115, 22, 0.12); border: 1px solid rgba(249, 115, 22, 0.25); }
+.btag-kc { color: #22d3ee; background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.25); }
+.btag-bj { color: #c084fc; background: rgba(192, 132, 252, 0.12); border: 1px solid rgba(192, 132, 252, 0.25); }
 .muted { color: var(--muted); font-size: 12px; }
 
 /* 骨架屏（首屏加载占位） */
@@ -324,7 +336,7 @@ main {
   flex: 1; border: 0; background: transparent; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   font-size: 11px; border-radius: var(--r-m);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .bottomnav button .ic { display: inline-flex; align-items: center; line-height: 1; }
 .bottomnav button.on { background: var(--teal-soft); color: var(--teal); font-weight: 700; }
@@ -333,7 +345,7 @@ main {
 /* ===== 详情底部抽屉 ===== */
 .scrim {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 40; opacity: 0;
-  pointer-events: none; transition: opacity 0.2s ease;
+  pointer-events: none; transition: opacity 0.2s var(--ease-out);
 }
 .scrim.show { opacity: 1; pointer-events: auto; }
 .sheet {
@@ -359,7 +371,7 @@ main {
 .btn {
   flex: 1; border: 0; background: var(--surface-2); color: var(--ink);
   border-radius: 10px; height: 42px; font-size: 14px; font-weight: 700;
-  transition: transform 0.08s ease, filter 0.15s ease;
+  transition: transform 0.08s var(--ease-out), filter 0.15s var(--ease-out);
 }
 .btn:active { transform: scale(0.97); filter: brightness(0.92); }
 .btn.primary {
@@ -372,10 +384,10 @@ main {
 .set-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 2px; border-bottom: 1px solid var(--line-soft); }
 .set-row:last-child { border-bottom: 0; }
 .set-row label { font-weight: 600; }
-.set-row select { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-s); padding: 7px 10px; font-size: 14px; transition: border-color 0.15s ease; }
+.set-row select { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-s); padding: 7px 10px; font-size: 14px; transition: border-color 0.15s var(--ease-out); }
 .set-row select:focus { border-color: var(--teal); outline: none; }
 /* input 选择器从 type=number 放宽:修复 #setToken(type=text) 此前无任何规则、渲染浏览器默认灰框+默认字体 */
-.set-row input { width: 90px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-s); padding: 7px 10px; font-size: 14px; font-family: inherit; transition: border-color 0.15s ease; }
+.set-row input { width: 90px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-s); padding: 7px 10px; font-size: 14px; font-family: inherit; transition: border-color 0.15s var(--ease-out); }
 .set-row input:focus { border-color: var(--teal); outline: none; }
 .about { color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 14px; }
 
@@ -383,7 +395,7 @@ main {
 .ptr {
   flex: none;
   text-align: center; color: var(--teal); font-size: 12px; height: 0; overflow: hidden;
-  transition: height 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: height 0.2s var(--ease-out); display: flex; align-items: center; justify-content: center; gap: 6px;
 }
 .ptr.show { height: 40px; }
 .ptr .spin { display: inline-block; animation: spin 0.8s linear infinite; }
@@ -455,7 +467,7 @@ main {
 .tier-head .c { color: var(--muted); font-size: 12px; }
 .opp-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
-  padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow-1); transition: transform 0.08s ease;
+  padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow-1); transition: transform 0.08s var(--ease-out);
 }
 .opp-card:active { transform: scale(0.985); }
 .opp-card .row1 { display: flex; align-items: center; gap: 8px; }
@@ -473,7 +485,7 @@ main {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 12px; margin: 8px 0; box-shadow: var(--shadow-1);
 }
-.leader-card, .market-row, .review-card { transition: transform 0.08s ease; }
+.leader-card, .market-row, .review-card { transition: transform 0.08s var(--ease-out); }
 .leader-card:active, .market-row:active, .review-card:active { transform: scale(0.985); }
 .plan-verdict { font-weight: 800; font-size: 15px; margin-bottom: 6px; }
 .plan-rules { list-style: none; padding: 0; margin: 0; }
@@ -531,18 +543,18 @@ main {
 .trade-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .trade-form input, .trade-form select, .trade-form textarea {
   background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 10px; font-size: 14px; font-family: inherit;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s var(--ease-out);
 }
 .trade-form input:focus, .trade-form select:focus, .trade-form textarea:focus { border-color: var(--teal); outline: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips .chip-btn {
   border: 0; background: var(--surface-2); color: var(--muted);
   border-radius: var(--r-s); padding: 9px 14px; font-size: 12px;
-  transition: background 0.15s ease, transform 0.08s ease;
+  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
 }
 .chips .chip-btn.on { background: var(--fill-teal); color: #fff; }
 .chips .chip-btn:active { transform: scale(0.92); }
-.trade-del { color: var(--red); font-size: 12px; background: none; border: 0; padding: 10px 8px; transition: transform 0.08s ease; }
+.trade-del { color: var(--red); font-size: 12px; background: none; border: 0; padding: 10px 8px; transition: transform 0.08s var(--ease-out); }
 .trade-del:active { transform: scale(0.9); }
 
 .pill {
@@ -560,13 +572,13 @@ main {
 .copilot-question {
   border: 0; background: var(--surface-2); color: var(--ink);
   border-radius: var(--r-s); padding: 10px 13px; font-size: 12px;
-  transition: background 0.15s ease, transform 0.08s ease;
+  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
 }
 .copilot-question.on { background: var(--fill-teal); color: #fff; }
 .copilot-question:active { transform: scale(0.94); }
 .copilot-verdict { font-size: 14px; margin: 4px 0; }
 .copilot-input-row { display: flex; gap: 8px; margin: 8px 0; }
-.copilot-input-row input { flex: 1; min-width: 0; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 13px; font-family: inherit; transition: border-color 0.15s ease; }
+.copilot-input-row input { flex: 1; min-width: 0; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 13px; font-family: inherit; transition: border-color 0.15s var(--ease-out); }
 .copilot-input-row input::placeholder { color: var(--muted); }
 .copilot-input-row input:focus { outline: none; border-color: var(--teal); }
 .copilot-input-row .btn { flex: 0 0 auto; padding: 0 16px; height: 40px; }
@@ -585,7 +597,7 @@ main {
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 10px 0; }
 .pager button {
   border: 0; background: var(--surface-2); color: var(--ink);
-  border-radius: var(--r-s); padding: 10px 16px; transition: transform 0.08s ease, background 0.15s ease;
+  border-radius: var(--r-s); padding: 10px 16px; transition: transform 0.08s var(--ease-out), background 0.15s var(--ease-out);
 }
 .pager button:active { transform: scale(0.94); }
 .pager .pg { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }

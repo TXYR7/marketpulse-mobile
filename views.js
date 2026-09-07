@@ -2,6 +2,7 @@
 import {
   buildModeMonitor, calculateRollingPromotion, calculatePromotionStats, buildSimilarDays,
 } from './analytics.js';
+import { boardTag } from './data.js';
 
 // 共享渲染工具：内容与上次相同则跳过 DOM 重建（防卡顿、保滚动位置）。返回是否真正重建。
 export function setHTML(el, html) {
@@ -92,7 +93,7 @@ export function renderOpportunity(ctx) {
         const minus = (x.reasons?.minus || []).map((r) => '<span class="minus">-' + esc(r) + '</span>').join('');
         const elim = (x.reasons?.elim || []).map((r) => '<span class="minus">' + esc(r) + '</span>').join('');
         return '<div class="opp-card" data-code="' + x.code + '">' +
-          '<div class="row1"><div class="nm">' + esc(x.name) + ' <span class="pill">' + (x.boards || 1) + '板</span></div>' +
+          '<div class="row1"><div class="nm">' + esc(x.name) + boardTag(x.code) + ' <span class="pill">' + (x.boards || 1) + '板</span></div>' +
           '<div class="right">' + tierBadge(x.tier) + '<div class="score">' + x.score + '</div>' + (x.signal ? signalTag(x.signal.state) : '') + '</div></div>' +
           '<div class="sub">' + esc(x.industry || '—') + (x.role ? ' · ' + x.role : '') + '</div>' +
           (plus || minus || elim ? '<div class="reasons">' + plus + minus + elim + '</div>' : '') +

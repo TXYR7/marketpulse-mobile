@@ -16,8 +16,8 @@ export function renderMarket(ctx) {
   function marketRow(r) {
     const pc = r.changePct > 0 ? 'up-c' : r.changePct < 0 ? 'down-c' : 'flat-c';
     return '<div class="market-row" data-code="' + r.code + '"><div><div class="nm">' + esc(r.name) + boardTag(r.code) + '</div><div class="code">' + r.code + ' · ' + (r.industry || '—') + '</div></div>' +
-      '<div class="right"><div class="price ' + pc + '">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
-      '<div class="amt">' + (r.changePct != null ? pctText(r.changePct) : '') + '</div></div></div>';
+      '<div class="right"><div class="price">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
+      '<div class="amt ' + pc + '">' + (r.changePct != null ? pctText(r.changePct) : '') + '</div></div></div>';
   }
   function paintRows(rows, emptyText) {
     if (!rows.length) { setHTML(el, '<div class="empty">' + (emptyText || '暂无数据') + '</div>'); return; }

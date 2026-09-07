@@ -251,7 +251,7 @@ function ztCard(x) {
     '<div class="right">' +
     (pv ? '<span class="promo-badge ' + pvc + '" title="' + pvTip + '">' + esc(pv.verdict) + '</span> ' : '') +
     (x.tier ? tierBadge(x.tier) : '') + (x.signal ? '<div style="margin-top:4px">' + signalTag(x.signal.state) + '</div>' : '') +
-    '<div class="price ' + pctClass(x.changePct) + '" style="margin-top:4px">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
+    '<div class="price" style="margin-top:4px">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
     '<div class="pct ' + pctClass(x.changePct) + '">' + pctText(x.changePct) + '</div>' +
     '<div class="meta">封 ' + fmtMoney(x.seal) + ' · 换 ' + (x.turnover != null ? x.turnover.toFixed(1) + '%' : '--') + '</div></div>' +
     '</div>';
@@ -333,7 +333,7 @@ function downCard(x) {
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="boards-tag b1">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + '</div><div class="code">' + x.code + ' · ' + esc(x.industry) + '</div></div>' +
-    '<div class="right"><div class="price ' + pctClass(x.changePct) + '">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
+    '<div class="right"><div class="price">' + (x.price ? x.price.toFixed(2) : '--') + '</div>' +
     '<div class="pct ' + pctClass(x.changePct) + '">' + pctText(x.changePct) + '</div>' +
     '<div class="meta">换 ' + (x.turnover != null ? x.turnover.toFixed(1) + '%' : '--') + '</div></div></div>';
 }
@@ -443,7 +443,7 @@ function renderWatch() {
     return '<div class="card" data-code="' + w.code + '">' +
       '<div><div class="name">' + esc(r.name) + (r.tier ? ' ' + tierBadge(r.tier) : '') + '</div>' +
       '<div class="code">' + w.code + (r.signal ? ' · ' + (r.signal.state) : '') + '</div></div>' +
-      '<div class="right"><div class="price ' + pctClass(r.changePct) + '">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
+      '<div class="right"><div class="price">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
       '<div class="pct ' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</div>' +
       '<div class="meta">主 ' + (r.main != null ? fmtMoney(r.main) : '--') + '</div></div></div>';
   }).join('');

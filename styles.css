@@ -450,10 +450,17 @@ main {
   display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px;
   border-radius: 7px; font-weight: 800; font-size: 12px; flex: 0 0 auto;
 }
-.tier-badge.S { background: var(--fill-red); color: #fff; }
-.tier-badge.A { background: var(--fill-amber); color: #fff; }
-.tier-badge.B { background: var(--fill-teal); color: #fff; }
+/* TSP 色彩纪律：梯队徽章彩字+透明底（替代实底白字），浅色变体加深文字 */
+.tier-badge.S { color: #f04438; background: rgba(240, 68, 56, 0.13); border: 1px solid rgba(240, 68, 56, 0.28); }
+.tier-badge.A { color: #f59e0b; background: rgba(245, 158, 11, 0.13); border: 1px solid rgba(245, 158, 11, 0.28); }
+.tier-badge.B { color: #3b82f6; background: rgba(59, 130, 246, 0.13); border: 1px solid rgba(59, 130, 246, 0.28); }
 .tier-badge.淘汰 { background: var(--surface-2); color: var(--muted); }
+html[data-theme="light"] .tier-badge.S { color: #d32027; }
+html[data-theme="light"] .tier-badge.A { color: #b45309; }
+html[data-theme="light"] .tier-badge.B { color: #2563eb; }
+/* 市场行方向色迁移到涨幅（价格保持中性——颜色=信号，TSP 纪律） */
+.market-row .amt.up-c { color: var(--red); }
+.market-row .amt.down-c { color: var(--green); }
 .signal-tag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-s); flex: 0 0 auto; }
 .signal-tag.可打 { background: var(--down-tint); color: var(--green); }
 .signal-tag.待触发 { background: var(--amber-tint); color: var(--amber); }

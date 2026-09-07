@@ -369,7 +369,7 @@ export async function fetchAuctionTrend(code, opts = {}) {
   const secid = marketPrefix(code) + code;
   const url = `https://push2his.eastmoney.com/api/qt/stock/trends/get?ut=${EMA.token}&fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&secid=${secid}&_=${Date.now()}`;
   const payload = await withPush2HisSlot(() => getJSON(url, opts.tries ?? 2, opts.timeoutMs ?? 8000));
-  return parseAuctionTrend(payload);
+  return parseAuctionTrend(payload, opts.todayCompact);
 }
 
 // 近 N 根日K（任意 dateKey 缓存均可：日K 不可变，昨日缓存的 bar 今日依旧有效），剔除当日未定型 bar
@@ -412,7 +412,7 @@ export async function collectAuctionSnapshot(mode = 'final', stocks = [], coreCo
   for (let offset = 0; offset < codes.length; offset += AUCTION_CHUNK_SIZE) {
     if (offset > 0) await new Promise((resolve) => setTimeout(resolve, AUCTION_CHUNK_GAP_MS));
     const chunk = codes.slice(offset, offset + AUCTION_CHUNK_SIZE);
-    const settled = await Promise.allSettled(chunk.map((code) => fetchAuctionTrend(code)));
+    const settled = await Promise.allSettled(chunk.map((code) => fetchAuctionTrend(code, { todayCompact })));
     settled.forEach((result, index) => {
       if (result.status === 'fulfilled') trends.set(chunk[index], result.value);
       else failed += 1;

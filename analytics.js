@@ -598,6 +598,10 @@ function buildRiskRadar({ stocks = [], leaders = [], emotion = {}, breakRate = {
   const firstCount = boards.filter((board) => board === 1).length;
   const maxBoard = boards.length ? Math.max(...boards) : 0;
   const rearCount = leaders.filter((leader) => leader.role === '跟风' || leader.role === '后排').length;
+  const avgGain = (list) => { const values = list.map((leader) => finiteNumber(leader.changePercent)).filter((value) => value !== null); return values.length ? round(values.reduce((sum, v) => sum + v, 0) / values.length, 2) : null; };
+  const frontCount = leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)).length;
+  const frontAvg = avgGain(leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)));
+  const rearAvg = avgGain(leaders.filter((leader) => leader.role === '跟风' || leader.role === '后排'));
   const brk = breakRate.available ? finiteNumber(breakRate.rate) : null;
   const highScore = Math.min(100, highCount * 10 + (emotion.level === 'red' ? 25 : 0));
   const rearScore = Math.min(100, rearCount * 8 + (maxBoard >= 4 ? 15 : 0));
@@ -609,17 +613,8 @@ function buildRiskRadar({ stocks = [], leaders = [], emotion = {}, breakRate = {
     if (score >= 40) return 'orange';
     return 'yellow';
   };
-  const frontCount = leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)).length;
-  const avgGain = (list) => { const values = list.map((leader) => finiteNumber(leader.changePercent)).filter((value) => value !== null); return values.length ? round(values.reduce((sum, v) => sum + v, 0) / values.length, 2) : null; };
-  const frontAvg = avgGain(leaders.filter((leader) => CORE_LEADER_ROLES.includes(leader.role)));
-  const rearAvg = avgGain(leaders.filter((leader) => leader.role === '跟风' || leader.role === '后排'));
   const spread = frontAvg !== null && rearAvg !== null ? `前后排涨幅差 ${round(frontAvg - rearAvg, 2)}` : null;
-  const actionFor = {
-    high: highScore >= 70 ? '禁止高位追涨' : highScore >= 40 ? '回避高位接力' : '高位可观察',
-    rear: rearScore >= 70 ? '禁止后排接力' : rearScore >= 40 ? '回避后排' : '聚焦核心',
-    first: firstScore >= 70 ? '首板偏拥挤，选择性参与' : '可留意低位首板',
-    break: brk === null ? '--' : brk >= 40 ? '降低仓位，聚焦强势回封' : brk >= 25 ? '聚焦强势回封' : '正常打板'
-  };
+  const actionFor = { high: highScore >= 70 ? '禁止高位追涨' : highScore >= 40 ? '回避高位接力' : '高位可观察', rear: rearScore >= 70 ? '禁止后排接力' : rearScore >= 40 ? '回避后排' : '聚焦核心', first: firstScore >= 70 ? '首板偏拥挤，选择性参与' : '可留意低位首板', break: brk === null ? '--' : brk >= 40 ? '降低仓位，聚焦强势回封' : brk >= 25 ? '聚焦强势回封' : '正常打板' };
   const items = [
     { key: 'high', label: '高位接力', score: highScore, level: levelOf(highScore), reasons: [`高位股 ${highCount} 只（≥4板）`], action: actionFor.high, impact: ['高位接力机会', '高位加速策略'] },
     { key: 'rear', label: '后排跟风', score: rearScore, level: levelOf(rearScore), reasons: [`前排 ${frontCount} 只`, `后排 ${rearCount} 只`, `强弱差 ${frontCount - rearCount}`, ...(spread !== null ? [spread] : [])], action: actionFor.rear, impact: ['后排机会', '打板接力策略'] },
@@ -646,7 +641,7 @@ function applyGate(stock, ctx = {}) {
   const themeScore = Number(ctx.themeScore);
   gates.push({ name: '题材过滤', pass: Number.isNaN(themeScore) ? true : themeScore >= 25, note: Number.isNaN(themeScore) ? '题材分缺失' : `强度 ${themeScore}` });
   const score = Number(ctx.score);
-  gates.push({ name: '个股质量', pass: Number.isNaN(score) ? false : score >= 60, note: `${Number(score).toFixed(0)} 分` });
+  gates.push({ name: '个股质量', pass: Number.isNaN(score) ? false : score >= 60, note: Number.isNaN(score) ? '评分缺失' : `${score.toFixed(0)} 分` });
   const riskBlocked = (ctx.riskItems || []).some((item) => ['high', 'rear', 'break'].includes(item.key) && Number(item.score) >= 80);
   gates.push({ name: '风险闸', pass: !riskBlocked, note: riskBlocked ? '存在高危风险项' : '风险可承受' });
   const modeOk = !ctx.phase || (ctx.allowedModes || []).includes(ctx.mode) || ctx.mode === '首板' || ctx.mode === '板块核心';
@@ -1280,7 +1275,8 @@ function assessPromotion(stock, ctx = {}) {
   // ① 周期容错（25）
   if (fault === null) push('cycle', '周期容错', 'na', `情绪阶段「${ctx.phase || '未知'}」无法定周期`);
   else {
-    scoreDim(25, undefined, fault);
+    const ratio = fault;
+    scoreDim(25, undefined, ratio);
     push('cycle', '周期容错', cycle === '主升' ? 'pass' : cycle === '修复' ? 'warn' : 'fail',
       `${cycle}周期 · 晋级容错≈${Math.round(fault * 100)}%${cycle === '退潮' ? '（放弃高位接力，试错只做首板）' : cycle === '修复' ? '（择优晋级，只做核心）' : '（容错极高，可拿晋级）'}`);
   }

@@ -1228,6 +1228,7 @@ function bind() {
   });
   $('#scrim').addEventListener('click', closeSheet);
   setupPTR();
+  setupEdgeJump();
 }
 
 function setupPTR() {
@@ -1242,6 +1243,29 @@ function setupPTR() {
     if ($('#ptr').classList.contains('show')) refresh(true);
     $('#ptr').classList.remove('show'); startY = null;
   });
+}
+
+// 边跳按钮：滚动离顶/离底超 500px 才现身，直达顶部/底部（reduced-motion 时瞬时跳）。
+// 内容重渲染（切换视图/补数）也会改变可滚距离，MutationObserver 与滚动共用同一 rAF 合并调度。
+function setupEdgeJump() {
+  const main = document.querySelector('main');
+  const top = $('#jumpTop');
+  const bottom = $('#jumpBottom');
+  if (!main || !top || !bottom) return;
+  let ticking = false;
+  const update = () => {
+    ticking = false;
+    const distBottom = main.scrollHeight - main.clientHeight - main.scrollTop;
+    top.classList.toggle('show', main.scrollTop > 500);
+    bottom.classList.toggle('show', distBottom > 500);
+  };
+  const schedule = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+  main.addEventListener('scroll', schedule, { passive: true });
+  new MutationObserver(schedule).observe(main, { childList: true, subtree: true });
+  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  top.addEventListener('click', () => main.scrollTo({ top: 0, behavior }));
+  bottom.addEventListener('click', () => main.scrollTo({ top: main.scrollHeight, behavior }));
+  update();
 }
 
 /* ---------------- 启动 ---------------- */

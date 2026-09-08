@@ -450,4 +450,15 @@ console.log('[B15] 降延迟批：ulist 缓存穿透 / fetchQuotes 失败块计�
   ok('health.latencyMs 接真实抓取耗时（不再恒 null）', /latencyMs: state\.lastFetchMs/.test(appSrc));
 }
 
+console.log('[B17] 边跳按钮：直达顶部/底部（index.html + app.js 接线 + styles 主题化）');
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  ok('index.html 含 #jumpTop / #jumpBottom 边跳按钮', /id="jumpTop"/.test(html) && /id="jumpBottom"/.test(html));
+  ok('app.js setupEdgeJump 接线滚动容器与 scrollTo', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /scrollTo\(\{ top: 0, behavior \}\)/.test(appSrc) && /scrollTo\(\{ top: main\.scrollHeight, behavior \}\)/.test(appSrc));
+  ok('离边超 500px 才现身 + reduced-motion 瞬时跳', /scrollTop > 500/.test(appSrc) && /distBottom > 500/.test(appSrc) && /prefers-reduced-motion/.test(appSrc));
+  ok('styles.css 提供 .edge-jump/.edge-btn 且全用主题 token（明暗双态自动适配）', /\.edge-jump/.test(css) && /\.edge-btn/.test(css) && /\.edge-btn\.show/.test(css) && /var\(--surface-raised\)/.test(css.slice(css.indexOf('.edge-jump'))));
+}
+
 console.log(`\nAll ${pass} smoke checks passed.`);

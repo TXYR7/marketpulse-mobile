@@ -993,6 +993,10 @@ const COPILOT_QUESTIONS = [
   { key: 'health', label: '当前数据可信吗？', keywords: ['数据', '可信', '真实', '延迟', '靠谱', '来源', '准吗'] }
 ];
 // 关键词路由：自由文本 → 最匹配的问题 key（子串 label +2 / 每关键词 +1），无匹配返回 null
+// ⚠ 有意分叉（2026-09-08 登记，勿盲目向桌面移植）：本段 Copilot 与桌面 app.js 的
+// composeCopilotAnswer/renderCopilotAnswer/llmAdapter(24问) 是两套演化——手机保持 v8 简化单体(16问)，
+// 问题集双向分叉(手机独有 limitup/emotion/height/should 等)。唯一实质口径差异(炸板率预警 35 vs 25)
+// 已于 2026-09-08 统一为 25(与桌面 Copilot/风险雷达同口径)。
 function routeCopilotQuery(text, questions) {
   const t = String(text || '').trim().toLowerCase();
   if (!t) return null;
@@ -1073,9 +1077,10 @@ function buildCopilotAnswer(key, payload) {
     advise = spans(mb >= 7 ? ['高位只做最核心，回避缩量加速'] : ['聚焦低位晋级与一进二']);
   } else if (key === 'breakrate') {
     const r = br;
+    // 预警线 25 与桌面 Copilot/风险雷达同口径（2026-09-08 对齐，旧值 35 是情绪指标红线，口径混用）
     fact = `炸板率 <b>${esc(r ?? '--')}%</b>`;
-    infer = spans(r != null && r >= 35 ? ['封板意愿弱、分歧大，资金畏高'] : r != null && r <= 20 ? ['封板坚决，情绪一致'] : ['分歧中等，注意盘中回封']);
-    advise = spans(r != null && r >= 35 ? ['减少打板，等回封确认'] : ['可正常参与前排']);
+    infer = spans(r != null && r >= 25 ? ['封板意愿弱、分歧大，资金畏高'] : r != null && r <= 20 ? ['封板坚决，情绪一致'] : ['分歧中等，注意盘中回封']);
+    advise = spans(r != null && r >= 25 ? ['减少打板，等回封确认'] : ['可正常参与前排']);
   } else if (key === 'leader') {
     const top = leaders.slice(0, 5);
     fact = top.length ? `核心龙头：${top.slice(0, 3).map((l) => `${l.name}(${l.boards}板)`).join('、')}` : '暂未识别核心龙头';

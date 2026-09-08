@@ -32,16 +32,22 @@ function luminance(px, i) {
   const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
+// 标记判定:纯白(三通道均 ≥245)——蜡烛白边框/白影线专属;
+// 星海(向深空底混色,min 通道 ≤~212)与银河填充(暖奶油/紫/蓝/粉)都不算标记,
+// 否则背景星点会被误计入标记范围/安全区。
+function isMarkPx(px, i) {
+  return px[i] >= 245 && px[i + 1] >= 245 && px[i + 2] >= 245;
+}
 
 for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
   const { w, h, bitDepth, colorType, px } = decodePNG(`icons/${name}`);
   console.log(`\n=== ${name} ${w}x${h} depth=${bitDepth} colorType=${colorType} ===`);
   const at = (x, y) => Array.from(px.slice((y * w + x) * 4, (y * w + x) * 4 + 3));
   console.log('四角:', at(0, 0).join(','), at(w - 1, 0).join(','), at(0, h - 1).join(','), at(w - 1, h - 1).join(','));
-  // 标记范围(亮度 > 0.5 视为白)
+  // 标记范围(纯白 = 蜡烛边框/影线)
   let minX = w, minY = h, maxX = 0, maxY = 0, whites = 0;
   for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
-    if (luminance(px, (y * w + x) * 4) > 0.5) {
+    if (isMarkPx(px, (y * w + x) * 4)) {
       whites += 1;
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
@@ -52,7 +58,7 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
     const cx = w / 2, cy = h / 2;
     let far = 0;
     for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
-      if (luminance(px, (y * w + x) * 4) > 0.5) {
+      if (isMarkPx(px, (y * w + x) * 4)) {
         const d = Math.hypot(x - cx, y - cy);
         if (d > far) far = d;
       }

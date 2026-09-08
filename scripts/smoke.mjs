@@ -310,7 +310,7 @@ console.log('[B12] 品牌批：命名三处一致 + 图标 PNG 尺寸与 manifes
   const manifest = JSON.parse(readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const appleTitle = (html.match(/apple-mobile-web-app-title" content="([^"]*)"/) || [])[1];
-  ok('short_name === apple-mobile-web-app-title ===「脉搏」', manifest.short_name === '脉搏' && appleTitle === '脉搏');
+  ok('short_name === apple-mobile-web-app-title ===「星脉」', manifest.short_name === '星脉' && appleTitle === '星脉');
   ok('name 含主名 MarketPulse', /MarketPulse/.test(manifest.name));
   const pngSize = (file) => {
     const b = readFileSync(new URL('../' + file, import.meta.url));

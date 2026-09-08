@@ -974,6 +974,9 @@ function evaluatePortfolioRisk({ positions = [], trades = [], limits = DEFAULT_R
 }
 
 /* ---------- 决策助手（返回 HTML 字符串，由视图注入） ---------- */
+// 炸板率预警线（Copilot 专用，与风险雷达 actionFor 的 25 同口径）——2026-09-08 评审批：v40 曾因魔数
+// 分支间漂移（breakrate 改 25 漏改 retreat 的 35）自相矛盾，收拢为单一常量杜绝复发。
+const COPILOT_BREAK_WARN = 25;
 const COPILOT_QUESTIONS = [
   { key: 'relay', label: '为什么今天不建议接力？', keywords: ['接力', '后排', '追高', '跟风', '还能打板', '能不能接', '接力的风险'] },
   { key: 'phase', label: '今天市场处于什么阶段？', keywords: ['阶段', '情绪周期', '什么行情', '冰点', '退潮', '主升', '分歧', '修复'] },
@@ -1079,8 +1082,8 @@ function buildCopilotAnswer(key, payload) {
     const r = br;
     // 预警线 25 与桌面 Copilot/风险雷达同口径（2026-09-08 对齐，旧值 35 是情绪指标红线，口径混用）
     fact = `炸板率 <b>${esc(r ?? '--')}%</b>`;
-    infer = spans(r != null && r >= 25 ? ['封板意愿弱、分歧大，资金畏高'] : r != null && r <= 20 ? ['封板坚决，情绪一致'] : ['分歧中等，注意盘中回封']);
-    advise = spans(r != null && r >= 25 ? ['减少打板，等回封确认'] : ['可正常参与前排']);
+    infer = spans(r != null && r >= COPILOT_BREAK_WARN ? ['封板意愿弱、分歧大，资金畏高'] : r != null && r <= 20 ? ['封板坚决，情绪一致'] : ['分歧中等，注意盘中回封']);
+    advise = spans(r != null && r >= COPILOT_BREAK_WARN ? ['减少打板，等回封确认'] : ['可正常参与前排']);
   } else if (key === 'leader') {
     const top = leaders.slice(0, 5);
     fact = top.length ? `核心龙头：${top.slice(0, 3).map((l) => `${l.name}(${l.boards}板)`).join('、')}` : '暂未识别核心龙头';

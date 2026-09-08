@@ -1296,9 +1296,10 @@ function setupEdgeJump() {
   main.addEventListener('scroll', schedule, { passive: true });
   // 视图切换只改 class/hidden（静态设置页无 childList 变更）——补 attributes 观察，否则切视图后按钮显隐滞留
   new MutationObserver(schedule).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
-  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-  top.addEventListener('click', () => main.scrollTo({ top: 0, behavior }));
-  bottom.addEventListener('click', () => main.scrollTo({ top: main.scrollHeight, behavior }));
+  const jumpMq = matchMedia('(prefers-reduced-motion: reduce)');
+  const behavior = () => (jumpMq.matches ? 'auto' : 'smooth'); // 实时读：OS 中途切换立即生效（2026-09-08 评审批）
+  top.addEventListener('click', () => main.scrollTo({ top: 0, behavior: behavior() }));
+  bottom.addEventListener('click', () => main.scrollTo({ top: main.scrollHeight, behavior: behavior() }));
   update();
 }
 

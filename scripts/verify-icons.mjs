@@ -39,6 +39,9 @@ function isMarkPx(px, i) {
   return px[i] >= 245 && px[i + 1] >= 245 && px[i + 2] >= 245;
 }
 
+// 退出码化（2026-09-08 评审批）：maskable FAIL 或标记判定空转（whites=0 会让安全区检查空转 PASS）→ exit 1，
+// 由 scripts/smoke.mjs [B19] 常驻调用。直接运行仍打印全部统计（ASCII 预览等）。
+let verifyFailed = false;
 for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
   const { w, h, bitDepth, colorType, px } = decodePNG(`icons/${name}`);
   console.log(`\n=== ${name} ${w}x${h} depth=${bitDepth} colorType=${colorType} ===`);
@@ -53,6 +56,7 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
     }
   }
+  if (!whites) { console.log('❌ 标记判定空转：0 个纯白像素（isMarkPx 失灵或图标为纯底），安全区检查无意义'); verifyFailed = true; }
   console.log(`白色占比 ${(100 * whites / (w * h)).toFixed(1)}% | 标记范围 x ${minX}-${maxX}(${(100 * (maxX - minX) / w).toFixed(0)}%宽) y ${minY}-${maxY}(${(100 * (maxY - minY) / h).toFixed(0)}%高)`);
   if (name === 'maskable-512.png') {
     const cx = w / 2, cy = h / 2;
@@ -63,7 +67,9 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
         if (d > far) far = d;
       }
     }
-    console.log(`标记最远点半径 ${far.toFixed(0)}px,安全区半径 ${0.4 * w}px → ${far < 0.4 * w ? 'PASS' : 'FAIL'}`);
+    const pass = far < 0.4 * w;
+    console.log(`标记最远点半径 ${far.toFixed(0)}px,安全区半径 ${0.4 * w}px → ${pass ? 'PASS' : 'FAIL'}`);
+    if (!pass) verifyFailed = true;
   }
   // ASCII 预览(采样 28 行)
   const rows = 28, cols = 28;
@@ -79,3 +85,4 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
   }
   console.log(lines.join('\n'));
 }
+if (verifyFailed) process.exit(1);

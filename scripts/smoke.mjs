@@ -3,6 +3,8 @@
 // 运行：npm test（= node --experimental-vm-modules scripts/smoke.mjs；B9 语法护栏需要该 flag）。
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
@@ -457,7 +459,7 @@ console.log('[B17] 边跳按钮：直达顶部/底部（index.html + app.js 接�
   const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
   ok('index.html 含 #jumpTop / #jumpBottom 边跳按钮', /id="jumpTop"/.test(html) && /id="jumpBottom"/.test(html));
-  ok('app.js setupEdgeJump 接线滚动容器与 scrollTo', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /scrollTo\(\{ top: 0, behavior \}\)/.test(appSrc) && /scrollTo\(\{ top: main\.scrollHeight, behavior \}\)/.test(appSrc));
+  ok('app.js setupEdgeJump 接线滚动容器与 scrollTo（reduced-motion 实时读）', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /scrollTo\(\{ top: 0, behavior: behavior\(\) \}\)/.test(appSrc) && /scrollTo\(\{ top: main\.scrollHeight, behavior: behavior\(\) \}\)/.test(appSrc));
   ok('离边超 500px 才现身 + reduced-motion 瞬时跳', /scrollTop > 500/.test(appSrc) && /distBottom > 500/.test(appSrc) && /prefers-reduced-motion/.test(appSrc));
   ok('styles.css 提供 .edge-jump/.edge-btn 显隐类（容器 pointer-events:none + 按钮 visibility 防触点死区/隐形焦点）', /\.edge-jump/.test(css) && /\.edge-btn/.test(css) && /\.edge-btn\.show/.test(css) && /pointer-events: none/.test(css.slice(css.indexOf('.edge-jump'))) && /visibility: hidden/.test(css.slice(css.indexOf('.edge-jump'))));
 }
@@ -490,6 +492,20 @@ console.log('[B18] 评审批 null 路径回归：缺数据不得被读成 0（20
   ]);
   ok('炸板池缺源 → brokenCount null + partial 标记', noBroken.brokenCount === null && noBroken.partial && noBroken.partialMissing.includes('炸板池'));
   ok('zbc 缺失("-") → breakCount null + breakCountAvailable false（数据层两段式）', noBroken.up[0].breakCount === null && noBroken.up[0].breakCountAvailable === false);
+}
+
+console.log('[B19] 评审批次级项：Copilot 炸板预警常量收拢 + 图标核验退出码化');
+{
+  const analyticsSrc = readFileSync(new URL('../analytics.js', import.meta.url), 'utf8');
+  ok('Copilot 炸板预警收拢为 COPILOT_BREAK_WARN 常量（≥2 处引用）', /const COPILOT_BREAK_WARN = 25;/.test(analyticsSrc) && ((analyticsSrc.match(/COPILOT_BREAK_WARN/g) || []).length >= 3));
+  ok('Copilot 分支不再有 >= 35 残留魔数（v40 漂移防复发）', !/>= 35 \? \['封板意愿弱/.test(analyticsSrc) && !/br >= 35/.test(analyticsSrc));
+  // 图标核验脚本退出码化：FAIL / 标记判定失灵（whites=0 空转）都退出 1，进 smoke 常驻
+  let verifyOk = false;
+  try {
+    execFileSync(process.execPath, [fileURLToPath(new URL('./verify-icons.mjs', import.meta.url))], { stdio: 'pipe' });
+    verifyOk = true;
+  } catch { verifyOk = false; }
+  ok('verify-icons.mjs 退出码 0（maskable 安全区 PASS 且标记判定未空转）', verifyOk);
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

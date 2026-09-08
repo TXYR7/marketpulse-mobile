@@ -827,14 +827,15 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 }
 
 /* ===== 边跳按钮（直达顶部/底部；离边超 500px 才现身，全用主题 token 双态自动适配） ===== */
-.edge-jump { position: fixed; right: 12px; bottom: calc(var(--nav-h) + var(--safe-b) + 16px); z-index: 29; display: flex; flex-direction: column; gap: 8px; }
+/* 容器 pointer-events:none(否则按钮隐藏时 40×88px 固定区整块吞点击,右下角卡片/PTR 触点死区);按钮 visibility 移出无障碍树与焦点序(opacity 不够,TalkBack 会激活隐形按钮) */
+.edge-jump { position: fixed; right: 12px; bottom: calc(var(--nav-h) + var(--safe-b) + 16px); z-index: 29; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .edge-btn {
   width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
   background: var(--surface-raised); color: var(--muted);
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
-  opacity: 0; transform: translateY(6px); pointer-events: none;
-  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out), color 0.15s var(--ease-out);
+  opacity: 0; visibility: hidden; transform: translateY(6px); pointer-events: none;
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out), color 0.15s var(--ease-out), visibility 0s 0.18s;
 }
-.edge-btn.show { opacity: 1; transform: none; pointer-events: auto; }
+.edge-btn.show { opacity: 1; visibility: visible; transform: none; pointer-events: auto; transition-delay: 0s; }
 .edge-btn:active { transform: scale(0.92); }

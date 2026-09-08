@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
-  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays
+  calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays,
+  applyGate, auctionVerdict
 } from '../analytics.js';
 import {
   shanghaiNow, todayStr, mergePools, sealQuality,
@@ -458,7 +459,37 @@ console.log('[B17] 边跳按钮：直达顶部/底部（index.html + app.js 接�
   ok('index.html 含 #jumpTop / #jumpBottom 边跳按钮', /id="jumpTop"/.test(html) && /id="jumpBottom"/.test(html));
   ok('app.js setupEdgeJump 接线滚动容器与 scrollTo', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /scrollTo\(\{ top: 0, behavior \}\)/.test(appSrc) && /scrollTo\(\{ top: main\.scrollHeight, behavior \}\)/.test(appSrc));
   ok('离边超 500px 才现身 + reduced-motion 瞬时跳', /scrollTop > 500/.test(appSrc) && /distBottom > 500/.test(appSrc) && /prefers-reduced-motion/.test(appSrc));
-  ok('styles.css 提供 .edge-jump/.edge-btn 且全用主题 token（明暗双态自动适配）', /\.edge-jump/.test(css) && /\.edge-btn/.test(css) && /\.edge-btn\.show/.test(css) && /var\(--surface-raised\)/.test(css.slice(css.indexOf('.edge-jump'))));
+  ok('styles.css 提供 .edge-jump/.edge-btn 显隐类（容器 pointer-events:none + 按钮 visibility 防触点死区/隐形焦点）', /\.edge-jump/.test(css) && /\.edge-btn/.test(css) && /\.edge-btn\.show/.test(css) && /pointer-events: none/.test(css.slice(css.indexOf('.edge-jump'))) && /visibility: hidden/.test(css.slice(css.indexOf('.edge-jump'))));
+}
+
+console.log('[B18] 评审批 null 路径回归：缺数据不得被读成 0（2026-09-08 代码评审修复锁定）');
+{
+  // ① promo ctx 全 null（对照桌面 test/trading-system-rules.test.js 回归）
+  const r = assessPromotion({ code: '600001', boards: 2, firstSealTime: '093200' }, { phase: '主升期', themeSize: null, openPct: null, volChg: null, role: null, prevDay: null });
+  ok('promo ctx 全 null → 无硬否决', JSON.stringify(r.hardFails) === '[]');
+  ok('promo ctx 全 null → 竞价/题材/量能三维 na', ['auction', 'theme', 'volume'].every((d) => r.checklist.find((c) => c.dim === d)?.status === 'na'));
+  // ② 个股 breakCount 缺失（数据层保留 null 而非 0）
+  const q = assessPromotion({ code: '1', boards: 2, firstSealTime: '093200', breakCount: null, breakCountAvailable: false }, { phase: '主升期' });
+  ok('breakCount null → 封板质量 na（不再「一封封死」满分）', q.checklist.find((c) => c.dim === 'quality')?.status === 'na');
+  // ③ applyGate 缺失语义（finiteNumber 替换 Number(null)=0）
+  const g = applyGate({}, { themeScore: null, score: null });
+  const themeGate = g.gates.find((x) => x.name === '题材过滤');
+  const qualityGate = g.gates.find((x) => x.name === '个股质量');
+  ok('applyGate 题材分 null → 放行且注记「题材分缺失」（不再显示 强度 0）', themeGate.pass === true && themeGate.note === '题材分缺失');
+  ok('applyGate 评分 null → 不通过且注记「评分缺失」（不再显示 0 分）', qualityGate.pass === false && qualityGate.note === '评分缺失');
+  // ④ 守卫换 finiteNumber 后 '' 语义修正（旧三元会返回 0 → 假「平开=低开」）
+  ok('auctionVerdict openPct 空串 → 竞价数据不足（不再读成 0% 平开）', auctionVerdict({ boards: 2 }, { openPct: '' }).tag === null);
+  // ⑤ Copilot retreat 阈值与 breakrate 同口径 25（v40 漏改分支）
+  const retreat = buildCopilotAnswer('retreat', { status: { phase: '主升期', level: 'green' }, stats: { breakRate: { available: true, rate: 30 } } });
+  ok('Copilot 退潮判定 br=30 → 退潮信号存在（阈值 25，v40 曾漏改此分支）', retreat.includes('退潮信号：存在'));
+  // ⑥ mergePools 缺源计数 null（缺炸板池不再 0% 炸板率满乐观）
+  const noBroken = mergePools('20260908', [
+    { status: 'fulfilled', value: { data: { pool: [{ c: '600001', n: '测试', p: 10000, zdp: 10, fund: '-', hs: '-', zbc: '-', ltsz: '-', amount: '-', fbt: 92500 }], qdate: '20260908', tc: 1 } } },
+    { status: 'fulfilled', value: { data: { pool: [], qdate: '20260908', tc: 0 } } },
+    { status: 'rejected', reason: new Error('炸板池失败') }
+  ]);
+  ok('炸板池缺源 → brokenCount null + partial 标记', noBroken.brokenCount === null && noBroken.partial && noBroken.partialMissing.includes('炸板池'));
+  ok('zbc 缺失("-") → breakCount null + breakCountAvailable false（数据层两段式）', noBroken.up[0].breakCount === null && noBroken.up[0].breakCountAvailable === false);
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

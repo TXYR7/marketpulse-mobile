@@ -106,14 +106,35 @@ function computeDerived(pools) {
   // M4 结构签名记忆化：结构字段(boards/成员/日期/历史)日内稳定，派生结果恒定，跳过重算省 CPU（不碰实时价）
   // 返回布尔：true=完成（或早退但派生已有），false=签名相同早退——loadGap 溢价就绪后据此决定是否重渲染
   const sig = deriveSig(pools);
-  if (sig === state.derivedSig && state.derived) { state.lastPayload = state.derived.lastPayload; return false; }
+  if (sig === state.derivedSig && state.derived) {
+    // 2026-09-08 评审批：早退 tick 上 refresh() 换进来的裸对象没有 tier/signal/role/themeSize——
+    // 用上一轮富化暂存回填，否则卡片徽标消失、S/A/B 筛选清空、promoContextOf 上下文逐 tick 漂移 ~10 分
+    const stash = state.enrichByCode || {};
+    for (const s of pools.up || []) {
+      const e = stash[s.code];
+      if (!e) continue;
+      if (s.tier === undefined) s.tier = e.tier;
+      if (s.score === undefined) s.score = e.score;
+      if (!s.signal) s.signal = e.signal;
+      if (!s.gate) s.gate = e.gate;
+      if (!s.role) s.role = e.role;
+      if (s.themeName === undefined) s.themeName = e.themeName;
+      if (s.themeScore === undefined) s.themeScore = e.themeScore;
+      if (s.themeSize == null) s.themeSize = e.themeSize;
+      if (!s.breakdown) s.breakdown = e.breakdown;
+      if (!s.buyType) s.buyType = e.buyType;
+    }
+    state.lastPayload = state.derived.lastPayload;
+    return false;
+  }
   const up = pools.up || [];
-  const upCount = pools.upCount ?? up.length;
-  const downCount = pools.downCount ?? (pools.down || []).length;
-  const brokenCount = pools.brokenCount ?? (pools.broken || []).length;
+  // 2026-09-08 评审批：缺源计数为 null（此前 0 会让情绪「跌停 0 家」绿灯、炸板率 0% 满乐观）——null 走 na 诚实降级
+  const upCount = pools.sources && pools.sources.up === false ? null : (pools.upCount ?? up.length);
+  const downCount = pools.sources && pools.sources.down === false ? null : (pools.downCount ?? (pools.down || []).length);
+  const brokenCount = pools.sources && pools.sources.broken === false ? null : (pools.brokenCount ?? (pools.broken || []).length);
   const maxBoard = up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const multiBoardCount = up.filter((x) => (x.boards || 1) > 1).length;
-  const breakRate = calculateBreakRate({ limitUpCount: upCount, brokenCount, available: true });
+  const breakRate = calculateBreakRate({ limitUpCount: upCount ?? 0, brokenCount: brokenCount ?? 0, available: brokenCount !== null });
   const memo = historyDerived(pools.date);
   const promo = memo.promo;
   // G9 情绪三指标：市场断板率同步可算（池内炸板回封占比）；昨首板/昨高位溢价读 loadGap 落位的缓存（date 不匹配则诚实显示 —）
@@ -151,7 +172,11 @@ function computeDerived(pools) {
   const byCode = {};
   ['S', 'A', 'B'].forEach((k) => opportunities.tiers[k].forEach((s) => { byCode[s.code] = s; }));
   opportunities.eliminated.forEach((s) => { byCode[s.code] = s; });
-  up.forEach((s) => { const m = byCode[s.code]; if (m) Object.assign(s, { tier: m.tier, score: m.score, signal: m.signal, role: m.role, themeName: m.themeName, themeScore: m.themeScore, breakdown: m.breakdown }); });
+  up.forEach((s) => { const m = byCode[s.code]; if (m) Object.assign(s, { tier: m.tier, score: m.score, signal: m.signal, role: m.role, themeName: m.themeName, themeScore: m.themeScore, themeSize: m.themeSize, breakdown: m.breakdown }); });
+  // 富化暂存：deriveSig 早退的 tick 上 refresh() 换进来的裸对象没有 role/themeSize——promoContextOf 据此兜底
+  const enrichByCode = {};
+  up.forEach((s) => { enrichByCode[s.code] = { tier: s.tier, score: s.score, signal: s.signal, gate: s.gate, role: s.role, themeName: s.themeName, themeScore: s.themeScore, themeSize: s.themeSize, breakdown: s.breakdown, buyType: s.buyType }; });
+  state.enrichByCode = enrichByCode;
 
   const structure = buildMarketStructure({ stocks: up, themes, leaders });
   const plan = buildPlan({ phase, riskRadar, emotion, opportunities });
@@ -224,7 +249,7 @@ function renderStatus() {
   $('#ladderHint').textContent = '最高 ' + maxBoard + ' 板';
 }
 function chip(cls, label, val) {
-  return '<div class="chip ' + cls + '"><span>' + label + '</span><strong>' + val + '</strong></div>';
+  return '<div class="chip ' + cls + '"><span>' + label + '</span><strong>' + (val == null ? '--' : val) + '</strong></div>';
 }
 
 /* ---------------- 渲染：盘中涨停池 ---------------- */
@@ -326,7 +351,7 @@ function renderZt() {
   const list = $('#ztList');
   if (!state.pools) return; // 首屏骨架由 index.html 提供，数据到达前不覆盖
   const rows = filterZt();
-  $('#ztHint').textContent = '共 ' + state.pools.upCount + ' 只';
+  $('#ztHint').textContent = state.pools.upCount != null ? '共 ' + state.pools.upCount + ' 只' : '--';
   patchCardList(list, rows, ztCard, ztStructSig, pctFieldSig, patchZtCard);
 }
 function downCard(x) {
@@ -339,8 +364,8 @@ function downCard(x) {
 }
 function renderDowns() {
   const p = state.pools; if (!p) return;
-  $('#dtCount').textContent = p.downCount;
-  $('#zbCount').textContent = p.brokenCount;
+  $('#dtCount').textContent = p.downCount != null ? p.downCount : '--';
+  $('#zbCount').textContent = p.brokenCount != null ? p.brokenCount : '--';
   // 折叠时不构建内部 DOM（炸板池常 50~150 行），首次展开才渲染
   if ($('#dtFold').open) patchCardList($('#dtList'), p.down, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无跌停</div>');
   if ($('#zbFold').open) patchCardList($('#zbList'), p.broken, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无炸板</div>');
@@ -934,16 +959,24 @@ function promoContextOf(s, pools) {
   for (let i = hist.length - 1; i >= 0; i -= 1) {
     if (String(hist[i].date) < String(pools.date)) { prevDay = (hist[i].stocks || []).find((x) => x.code === s.code) || null; break; }
   }
-  // 题材梯队真实口径（2026-09-08 对齐桌面修复）：池内原始股票无 themeSize 字段
-  // （rankOpportunities 富化的是副本），此前恒 null 被规则引擎读成 0 → 全员「孤立独板」。按全池行业计数直供。
-  let themeSize = null;
-  if (s.industry) { themeSize = 0; for (const x of pools.up || []) if (x.industry === s.industry) themeSize += 1; }
+  // 题材梯队真实口径（2026-09-08 评审批三修）：
+  // ① 富化优先：写回值/暂存兜底（deriveSig 早退 tick 上裸对象无 role/themeSize，否则检查表分数逐 tick 摆动 ~10 分）
+  // ② '未分类' 是 mapPool 缺 hybk 的兜底桶不是真题材 → null（na），杜绝假「孤立独板」硬否决/假梯队加分
+  // ③ 现场计数用 trim 归一（与 groupThemes 展示口径一致），防尾随空格使同一行业数不齐
+  const stash = (state.enrichByCode || {})[s.code] || {};
+  let themeSize = s.themeSize != null ? s.themeSize : (stash.themeSize != null ? stash.themeSize : null);
+  if (themeSize === null && s.industry && s.industry !== '未分类') {
+    const key = String(s.industry).trim();
+    themeSize = 0;
+    for (const x of pools.up || []) if (String(x.industry || '').trim() === key) themeSize += 1;
+  }
   return {
     phase: state.phase,
     themeSize,
-    role: s.role,
-    // 竞价撮合%优先（9:26 即有真值，对齐桌面 todayOpenByCode），今开代理兜底
-    openPct: state.auctionPctByCode[s.code] ?? state.openPctByCode[s.code] ?? null,
+    role: s.role || stash.role || null,
+    // 竞价撮合%优先（9:26 即有真值，applyAuctionPayload 已做当日校验）；今开代理必须同日才可信——
+    // warmCache 水合的昨日 gap% 会把存量股硬否决成「竞价避雷」（2026-09-08 评审批）
+    openPct: state.auctionPctByCode[s.code] ?? (state.openPctDate === pools.date ? state.openPctByCode[s.code] : undefined) ?? null,
     prevDay: prevDay ? { boards: prevDay.boards, breakCount: prevDay.breaks, turnoverRate: prevDay.turnoverRate } : null,
   };
 }
@@ -1261,7 +1294,8 @@ function setupEdgeJump() {
   };
   const schedule = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
   main.addEventListener('scroll', schedule, { passive: true });
-  new MutationObserver(schedule).observe(main, { childList: true, subtree: true });
+  // 视图切换只改 class/hidden（静态设置页无 childList 变更）——补 attributes 观察，否则切视图后按钮显隐滞留
+  new MutationObserver(schedule).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
   const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
   top.addEventListener('click', () => main.scrollTo({ top: 0, behavior }));
   bottom.addEventListener('click', () => main.scrollTo({ top: main.scrollHeight, behavior }));

@@ -111,7 +111,10 @@ function mapPool(row) {
   const zdp = toNum(row.zdp);
   const fund = toNum(row.fund);
   const hs = toNum(row.hs);
-  const zbc = toNum(row.zbc) ?? 0;
+  // 2026-09-08 评审批：缺失/'-' 的炸板次数不再洗成 0（那会让检查表「一封封死」满分、prevRotten 永不触发
+  // 弱转强）——对齐桌面 server.js mapStocks 两段式：值保留 null + breakCountAvailable 标记，下游守卫标 na。
+  const zbc = toNum(row.zbc);
+  const breakCountAvailable = zbc !== null;
   const ltsz = toNum(row.ltsz);
   const seal = sealQuality({ sealAmount: fund, circulatingValue: ltsz, breakCount: zbc });
   return {
@@ -128,6 +131,7 @@ function mapPool(row) {
     lastSeal: row.lbt,
     breaks: zbc,
     breakCount: zbc,
+    breakCountAvailable,
     turnover: hs,
     turnoverRate: hs,
     seal: fund,
@@ -165,9 +169,9 @@ export function mergePools(date, settled) {
     up: ups,
     down: downs,
     broken: brokens,
-    upCount: up ? (up.data?.tc ?? ups.length) : 0,
-    downCount: down ? (down.data?.tc ?? downs.length) : 0,
-    brokenCount: broken ? (broken.data?.tc ?? brokens.length) : 0,
+    upCount: up ? (up.data?.tc ?? ups.length) : null,
+    downCount: down ? (down.data?.tc ?? downs.length) : null,
+    brokenCount: broken ? (broken.data?.tc ?? brokens.length) : null,
     sources: { up: !!up, down: !!down, broken: !!broken },
     partial: failed.length > 0,
     partialMissing: failed,

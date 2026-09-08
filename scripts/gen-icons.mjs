@@ -79,21 +79,24 @@ function encodePNG(width, height, rgba) {
 // ---- 标记几何(512 设计坐标):三根递升蜡烛(白边框+银河填充)+ 纯白影线 ----
 // 蜡烛宽 76、间距 42;底部递升(356/330/300)、顶部递升更陡(280/216/140)——上升势能;
 // 影线宽 22,上下各伸出 32。边框厚 9。
+// 影线宽 22,上下各伸出 32,水平居中于实体中线(2026-09-08 评审批修:旧 wick 全部右偏 +11px 且先于实体绘制,
+// 22px 白影线盖在银河填充上贯穿实体,把主视觉吃掉一半成不对称 H 形)。边框厚 9。
 const BORDER = 9;
 const CANDLES = [
-  { body: [100, 280, 176, 356], wick: [138, 248, 160, 388] },
-  { body: [218, 216, 294, 330], wick: [256, 184, 278, 362] },
-  { body: [336, 140, 412, 300], wick: [374, 108, 396, 332] }
+  { body: [100, 280, 176, 356], wick: [127, 248, 149, 388] },
+  { body: [218, 216, 294, 330], wick: [245, 184, 267, 362] },
+  { body: [336, 140, 412, 300], wick: [363, 108, 385, 332] }
 ];
 function insideRect(x, y, r) { return x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]; }
 function candleAt(x, y) {
   for (let i = 0; i < CANDLES.length; i += 1) {
     const c = CANDLES[i];
-    if (insideRect(x, y, c.wick)) return { i, part: 'wick' };
+    // 先判实体再判影线:实体覆盖影线(标准蜡烛图画法),影线只在实体上下段露出
     if (insideRect(x, y, c.body)) {
       const edge = Math.min(x - c.body[0], c.body[2] - x, y - c.body[1], c.body[3] - y);
       return { i, part: edge <= BORDER ? 'border' : 'fill' };
     }
+    if (insideRect(x, y, c.wick)) return { i, part: 'wick' };
   }
   return null;
 }

@@ -638,10 +638,10 @@ function applyGate(stock, ctx = {}) {
   const gates = [];
   const marketOk = ctx.emotionLevel !== 'red' && !(ctx.breakRate !== null && ctx.breakRate !== undefined && ctx.breakRate >= 40);
   gates.push({ name: '市场环境', pass: marketOk, note: ctx.emotionPhase ? `${ctx.emotionPhase}${ctx.breakRate !== null && ctx.breakRate !== undefined ? ` · 炸板率 ${ctx.breakRate}%` : ''}` : '' });
-  const themeScore = Number(ctx.themeScore);
-  gates.push({ name: '题材过滤', pass: Number.isNaN(themeScore) ? true : themeScore >= 25, note: Number.isNaN(themeScore) ? '题材分缺失' : `强度 ${themeScore}` });
-  const score = Number(ctx.score);
-  gates.push({ name: '个股质量', pass: Number.isNaN(score) ? false : score >= 60, note: Number.isNaN(score) ? '评分缺失' : `${score.toFixed(0)} 分` });
+  const themeScore = finiteNumber(ctx.themeScore);
+  gates.push({ name: '题材过滤', pass: themeScore === null ? true : themeScore >= 25, note: themeScore === null ? '题材分缺失' : `强度 ${themeScore}` });
+  const score = finiteNumber(ctx.score);
+  gates.push({ name: '个股质量', pass: score === null ? false : score >= 60, note: score === null ? '评分缺失' : `${score.toFixed(0)} 分` });
   const riskBlocked = (ctx.riskItems || []).some((item) => ['high', 'rear', 'break'].includes(item.key) && Number(item.score) >= 80);
   gates.push({ name: '风险闸', pass: !riskBlocked, note: riskBlocked ? '存在高危风险项' : '风险可承受' });
   const modeOk = !ctx.phase || (ctx.allowedModes || []).includes(ctx.mode) || ctx.mode === '首板' || ctx.mode === '板块核心';
@@ -1103,7 +1103,8 @@ function buildCopilotAnswer(key, payload) {
     infer = spans(cant.length ? cant : ['无明确体系禁止，看前排确定性']);
     advise = spans(playable > 0 && !cant.length ? ['只在换手充分、检查表通过时出手'] : ['不出手也是一种操作']);
   } else if (key === 'retreat') {
-    const weak = (status.level === 'red') || ['退潮', '退潮初期', '冰点'].includes(status.phase) || (br != null && br >= 35);
+    // 阈值 25 与 breakrate 问句/桌面同口径（2026-09-08 评审批补漏：v40 只改了 breakrate 分支，此分支漏改致 [25,35) 自相矛盾）
+    const weak = (status.level === 'red') || ['退潮', '退潮初期', '冰点'].includes(status.phase) || (br != null && br >= 25);
     fact = `退潮信号：${weak ? '存在' : '暂不明显'}`;
     infer = spans(weak ? ['高位断板/炸板率抬升/情绪转弱', '亏钱效应扩散'] : ['高位仍韧，赚钱效应尚可']);
     advise = spans(weak ? ['收缩仓位、停止高位接力、管住手'] : ['按阶段策略正常参与']);
@@ -1219,12 +1220,12 @@ function cycleOf(phase) {
 function auctionVerdict(stock, ctx = {}) {
   const boards = Math.max(1, finiteNumber(stock.boards) || 1);
   // null 守卫：Number(null)===0 会把「缺数据」读成 0% 平开 → 竞价避雷；缺失必须保持 null
-  const openPct = ctx.openPct == null ? null : (Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null);
+  const openPct = finiteNumber(ctx.openPct);
   if (openPct === null) return { tag: null, note: '竞价数据不足' };
   const [lo, hi] = boards >= 3 ? PROMO_RULES.openBandBoard3Plus : PROMO_RULES.openBandBoard2;
   const prev = ctx.prevDay || null;
   const prevRotten = !!(prev && ((Number(prev.breakCount) || 0) >= 2 || (Number(prev.turnoverRate) || 0) >= 50));
-  const volChg = ctx.volChg == null ? null : (Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null);
+  const volChg = finiteNumber(ctx.volChg);
   if (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh) {
     return { tag: '竞价避雷', note: openPct <= 0 ? '低开=隔夜分歧严重，无人接力' : '超级高开=情绪透支，防高开低走炸板兑现' };
   }
@@ -1298,7 +1299,7 @@ function assessPromotion(stock, ctx = {}) {
   // ③ 竞价承接（15）
   const av = auctionVerdict(stock, ctx);
   // null 守卫：服务端缺数据传 null，Number(null)===0 曾被读成「平开=竞价低开」硬否决（2026-09-08 修）
-  const openPct = ctx.openPct == null ? null : (Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null);
+  const openPct = finiteNumber(ctx.openPct);
   if (openPct === null) push('auction', '竞价承接', 'na', '今开/昨收未取到');
   else if (av.tag === '竞价避雷') push('auction', '竞价承接', 'fail', av.note);
   else if (av.tag === '弱转强') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
@@ -1315,7 +1316,7 @@ function assessPromotion(stock, ctx = {}) {
 
   // ⑤ 题材梯队（15）
   // null 守卫：同 openPct（缺数据传 null 曾被读成 0 → 全员「孤立独板」硬否决，2026-09-08 修）
-  const themeSize = ctx.themeSize == null ? null : (Number.isFinite(Number(ctx.themeSize)) ? Number(ctx.themeSize) : null);
+  const themeSize = finiteNumber(ctx.themeSize);
   const role = String(ctx.role || stock.role || '');
   if (themeSize === null) push('theme', '题材梯队', 'na', '板块家数未知');
   else if (themeSize <= 1) push('theme', '题材梯队', 'fail', '孤立独板——无跟风无梯队，100% 无法晋级');
@@ -1325,7 +1326,7 @@ function assessPromotion(stock, ctx = {}) {
   else { scoreDim(15, undefined, 0.3); push('theme', '题材梯队', 'warn', `板块仅 ${themeSize} 只涨停，梯队薄`); }
 
   // ⑥ 量能结构（10）：各阶缩放标准（null 守卫同上：缺失≠0%）
-  const volChg = ctx.volChg == null ? null : (Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null);
+  const volChg = finiteNumber(ctx.volChg);
   if (volChg === null) push('volume', '量能结构', 'na', '无昨日成交量可比');
   else if (boards === 2) {
     const [lo, hi] = PROMO_RULES.volUpStage12;

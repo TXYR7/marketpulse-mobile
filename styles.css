@@ -237,7 +237,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .menu-scrim.show { opacity: 1; pointer-events: auto; }
 .menu-panel {
-  position: fixed; top: 0; left: 0; bottom: 0; width: 64%; max-width: 264px; z-index: 36; /* 64%:原 74% 在宽屏上过宽,收窄成利落的抽屉 */
+  position: fixed; top: 0; left: 0; bottom: 0; width: fit-content; min-width: 168px; max-width: 78vw; z-index: 36; /* 宽度=内容自适应:比最长菜单项(图标+「交易与持仓」)多出左右 padding 即可 */
   background: var(--surface); box-shadow: var(--shadow-2);
   padding: calc(var(--safe-t) + 14px) 14px 20px;
   transform: translateX(-100%); transition: transform 0.24s var(--ease-out); overflow-y: auto; overscroll-behavior: contain;

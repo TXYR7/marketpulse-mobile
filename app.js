@@ -934,9 +934,13 @@ function promoContextOf(s, pools) {
   for (let i = hist.length - 1; i >= 0; i -= 1) {
     if (String(hist[i].date) < String(pools.date)) { prevDay = (hist[i].stocks || []).find((x) => x.code === s.code) || null; break; }
   }
+  // 题材梯队真实口径（2026-09-08 对齐桌面修复）：池内原始股票无 themeSize 字段
+  // （rankOpportunities 富化的是副本），此前恒 null 被规则引擎读成 0 → 全员「孤立独板」。按全池行业计数直供。
+  let themeSize = null;
+  if (s.industry) { themeSize = 0; for (const x of pools.up || []) if (x.industry === s.industry) themeSize += 1; }
   return {
     phase: state.phase,
-    themeSize: Number.isFinite(Number(s.themeSize)) ? Number(s.themeSize) : null,
+    themeSize,
     role: s.role,
     // 竞价撮合%优先（9:26 即有真值，对齐桌面 todayOpenByCode），今开代理兜底
     openPct: state.auctionPctByCode[s.code] ?? state.openPctByCode[s.code] ?? null,

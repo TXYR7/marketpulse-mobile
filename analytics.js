@@ -1218,12 +1218,13 @@ function cycleOf(phase) {
 // 竞价判定（高开区间 + 弱转强）：openPct=今开/昨收%
 function auctionVerdict(stock, ctx = {}) {
   const boards = Math.max(1, finiteNumber(stock.boards) || 1);
-  const openPct = Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null;
+  // null 守卫：Number(null)===0 会把「缺数据」读成 0% 平开 → 竞价避雷；缺失必须保持 null
+  const openPct = ctx.openPct == null ? null : (Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null);
   if (openPct === null) return { tag: null, note: '竞价数据不足' };
   const [lo, hi] = boards >= 3 ? PROMO_RULES.openBandBoard3Plus : PROMO_RULES.openBandBoard2;
   const prev = ctx.prevDay || null;
   const prevRotten = !!(prev && ((Number(prev.breakCount) || 0) >= 2 || (Number(prev.turnoverRate) || 0) >= 50));
-  const volChg = Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null;
+  const volChg = ctx.volChg == null ? null : (Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null);
   if (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh) {
     return { tag: '竞价避雷', note: openPct <= 0 ? '低开=隔夜分歧严重，无人接力' : '超级高开=情绪透支，防高开低走炸板兑现' };
   }
@@ -1296,7 +1297,8 @@ function assessPromotion(stock, ctx = {}) {
 
   // ③ 竞价承接（15）
   const av = auctionVerdict(stock, ctx);
-  const openPct = Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null;
+  // null 守卫：服务端缺数据传 null，Number(null)===0 曾被读成「平开=竞价低开」硬否决（2026-09-08 修）
+  const openPct = ctx.openPct == null ? null : (Number.isFinite(Number(ctx.openPct)) ? Number(ctx.openPct) : null);
   if (openPct === null) push('auction', '竞价承接', 'na', '今开/昨收未取到');
   else if (av.tag === '竞价避雷') push('auction', '竞价承接', 'fail', av.note);
   else if (av.tag === '弱转强') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
@@ -1304,14 +1306,16 @@ function assessPromotion(stock, ctx = {}) {
   else { scoreDim(15, undefined, 0.35); push('auction', '竞价承接', 'warn', av.note); }
 
   // ④ 封板质量（15）
-  const brk = stock.breakCountAvailable === false ? null : (finiteNumber(stock.breakCount) || 0);
+  // 炸板次数缺失 → na（此前 finiteNumber(null)||0 把缺失读成 0 =「一封封死」满分，反向美化了缺数据）
+  const brk = stock.breakCountAvailable === false || stock.breakCount == null ? null : (finiteNumber(stock.breakCount) ?? 0);
   if (brk === null) push('quality', '封板质量', 'na', '炸板次数未知');
   else if (brk >= PROMO_RULES.breakFailMin) { scoreDim(15, undefined, 0); push('quality', '封板质量', 'fail', `反复炸板 ${brk} 次——获利盘疯狂兑现，勉强封板次日大概率低开`); }
   else if (brk === PROMO_RULES.breakPerfect) { scoreDim(15, undefined, 1); push('quality', '封板质量', 'pass', '一封封死不开板，筹码高度锁定'); }
   else { scoreDim(15, undefined, 0.6); push('quality', '封板质量', 'warn', `开过 ${brk} 次板但快速回封，属充分换手的健康晋级`); }
 
   // ⑤ 题材梯队（15）
-  const themeSize = Number.isFinite(Number(ctx.themeSize)) ? Number(ctx.themeSize) : null;
+  // null 守卫：同 openPct（缺数据传 null 曾被读成 0 → 全员「孤立独板」硬否决，2026-09-08 修）
+  const themeSize = ctx.themeSize == null ? null : (Number.isFinite(Number(ctx.themeSize)) ? Number(ctx.themeSize) : null);
   const role = String(ctx.role || stock.role || '');
   if (themeSize === null) push('theme', '题材梯队', 'na', '板块家数未知');
   else if (themeSize <= 1) push('theme', '题材梯队', 'fail', '孤立独板——无跟风无梯队，100% 无法晋级');
@@ -1320,8 +1324,8 @@ function assessPromotion(stock, ctx = {}) {
   else if (themeSize >= 3) { scoreDim(15, undefined, 0.7); push('theme', '题材梯队', 'pass', `板块 ${themeSize} 只涨停，有梯队助攻`); }
   else { scoreDim(15, undefined, 0.3); push('theme', '题材梯队', 'warn', `板块仅 ${themeSize} 只涨停，梯队薄`); }
 
-  // ⑥ 量能结构（10）：各阶缩放标准
-  const volChg = Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null;
+  // ⑥ 量能结构（10）：各阶缩放标准（null 守卫同上：缺失≠0%）
+  const volChg = ctx.volChg == null ? null : (Number.isFinite(Number(ctx.volChg)) ? Number(ctx.volChg) : null);
   if (volChg === null) push('volume', '量能结构', 'na', '无昨日成交量可比');
   else if (boards === 2) {
     const [lo, hi] = PROMO_RULES.volUpStage12;

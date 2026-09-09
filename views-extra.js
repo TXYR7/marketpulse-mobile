@@ -1,7 +1,7 @@
 // views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
 import { fetchAllMarket, searchStock, boardTag } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
-import { evaluatePortfolioRisk, buildCopilotAnswer, COPILOT_QUESTIONS, routeCopilotQuery } from './analytics.js'; // 2026-09-09: attributionOf 不再使用(假精确,同桌面端)
+import { evaluatePortfolioRisk } from './analytics.js'; // 2026-09-09 减法批:attributionOf(假精确)+Copilot 系列 import 已删
 import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
@@ -181,23 +181,12 @@ export function renderReview(ctx) {
   }
 }
 
-/* ---------------- 决策助手 ---------------- */
-export function renderAI(ctx) {
-  const el = document.querySelector('#aiView');
-  if (!el) return;
-  const payload = ctx.state.lastPayload;
-  const qHtml = COPILOT_QUESTIONS.map((q) => '<button type="button" class="copilot-question" data-copilot="' + q.key + '">' + esc(q.label) + '</button>').join('');
-  const html = '<div class="sec-title"><h2>决策助手</h2><span class="hint">规则驱动，非预测</span></div>' +
-    '<div class="copilot-questions">' + qHtml + '</div>' +
-    '<div class="copilot-input-row"><input id="copilotInput" type="search" placeholder="问点什么，例如：现在能上几成仓" aria-label="向决策助手提问" autocomplete="off" />' +
-    '<button class="btn primary" type="button" id="copilotAsk">提问</button></div>' +
-    '<div id="copilotAnswer">' + (payload ? '<div class="all-empty">点击上方问题或输入关键词，查看系统解释</div>' : '<div class="all-empty">等待实时行情后可用</div>') + '</div>';
-  el.__ctx = ctx;
-  if (!setHTML(el, html)) return;
-}
+/* 2026-09-09 减法批:决策助手(renderAI/answerCopilotWith/submitCopilotInput + 事件委托两分支 + import)
+   已删——与桌面端同口径(答案与页面数字同源零增量,LLM 从未配置);analytics.js 的
+   COPILOT_QUESTIONS/buildCopilotAnswer/routeCopilotQuery 函数保留(同步哨兵锁定同名一致性)。 */
 
 /* ---------------- 模块级事件委托（一次性挂载；Node 导入安全守卫） ----------------
-   覆盖：翻页 / chip 多选 / 交易保存删除 / 复盘生成保存删除 / 决策助手提问。
+   覆盖：翻页 / chip 多选 / 交易保存删除 / 复盘生成保存删除。
    渲染函数只产出 HTML 并暴露 __ctx/__repaint/__nav，不再「每次渲染重新绑监听」。 */
 if (typeof document !== 'undefined') {
   const selGroups = (root) => {
@@ -236,29 +225,6 @@ if (typeof document !== 'undefined') {
     ctx.state.trades = await getTrades();
     ctx.toast('已保存交易');
     container.__repaint();
-  }
-  // 决策助手共用应答路径：预设按钮与自由文本输入（G25 对齐桌面）走同一 enriched 组装
-  function answerCopilotWith(key, ctx) {
-    if (!ctx.state.lastPayload) { ctx.toast('等待实时行情后再询问'); return; }
-    const enriched = {
-      ...ctx.state.lastPayload,
-      status: { ...(ctx.state.lastPayload.status || {}), phase: ctx.state.phase, emotionIndex: ctx.state.emotion?.emotionIndex ?? null },
-      stocks: (ctx.state.pools && ctx.state.pools.up) || [],
-      positionAdvice: ctx.state.positionAdvice,
-      mentalNotes: ctx.state.mentalNotes,
-    };
-    const el = document.querySelector('#copilotAnswer');
-    if (el) el.innerHTML = buildCopilotAnswer(key, enriched);
-  }
-  function submitCopilotInput(input) {
-    const ctx = input.closest('#aiView')?.__ctx;
-    if (!ctx) return;
-    const text = input.value.trim();
-    if (!text) { ctx.toast('输入问题后再提问'); return; }
-    const key = routeCopilotQuery(text, COPILOT_QUESTIONS);
-    if (!key) { ctx.toast('没匹配到——换个说法，或点上方预设问题'); return; }
-    answerCopilotWith(key, ctx);
-    input.value = '';
   }
   document.addEventListener('click', async (e) => {
     const hit = (s2) => e.target.closest(s2);
@@ -304,18 +270,6 @@ if (typeof document !== 'undefined') {
       ctx.state.reviews = await getReviews();
       ctx.toast('已保存复盘');
       container.__repaint();
-      return;
-    }
-    const cq = hit('[data-copilot]');
-    if (cq) {
-      const ctx = cq.closest('#aiView')?.__ctx;
-      if (!ctx) return;
-      answerCopilotWith(cq.dataset.copilot, ctx);
-      return;
-    }
-    if (hit('#copilotAsk')) {
-      const input = document.querySelector('#copilotInput');
-      if (input) submitCopilotInput(input);
       return;
     }
     // chip 多选：只切类名，提交时按 .on 收集（不再维护 _sel 状态）

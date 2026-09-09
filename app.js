@@ -8,7 +8,7 @@ import {
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList, BD_LABELS } from './views.js';
-import { renderMarket, renderTrades, renderReview, renderAI } from './views-extra.js';
+import { renderMarket, renderTrades, renderReview } from './views-extra.js'; // 2026-09-09 减法批:renderAI 已随决策助手删除
 import { APP_VERSION } from './version.js';
 
 const state = {
@@ -740,7 +740,7 @@ function renderView(v) {
   else if (v === 'market') renderMarket(ctx);
   else if (v === 'trades') renderTrades(ctx);
   else if (v === 'review') renderReview(ctx);
-  else if (v === 'ai') renderAI(ctx);
+  // 2026-09-09 减法批:'ai' 分支已随决策助手删除
 }
 function renderCurrentView() { renderView(state.view); }
 

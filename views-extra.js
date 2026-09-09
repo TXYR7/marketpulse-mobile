@@ -1,7 +1,7 @@
 // views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
 import { fetchAllMarket, searchStock, boardTag } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
-import { evaluatePortfolioRisk, attributionOf, buildCopilotAnswer, COPILOT_QUESTIONS, routeCopilotQuery } from './analytics.js';
+import { evaluatePortfolioRisk, buildCopilotAnswer, COPILOT_QUESTIONS, routeCopilotQuery } from './analytics.js'; // 2026-09-09: attributionOf 不再使用(假精确,同桌面端)
 import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
@@ -118,12 +118,11 @@ export function renderTrades(ctx) {
       '<button class="btn primary" id="tfSubmit">保存交易</button></div>';
 
     const ledger = trades.length ? trades.map((t) => {
-      const at = attributionOf(t);
+      // 2026-09-09 减法批:归因行已删(attributionOf 手拍权重=假精确,桌面端归因卡同日删除,跨端口径统一)
       // 旧记录可能只存了代码：报价缓存有名字就显示名字
       const nameOf = (t) => (t.name && t.name !== t.code) ? t.name : ((ctx.state && ctx.state.quotes && ctx.state.quotes[t.code] && ctx.state.quotes[t.code].name) || t.name || t.code);
       return '<div class="ledger-row"><div><div class="nm">' + esc(nameOf(t)) + ' <span class="pill">' + esc(t.strategy || '') + '</span></div>' +
-        '<div class="meta">' + (t.date || '') + ' · ' + esc((t.buyReasons || []).join('/')) + '</div>' +
-        '<div class="meta">盘面 ' + at.market + ' / 题材 ' + at.theme + ' / 个股 ' + at.stock + ' / 买卖 ' + (at.buy + at.sell).toFixed(2) + '</div></div>' +
+        '<div class="meta">' + (t.date || '') + ' · ' + esc((t.buyReasons || []).join('/')) + '</div></div>' +
         '<div style="text-align:right"><div class="pnl ' + (t.pnl >= 0 ? 'up-c' : 'down-c') + '">' + (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(2) + '</div>' +
         '<button class="trade-del" data-del="' + t.id + '">删除</button></div></div>';
     }).join('') : '<div class="empty">还没有交易记录</div>';

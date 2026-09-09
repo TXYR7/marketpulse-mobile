@@ -95,8 +95,12 @@
           <div class="body"><div class="list" id="zbList"></div></div>
         </details>
 
-        <div class="sec-title"><h2>昨日涨停 · 今日开盘预期差</h2><span class="hint" id="gapSummary">--</span></div>
-        <div class="list" id="gapRows"></div>
+        <!-- 2026-09-09 减法批:预期差收进折叠(与桌面端迁复盘同口径)——9:26 看一眼后整天是死重,
+             常驻展开还把风险雷达压到屏幕底部;折叠后雷达上浮为首屏可达的止手闸 -->
+        <details class="fold" id="gapFold">
+          <summary><span class="fold-title">昨日涨停 · 今日开盘预期差</span><span id="gapSummary" class="hint">--</span></summary>
+          <div class="body"><div class="list" id="gapRows"></div></div>
+        </details>
 
         <div class="sec-title"><h2>风险雷达</h2></div>
         <div id="radar"></div>

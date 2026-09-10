@@ -22,6 +22,12 @@ const EMA = {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
     // `_` 缓存穿透：与桌面 server.js 口径一致——不加则 CDN/浏览器 HTTP 缓存可返回陈旧响应（主力/超大单冻结的根因之一）
     return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66&_=${Date.now()}`;
+  },
+  // 2026-09-10:push2 主 host 在部分网络(代理/fake-ip)下被单点掐断(本次预期差大面积「暂无数据」的根因)——
+  // push2delay 是同 API 的延迟行情域名,实测与主 host 同数据(仅延迟 0-15min),作为兜底(同桌面 fetchBatchQuotes 口径)
+  ulistDelay(codes) {
+    const secids = codes.map((c) => marketPrefix(c) + c).join(',');
+    return `https://push2delay.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66&_=${Date.now()}`;
   }
 };
 
@@ -208,7 +214,10 @@ export async function fetchQuotes(codes, opts = {}) {
     while (idx < chunks.length) {
       const ch = chunks[idx++];
       try {
-        const data = await getJSON(EMA.ulist(ch), opts.tries ?? 3, opts.timeoutMs ?? 9000);
+        // 主 host push2 失败(代理掐断/超时)→ push2delay 同 API 兜底,只兜一轮不重试放大
+        let data;
+        try { data = await getJSON(EMA.ulist(ch), opts.tries ?? 3, opts.timeoutMs ?? 9000); }
+        catch (e) { data = await getJSON(EMA.ulistDelay(ch), 1, opts.timeoutMs ?? 9000); }
         for (const row of data?.data?.diff || []) {
           out[String(row.f12)] = {
             code: String(row.f12),

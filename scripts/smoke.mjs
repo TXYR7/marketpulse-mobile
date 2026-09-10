@@ -302,8 +302,9 @@ console.log('[B13] 详情抽屉提速批：fetchQuotes 数值清洗（停牌 -�
     const keepAlive = setTimeout(() => {}, 500);
     const q2 = await fetchQuotes(['600001'], { tries: 1, timeoutMs: 30 });
     clearTimeout(keepAlive);
-    ok('fail-fast 透传：抽屉补价参数(tries=1/30ms)直达 getJSON，单块中止且单块失败不抛错',
-      aborts === 1 && q2.__failedChunks === 1 && Object.keys(q2).length === 1 && Date.now() - t0 < 2000);
+    // 2026-09-10 push2delay 兜底批:主 host 挂 → 兜底也挂(tries=1) → 块计失败不抛错;两次中止=主+兜各一次
+    ok('fail-fast 透传：抽屉补价参数(tries=1/30ms)直达 getJSON，主+兜底均中止且单块失败不抛错',
+      aborts === 2 && q2.__failedChunks === 1 && Object.keys(q2).length === 1 && Date.now() - t0 < 2000);
   } finally {
     globalThis.fetch = realFetch;
   }

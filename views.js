@@ -154,7 +154,7 @@ export function renderStructure(ctx) {
     const bd = Object.entries(l.breakdown || {}).filter(([, v]) => v != null).map(([k, v]) => '<span>' + (BD_LABELS[k] || k) + ':' + v + '</span>').join('');
     return '<div class="leader-card" data-code="' + l.code + '"><div class="row1"><div class="nm">' + esc(l.name) + '</div>' +
       '<div class="right"><div class="sc">' + l.score + '</div></div></div>' +
-      '<div class="sub">' + (l.boards || 1) + '板 · ' + esc(l.role) + ' · ' + esc(l.themeName || '') + '</div>' +
+      '<div class="sub"><span class="bd-tag">' + (l.boards || 1) + '板</span>' + esc(l.role) + ' · ' + esc(l.themeName || '') + '</div>' +
       (bd ? '<div class="bd">' + bd + '</div>' : '') + '</div>';
   }).join('');
 

@@ -672,10 +672,11 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .leader-card .nm { font-weight: 700; font-size: 15px; }
 .leader-card .role { font-size: 11px; color: var(--amber); }
 .leader-card .right { margin-left: auto; text-align: right; }
-.leader-card .sc { font-weight: 800; font-variant-numeric: tabular-nums; }
+.leader-card .sc { font-weight: 800; font-variant-numeric: tabular-nums; color: var(--data-ink); } /* 2026-09-10 分数=数据紫(角色系统) */
+.leader-card .sub .bd-tag { display: inline-block; margin-right: 4px; color: var(--data-ink); font-weight: 800; }
 .leader-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .leader-card .bd { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.leader-card .bd span { font-size: 10px; color: var(--muted); background: var(--surface-2); border-radius: 5px; padding: 1px 6px; }
+.leader-card .bd span { font-size: 10px; color: var(--data-ink); background: var(--data-soft); border-radius: 5px; padding: 1px 6px; } /* 2026-09-10 归因条=紫底紫字 */
 
 /* ===== 交易 / 复盘 ===== */
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }

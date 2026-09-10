@@ -532,16 +532,10 @@ async function openSheet(code) {
     '<div id="sheetKv">' + kvGrid(stock, d) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
-    '<div class="s-actions"><button class="btn primary" id="sheetCopy">复制代码 · 去同花顺</button>' +
-    '<button class="btn" id="sheetClose">关闭</button></div>';
+    '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>'; // 2026-09-10 减法批:复制代码按钮已砍(用户点名没用)
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code);
   if (!state.manualDate) loadAuctionDetail(code);
-  // 2026-09-10 全盘对齐桌面:自选按钮已删,主操作改复制代码+去同花顺引导(桌面 modalAction 同款)
-  $('#sheetCopy').addEventListener('click', () => {
-    try { navigator.clipboard.writeText(code); toast('已复制 ' + code + (stock?.name ? ' · ' + stock.name : '') + ' · 去同花顺查看'); }
-    catch { toast('代码 ' + code); }
-  });
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
   // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出

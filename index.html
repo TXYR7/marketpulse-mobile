@@ -58,9 +58,18 @@
     </div>
 
     <main>
-      <!-- 盘中 -->
+      <!-- 盘中(2026-09-10 全盘对齐桌面:一页到底,机会/梯队/结构并入;自选页整链删) -->
       <section class="view active" id="view-intraday">
         <div class="banner hide" id="intradayBanner"></div>
+        <!-- 2026-09-10 对齐桌面重排版:信息从重到轻——机会(答案层)最前 -->
+        <div class="sec-title"><h2>机会池 · S/A/B 评级</h2><span class="hint" id="oppHint">--</span></div>
+        <div id="opp"></div>
+
+        <div class="sec-title"><h2>连板梯队</h2><span class="hint" id="ladderHint">--</span></div>
+        <div id="ladderFull"></div>
+
+        <div id="structure"></div>
+
         <div class="sec-title"><h2>涨停池</h2><span class="hint" id="ztHint">--</span></div>
         <div class="toolbar">
           <label class="search"><span aria-hidden="true"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><input id="ztSearch" type="search" placeholder="搜索名称 / 代码" autocomplete="off" /></label>
@@ -104,33 +113,10 @@
         <div class="sec-title"><h2>风险雷达</h2></div>
         <div id="radar"></div>
       </section>
-
-      <!-- 机会 -->
-      <section class="view" id="view-opportunity">
-        <div class="sec-title"><h2>机会池 · S/A/B 评级</h2><span class="hint" id="oppHint">--</span></div>
-        <div id="opp"></div>
-      </section>
-
-      <!-- 梯队 -->
-      <section class="view" id="view-ladder">
-        <div class="sec-title"><h2>连板梯队</h2><span class="hint" id="ladderHint">--</span></div>
-        <div id="ladderFull"></div>
-      </section>
-
-      <!-- 结构 -->
-      <section class="view" id="view-structure">
-        <div id="structure"></div>
-      </section>
-
-      <!-- 自选 -->
-      <section class="view" id="view-watch">
-        <div class="sec-title"><h2>自选观察</h2><span class="hint">本地存储</span></div>
-        <div class="toolbar">
-          <label class="search"><span aria-hidden="true">＋</span><input id="watchInput" type="search" placeholder="输入代码加入自选，如 600519" inputmode="numeric" autocomplete="off" /></label>
-        </div>
-        <div class="list" id="watchList"></div>
-        <div class="empty hide" id="watchEmpty">还没有自选，输入代码添加。数据存于本机浏览器。</div>
-      </section>
+      <!-- 2026-09-10 全盘对齐桌面:view-opportunity/view-ladder/view-structure 三个独立视图已删——
+           内容容器(#opp/#ladderFull/#structure)迁入 view-intraday,渲染函数(views.js)原样复用;
+           view-watch(自选页)整链删除——桌面 2026-09-09 同口径(实盘在同花顺/东财,本页只做研究参考),
+           store.js 的 watch 数据层保留(旧数据可导出),只删界面与入口 -->
 
       <!-- 全市场（侧滑菜单） -->
       <section class="view" id="view-market">
@@ -188,10 +174,7 @@
           <label for="setNotify">信号变化通知（前台运行时）</label>
           <input id="setNotify" type="checkbox" style="flex:0 0 auto;width:20px;height:20px" />
         </div>
-        <div class="set-row">
-          <label>清空本地数据</label>
-          <button class="btn" id="clearBtn" style="flex:0 0 auto;padding:0 14px;height:36px">清空自选</button>
-        </div>
+        <!-- 2026-09-10 全盘对齐桌面:清空自选按钮已随自选页删除 -->
         <div class="about">
           版本 <span id="aboutVersion">--</span> · MarketPulse 星脉 · 数据来自东方财富公开接口，由手机浏览器直接获取，无后端服务器。<br />
           行情有延迟，仅供信息展示，不构成投资建议。<br />
@@ -201,11 +184,10 @@
     </main>
 
     <nav class="bottomnav">
+      <!-- 2026-09-10 全盘对齐桌面:机会/梯队/结构并入盘中页,自选已删——导航 5 键减 3 键 -->
       <button class="on" data-view="intraday"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9 16v-5M12.5 16V8M16 16v-3"/></svg></span>盘中</button>
-      <button data-view="opportunity"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 11.4v1.2"/></svg></span>机会</button>
-      <button data-view="ladder"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 3v18M17 3v18M7 7.5h10M7 12h10M7 16.5h10"/></svg></span>梯队</button>
-      <button data-view="structure"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.8 7.2l3.8 8.6M17.2 7.2l-3.8 8.6M7 6h10"/></svg></span>结构</button>
-      <button data-view="watch"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3z"/></svg></span>自选</button>
+      <button data-view="review"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h4"/></svg></span>复盘</button>
+      <button data-view="settings"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span>设置</button>
     </nav>
 
     <div class="scrim" id="scrim"></div>

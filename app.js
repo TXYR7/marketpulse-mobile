@@ -262,7 +262,6 @@ function aucInfoOf(code) {
   return pct == null ? null : { pct, matched: !!it.matched };
 }
 function ztCard(x) {
-  const starred = state.watch.some((w) => w.code === x.code);
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   const pv = x.promo && x.promo.available !== false ? x.promo : null;
   const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
@@ -270,7 +269,7 @@ function ztCard(x) {
   const auc = aucInfoOf(x.code);
   return '<div class="card" data-code="' + x.code + '">' +
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
-    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + (starred ? ' <span class="star">★</span>' : '') + '</div>' +
+    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
     (auc ? '<div class="auc">竞价 <b class="' + pctClass(auc.pct) + '">' + pctText(auc.pct) + '</b><em>' + (auc.matched ? '撮合' : '虚拟') + '</em></div>' : '') + '</div>' +
     '<div class="right">' +
@@ -302,7 +301,7 @@ function ztStructSig(x) {
   const pv = x.promo && x.promo.available !== false ? x.promo.verdict : '';
   const auc = aucInfoOf(x.code);
   const aucKey = auc ? (auc.pct + (auc.matched ? 'm' : 'v')) : '';
-  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', state.watch.some((w) => w.code === x.code) ? 1 : 0, pv, aucKey].join('|');
+  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', pv, aucKey].join('|');
 }
 function pctFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.seal ?? '', x.turnover ?? ''].join('|'); }
 function downFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.turnover ?? ''].join('|'); }
@@ -439,60 +438,23 @@ function renderRadar() {
 }
 
 function renderIntraday() {
+  // 2026-09-10 全盘对齐桌面:机会/梯队/结构并入盘中页一页到底(渲染函数自 views.js 原样复用)
+  const ctx = { state, toast, actions: { loadHistory } };
+  renderOpportunity(ctx);
+  renderLadder(ctx);
+  renderStructure(ctx);
   renderZt(); renderDowns(); renderRadar();
   $('#dateLabel').textContent = (state.manualDate || todayStr()).slice(0, 4) + '-' + (state.manualDate || todayStr()).slice(4, 6) + '-' + (state.manualDate || todayStr()).slice(6, 8);
   updateBanner();
   loadGap();
 }
 
-/* ---------------- 渲染：自选 ---------------- */
-function recordFor(code) {
-  if (state.pools) {
-    const s = state.pools.up.find((x) => x.code === code) || state.pools.down.find((x) => x.code === code) || state.pools.broken.find((x) => x.code === code);
-    if (s) return { name: s.name, price: s.price, changePct: s.changePct, main: null, super: null, tier: s.tier, signal: s.signal };
-  }
-  const d = state.quotes[code];
-  if (d) {
-    const pct = d.price != null && d.prevClose ? ((d.price - d.prevClose) / d.prevClose * 100) : null;
-    return { name: d.name || code, price: d.price, changePct: pct, main: d.main, super: d.super };
-  }
-  return { name: code, price: null };
-}
-function renderWatch() {
-  const list = $('#watchList');
-  const empty = $('#watchEmpty');
-  if (!state.watch.length) { setHTML(list, ''); empty.classList.remove('hide'); return; }
-  empty.classList.add('hide');
-  const html = state.watch.map((w) => {
-    const r = recordFor(w.code);
-    return '<div class="card" data-code="' + w.code + '">' +
-      '<div><div class="name">' + esc(r.name) + (r.tier ? ' ' + tierBadge(r.tier) : '') + '</div>' +
-      '<div class="code">' + w.code + (r.signal ? ' · ' + (r.signal.state) : '') + '</div></div>' +
-      '<div class="right"><div class="price">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
-      '<div class="pct ' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</div>' +
-      '<div class="meta">主 ' + (r.main != null ? fmtMoney(r.main) : '--') + '</div></div></div>';
-  }).join('');
-  setHTML(list, html);
-}
-async function loadWatch() {
-  state.watch = await getWatch();
-  const codes = state.watch.map((w) => w.code);
-  const inPools = new Set();
-  if (state.pools) [...state.pools.up, ...state.pools.down, ...state.pools.broken].forEach((x) => inPools.add(x.code));
-  const needQuote = codes.filter((c) => !inPools.has(c));
-  // 报价带 TTL：TTL 内切回自选不重复打接口；新报价合并进旧表而非整体替换
-  const fresh = Date.now() - state.quotesAt < Math.min(state.refreshMs || 15000, 15000);
-  if (needQuote.length && !fresh) {
-    const q = await fetchQuotes(needQuote).catch(() => ({}));
-    if (Object.keys(q).length) { mergeQuotes(q); state.quotesAt = Date.now(); }
-  }
-  // 早期按代码加入的自选（名字存成了代码）：报价带回了名字就回填存储，列表/抽屉不再显示纯代码
-  for (const w of state.watch) {
-    const n = state.quotes[w.code] && state.quotes[w.code].name;
-    if (n && n !== w.code && (!w.name || w.name === w.code)) { w.name = n; putWatch(w).catch(() => {}); }
-  }
-  renderWatch();
-}
+/* ---------------- 渲染:自选已删(2026-09-10 全盘对齐桌面) ----------------
+   renderWatch/loadWatch/recordFor/卡片星标/抽屉加自选按钮/设置清空自选 随 view-watch 整链删除——
+   实盘在同花顺/东财,详情抽屉主操作改「复制代码去同花顺」(同桌面 2026-09-09 口径)。
+   store.js 的 getWatch/putWatch 数据层保留(旧数据不丢);state.watch 仅剩详情抽屉
+   对池外历史卡片的兜底寻名——无害残留。 */
+/* renderWatch/loadWatch 已随自选页删除(2026-09-10) */
 
 /* ---------------- 详情抽屉 ---------------- */
 // 报价新鲜度按只计时（mergeQuotes 盖章 t；无 t 的旧条目回退全局 quotesAt）。
@@ -519,8 +481,7 @@ async function openSheet(code) {
   // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
   //（旧版渲染前 await 报价，弱网下最坏 3×9s 抽屉不出现，体感「点了没反应」）
   let d = freshQuote(code) || {};
-  if (d.price == null && stock.price == null && state.quotes[code]) d = state.quotes[code]; // 池外自选股：回退最近缓存报价展示，后台再刷
-  const isWatch = state.watch.some((w) => w.code === code);
+  if (d.price == null && stock.price == null && state.quotes[code]) d = state.quotes[code]; // 池外票：回退最近缓存报价展示，后台再刷
   const pct = d.price != null && d.prevClose ? ((d.price - d.prevClose) / d.prevClose * 100) : (stock.changePct != null ? stock.changePct : null);
   const body = $('#sheetBody');
   let head = '<div class="s-head"><div><div class="s-name">' + esc(stock.name || code) + '</div>' +
@@ -563,16 +524,15 @@ async function openSheet(code) {
     '<div id="sheetKv">' + kvGrid(stock, d) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
-    '<div class="s-actions"><button class="btn primary" id="sheetWatch">' + (isWatch ? '取消自选' : '★ 加自选') + '</button>' +
+    '<div class="s-actions"><button class="btn primary" id="sheetCopy">复制代码 · 去同花顺</button>' +
     '<button class="btn" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code);
   if (!state.manualDate) loadAuctionDetail(code);
-  $('#sheetWatch').addEventListener('click', async () => {
-    if (isWatch) { await delWatch(code); state.watch = state.watch.filter((w) => w.code !== code); }
-    else { await putWatch({ code, name: stock.name || code, addedAt: Date.now() }); state.watch.push({ code, name: stock.name || code, addedAt: Date.now() }); }
-    renderWatch(); renderZt();
-    openSheet(code);
+  // 2026-09-10 全盘对齐桌面:自选按钮已删,主操作改复制代码+去同花顺引导(桌面 modalAction 同款)
+  $('#sheetCopy').addEventListener('click', () => {
+    try { navigator.clipboard.writeText(code); toast('已复制 ' + code + (stock?.name ? ' · ' + stock.name : '') + ' · 去同花顺查看'); }
+    catch { toast('代码 ' + code); }
   });
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
@@ -733,14 +693,11 @@ function switchView(v) {
 function renderView(v) {
   const ctx = { state, toast, actions: { loadHistory } };
   if (v === 'intraday') renderIntraday();
-  else if (v === 'opportunity') renderOpportunity(ctx);
-  else if (v === 'ladder') renderLadder(ctx);
-  else if (v === 'structure') renderStructure(ctx);
-  else if (v === 'watch') loadWatch();
   else if (v === 'market') renderMarket(ctx);
   else if (v === 'trades') renderTrades(ctx);
   else if (v === 'review') renderReview(ctx);
   // 2026-09-09 减法批:'ai' 分支已随决策助手删除
+  // 2026-09-10 全盘对齐桌面:'opportunity'/'ladder'/'structure'/'watch' 分支已随视图合并/自选删除
 }
 function renderCurrentView() { renderView(state.view); }
 
@@ -1216,19 +1173,7 @@ function bind() {
     $$('#ztFilter button').forEach((x) => x.classList.remove('on')); b.classList.add('on');
     state.ztFilter = b.dataset.f; renderZt();
   }));
-  $('#watchInput').addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter') return;
-    const code = e.target.value.trim().replace(/\D/g, '');
-    if (code.length < 4) { toast('请输入有效的股票代码'); return; }
-    if (state.watch.some((w) => w.code === code)) { toast('已在自选'); return; }
-    let name = code;
-    if (state.pools) { const s = [...state.pools.up, ...state.pools.down, ...state.pools.broken].find((x) => x.code === code); if (s) name = s.name; }
-    // 池外票：报价缓存（fetchQuotes 带 f14 名字）里有的话直接用，别把代码存成名字
-    if (name === code && state.quotes[code] && state.quotes[code].name) name = state.quotes[code].name;
-    await putWatch({ code, name, addedAt: Date.now() });
-    state.watch.push({ code, name, addedAt: Date.now() });
-    e.target.value = ''; toast('已加入自选'); loadWatch();
-  });
+  // 2026-09-10 全盘对齐桌面:watchInput 绑定已随自选页删除
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
   $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });
   // B6:接口 token 设置——手机 PWA 无控制台，这是 token 失效时的救命通道（改后即时生效，免重启）
@@ -1255,10 +1200,7 @@ function bind() {
       toast(e.target.checked ? '信号通知已开启' : '信号通知已关闭');
     });
   }
-  $('#clearBtn').addEventListener('click', async () => {
-    await clearWatch(); // 单事务清空
-    state.watch = []; renderWatch(); toast('已清空自选');
-  });
+  // 2026-09-10 全盘对齐桌面:清空自选按钮(clearBtn)已随自选页删除
   $('#scrim').addEventListener('click', closeSheet);
   setupPTR();
   setupEdgeJump();

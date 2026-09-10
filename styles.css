@@ -620,7 +620,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .opp-card .row1 { display: flex; align-items: center; gap: 8px; }
 .opp-card .nm { font-weight: 700; font-size: 15px; }
 .opp-card .row1 .right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.opp-card .score { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.opp-card .score { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--data-ink); } /* 2026-09-10 对齐桌面:评分=数据紫 */
 .opp-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .opp-card .reasons { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .opp-card .reasons .plus { color: var(--pos-ink); } /* 2026-09-10:绿→青碧,利多项避开A股跌绿雷区(与桌面统一) */

@@ -623,7 +623,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .opp-card .score { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
 .opp-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .opp-card .reasons { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
-.opp-card .reasons .plus { color: var(--green); }
+.opp-card .reasons .plus { color: var(--pos-ink); } /* 2026-09-10:绿→青碧,利多项避开A股跌绿雷区(与桌面统一) */
 .opp-card .reasons .minus { color: var(--red); }
 .opp-card .reasons span { font-size: 11px; }
 

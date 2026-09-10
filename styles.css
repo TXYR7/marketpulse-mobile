@@ -317,6 +317,7 @@ main {
   flex: 1 1 auto;
   min-height: 0; /* 关键:flex 子项默认 min-height:auto 会撑爆壳,必须 0 才能让 overflow-y 生效 */
   overflow-y: auto;
+  overflow-x: hidden; /* 2026-09-10:锁横向,整页不许左右跑(内容全 grid 无宽表,锁死无副作用) */
   overscroll-behavior-y: contain; /* 新滚动容器承接原 body 的防链/禁原生下拉语义 */
   -webkit-overflow-scrolling: touch;
   padding: 10px 10px calc(var(--nav-h) + var(--safe-b) + 14px);

@@ -187,7 +187,8 @@ console.log('[B8] 版本一致性（sw.js CACHE ↔ version.js APP_VERSION）');
   const ver = readFileSync(new URL('../version.js', import.meta.url), 'utf8');
   const cache = (sw.match(/const CACHE = ['"]([^'"]+)['"]/) || [])[1];
   const appVer = (ver.match(/APP_VERSION = ['"]([^'"]+)['"]/) || [])[1];
-  ok('双源版本号一致', Boolean(cache) && cache === appVer && cache.startsWith('mp-mobile-v'));
+  // 2026-09-10 起日期制版本(mp-mobile-YYYYMMDD 或 -N 同日序列),替代旧 vN 累积计数
+  ok('双源版本号一致', Boolean(cache) && cache === appVer && /^mp-mobile-\d{8}(-\d+)?$/.test(cache));
 }
 
 console.log('[B9] 整文件语法护栏（vm.SourceTextModule 只编译不执行）');

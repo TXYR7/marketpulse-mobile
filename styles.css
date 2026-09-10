@@ -11,6 +11,9 @@
   --ink: #fafafa;
   --muted: #a9a9b4;
   --teal: #3b82f6;
+  /* 2026-09-10 色彩角色拆分(桌面同款):蓝=交互 / 紫=数据 / 青碧=正向 */
+  --data-ink: #a78bfa; --data-soft: rgba(167, 139, 250, .16);
+  --pos-ink: #2dd4bf; --pos-soft: rgba(45, 212, 191, .14);
   --teal-strong: #60a5fa;
   --teal-soft: rgba(59, 130, 246, 0.14);
   /* 填充态专用底色（白字徽章/主按钮）；--amber 亮琥珀只用于文字与浅底（暗底可读） */
@@ -49,6 +52,8 @@ html[data-theme="light"] {
   --ink: #18181b;
   --muted: #52525b;
   --teal: #2563eb;
+  --data-ink: #7c3aed; --data-soft: rgba(124, 58, 237, .10);
+  --pos-ink: #0d9488; --pos-soft: rgba(13, 148, 136, .10);
   --teal-strong: #1d4ed8;
   --teal-soft: rgba(59, 130, 246, 0.10);
   --fill-teal: #2563eb;
@@ -189,7 +194,7 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--teal-soft); color: var(--teal); border: 1px solid transparent;
 }
 /* 2026-09-10 阶段徽标分色(桌面 phase-badge 同款语义):绿=主升类/黄=分歧观望/红=退潮冰点 */
-.topbar .phase-badge.ok { background: rgba(59, 130, 246, 0.13); color: var(--teal); }
+.topbar .phase-badge.ok { background: rgba(59, 130, 246, 0.13); color: var(--pos-ink); }
 .topbar .phase-badge.warn { background: var(--amber-tint); color: var(--amber); }
 .topbar .phase-badge.bad { background: var(--danger-tint); color: var(--red); }
 /* 纯图标按钮:无框无底,与左侧 ☰ 对称;旋转动画转内层 .ic,见 app.js spinStart */
@@ -213,8 +218,8 @@ button { font-family: inherit; cursor: pointer; }
 }
 .chip span { color: var(--muted); font-size: 10px; }
 .chip strong { font-size: 15px; font-variant-numeric: tabular-nums; }
-.chip.sent { background: var(--teal-soft); }
-.chip.sent strong { color: var(--teal); }
+.chip.sent { background: var(--data-soft); }
+.chip.sent strong { color: var(--data-ink); }
 .chip.up { background: var(--up-tint); }
 .chip.up strong { color: var(--red); }
 .chip.down { background: var(--down-tint); }
@@ -419,7 +424,7 @@ main {
 .rank-row:last-child { border-bottom: 0; }
 .rank-row .idx { width: 20px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .rank-row .nm { font-weight: 600; }
-.rank-row .cnt { margin-left: auto; color: var(--teal); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rank-row .cnt { margin-left: auto; color: var(--data-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .rank-row .chg { min-width: 38px; text-align: right; font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* 空状态 / 加载 */
@@ -599,7 +604,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .signal-tag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-s); flex: 0 0 auto; }
 .signal-tag.可打 { background: var(--down-tint); color: var(--green); }
 .signal-tag.待触发 { background: var(--amber-tint); color: var(--amber); }
-.signal-tag.观察 { background: var(--teal-soft); color: var(--teal); }
+.signal-tag.观察 { background: var(--surface-2); color: var(--muted); }
 .signal-tag.禁打 { background: var(--danger-tint); color: var(--red); }
 
 /* ===== 机会分层 ===== */
@@ -653,13 +658,13 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 
 /* 结构树 */
 .tree-main { border-left: 3px solid var(--red); }
-.tree-branch { border-left: 3px solid var(--teal); }
+.tree-branch { border-left: 3px solid var(--data-ink); }
 .tree-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .tree-head .tn { font-weight: 800; font-size: 15px; }
 .tree-head .ts { color: var(--muted); font-size: 12px; }
 .tree-members { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .tree-members .m { display: flex; gap: 8px; font-size: 13px; padding: 3px 0; }
-.tree-members .m .b { color: var(--teal); font-weight: 700; min-width: 30px; font-variant-numeric: tabular-nums; }
+.tree-members .m .b { color: var(--data-ink); font-weight: 700; min-width: 30px; font-variant-numeric: tabular-nums; }
 .tree-members .m .r { color: var(--muted); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* 龙头卡 */
@@ -749,7 +754,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .s-breakdown .bd-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
 .s-breakdown .bd-row .k { color: var(--muted); width: 64px; }
 .s-breakdown .bd-bar { flex: 1; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
-.s-breakdown .bd-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--teal), var(--teal-strong)); }
+.s-breakdown .bd-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--data-ink), var(--data-ink)); }
 .s-signal { margin-top: 8px; }
 .s-signal .st { font-weight: 800; font-size: 15px; }
 
@@ -782,7 +787,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .copilot-layer .cl-label { font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: 0.04em; }
 .copilot-layer .cl-body { margin-top: 3px; font-size: 13px; line-height: 1.5; }
 .copilot-layer .cl-body span { display: inline-block; background: var(--surface-2); border-radius: 6px; padding: 2px 8px; margin: 3px 4px 0 0; font-size: 12px; }
-.copilot-layer.fact { border-left-color: var(--teal); }
+.copilot-layer.fact { border-left-color: var(--data-ink); }
 .copilot-layer.infer { border-left-color: var(--amber); }
 .copilot-layer.advise { border-left-color: var(--green); }
 
@@ -791,7 +796,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .s-similar .sim-card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
 .s-similar .sim-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .s-similar .sim-top b { font-size: 13px; }
-.s-similar .sim-score { font-size: 11px; color: var(--teal-strong); font-weight: 800; }
+.s-similar .sim-score { font-size: 11px; color: var(--data-ink); font-weight: 800; }
 .s-similar .sf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin-top: 6px; }
 .s-similar .sf-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--muted); }
 .s-similar .sf-row span { flex: 1 1 46%; }
@@ -808,8 +813,8 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .s-auction .auc-kv { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--muted); }
 .s-auction .auc-kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .auc-svg { display: block; width: 100%; height: 56px; margin-top: 6px; }
-.auc-svg .line { fill: none; stroke: var(--teal); stroke-width: 1.5; }
-.auc-svg circle { fill: var(--teal); }
+.auc-svg .line { fill: none; stroke: var(--data-ink); stroke-width: 1.5; }
+.auc-svg circle { fill: var(--data-ink); }
 .auc-svg .ref { stroke: var(--line); stroke-dasharray: 3 3; stroke-width: 1; }
 
 /* 涨停池卡片：竞价行 */

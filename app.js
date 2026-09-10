@@ -7,13 +7,12 @@ import {
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce, patchCardList, BD_LABELS } from './views.js';
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, BD_LABELS } from './views.js';
 import { renderTrades, renderReview } from './views-extra.js'; // 2026-09-09 减法批:renderAI 已随决策助手删除
 import { APP_VERSION } from './version.js';
 
 const state = {
   pools: null, quotes: {}, watch: [], view: 'intraday',
-  ztSort: 'boards', ztFilter: 'all', ztFilterText: '',
   refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
@@ -285,20 +284,10 @@ function ztCard(x) {
     '</div>';
 }
 function filterZt() {
+  // 2026-09-10 减法批:搜索/排序/过滤 UI 已砍——固定连板降序·封单次序(与连板梯队视角一致)
   const p = state.pools;
   if (!p) return [];
-  let rows = p.up.slice();
-  const kw = state.ztFilterText.trim();
-  if (kw) rows = rows.filter((x) => x.name.includes(kw) || x.code.includes(kw));
-  if (state.ztFilter === 'playable') rows = rows.filter((x) => x.signal?.state === '可打');
-  else if (['S', 'A', 'B'].includes(state.ztFilter)) rows = rows.filter((x) => x.tier === state.ztFilter);
-  rows.sort((a, b) => {
-    if (state.ztSort === 'seal') return (b.seal || 0) - (a.seal || 0);
-    if (state.ztSort === 'pct') return (b.changePct || 0) - (a.changePct || 0);
-    if (state.ztSort === 'tier') return (b.score || 0) - (a.score || 0);
-    return (b.boards || 1) - (a.boards || 1) || (b.seal || 0) - (a.seal || 0);
-  });
-  return rows;
+  return p.up.slice().sort((a, b) => (b.boards || 1) - (a.boards || 1) || (b.seal || 0) - (a.seal || 0));
 }
 // 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星/晋级结论/竞价行）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
 function ztStructSig(x) {
@@ -1162,18 +1151,9 @@ function bind() {
     if (meta) meta.setAttribute('content', next === 'light' ? '#ffffff' : '#18181b');
     try { localStorage.setItem('mp-theme', next); } catch {}
   });
-  // 涨停池搜索防抖（共享 views.js 的 debounce），避免逐键全列表重建
-  $('#ztSearch').addEventListener('input', debounce((e) => { state.ztFilterText = e.target.value; renderZt(); }, 250));
   // 折叠池首次展开才渲染
   ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
-  $$('#ztSort button').forEach((b) => b.addEventListener('click', () => {
-    $$('#ztSort button').forEach((x) => x.classList.remove('on')); b.classList.add('on');
-    state.ztSort = b.dataset.sort; renderZt();
-  }));
-  $$('#ztFilter button').forEach((b) => b.addEventListener('click', () => {
-    $$('#ztFilter button').forEach((x) => x.classList.remove('on')); b.classList.add('on');
-    state.ztFilter = b.dataset.f; renderZt();
-  }));
+  // 2026-09-10 减法批:ztSearch/ztSort/ztFilter 绑定已随控件整链删除
   // 2026-09-10 全盘对齐桌面:watchInput 绑定已随自选页删除
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
   $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });

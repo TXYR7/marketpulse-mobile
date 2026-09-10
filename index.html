@@ -70,22 +70,8 @@
         <div id="structure"></div>
 
         <div class="sec-title"><h2>涨停池</h2><span class="hint" id="ztHint">--</span></div>
-        <div class="toolbar">
-          <label class="search"><span aria-hidden="true"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><input id="ztSearch" type="search" placeholder="搜索名称 / 代码" autocomplete="off" /></label>
-          <div class="seg" id="ztSort">
-            <button data-sort="boards" class="on">连板</button>
-            <button data-sort="seal">封单</button>
-            <button data-sort="pct">涨幅</button>
-            <button data-sort="tier">评级</button>
-          </div>
-        </div>
-        <div class="subtab" id="ztFilter">
-          <button data-f="all" class="on">全部</button>
-          <button data-f="playable">可打</button>
-          <button data-f="S">S级</button>
-          <button data-f="A">A级</button>
-          <button data-f="B">B级</button>
-        </div>
+        <!-- 2026-09-10 减法批:搜索框/排序 seg/过滤 subtab 整链砍除(用户点名没用)——
+             固定排序=连板降序·封单次序(与连板梯队视角一致),过滤由上方机会池 S/A/B 卡承担 -->
         <div class="list" id="ztList">
           <div class="sk-card"><div class="sk sq"></div><div class="sk-lines"><i class="sk w56"></i><i class="sk w36"></i></div><div class="sk-col"><i class="sk w44"></i><i class="sk w28"></i></div></div>
           <div class="sk-card"><div class="sk sq"></div><div class="sk-lines"><i class="sk w48"></i><i class="sk w40"></i></div><div class="sk-col"><i class="sk w44"></i><i class="sk w28"></i></div></div>

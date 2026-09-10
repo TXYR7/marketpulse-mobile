@@ -333,31 +333,8 @@ main {
 .sec-title h2 { font-size: 15px; margin: 0; letter-spacing: 0.3px; }
 .sec-title .hint { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-/* 工具栏 */
+/* 工具栏（2026-09-10 减法批:.search/.seg/.subtab 已随涨停池搜索/排序/过滤控件删除,仅留复盘页在用的 .toolbar） */
 .toolbar { display: flex; gap: 8px; margin: 8px 2px; }
-.search {
-  flex: 1; display: flex; align-items: center; gap: 6px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--r-s); padding: 0 10px; height: 40px;
-  transition: border-color 0.15s var(--ease-out);
-}
-.search:focus-within { border-color: var(--teal); }
-.search input { flex: 1; border: 0; background: transparent; color: var(--ink); font-size: 14px; outline: none; }
-.seg { display: flex; gap: 4px; }
-.seg button {
-  border: 0; background: var(--surface-2); color: var(--muted);
-  border-radius: var(--r-s); padding: 0 12px; height: 40px; font-size: 13px;
-  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
-}
-.seg button.on { background: var(--fill-teal); color: #fff; }
-.seg button:active { transform: scale(0.94); }
-.subtab { display: flex; gap: 6px; margin: 8px 2px; flex-wrap: wrap; }
-.subtab button {
-  border: 0; background: var(--surface-2); color: var(--muted);
-  border-radius: var(--r-s); padding: 10px 15px; font-size: 13px;
-  transition: background 0.15s var(--ease-out), transform 0.08s var(--ease-out);
-}
-.subtab button.on { background: var(--fill-teal); color: #fff; }
-.subtab button:active { transform: scale(0.94); }
 
 /* ===== 股票卡片 ===== */
 /* B2:content-visibility 下沉到卡片级——滚动容器(.list)永远部分在视口,声明在容器上无效;

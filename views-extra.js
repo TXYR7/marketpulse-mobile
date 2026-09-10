@@ -2,7 +2,7 @@
 import { boardTag } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import { evaluatePortfolioRisk } from './analytics.js'; // 2026-09-09 减法批:attributionOf(假精确)+Copilot 系列 import 已删
-import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
+import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
 export function renderTrades(ctx) {

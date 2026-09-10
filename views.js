@@ -12,8 +12,7 @@ export function setHTML(el, html) {
   return true;
 }
 
-// 共享防抖（原 views-extra 内部实现提升为公共工具，涨停池搜索框也复用）
-export function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+// 2026-09-10 减法批:debounce 已随涨停池搜索框(最后一个调用方)删除
 
 // 行级 diff：列表成员与顺序不变时，只原地更新变化的字段（价格/涨跌/封单等），
 // 不再每 tick 整表 innerHTML 重建（盘中 300 卡 × 每 8~15s 一次的主线程卡顿根源）。

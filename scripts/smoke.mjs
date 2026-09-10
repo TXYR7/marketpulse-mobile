@@ -315,7 +315,8 @@ console.log('[B12] 品牌批：命名三处一致 + 图标 PNG 尺寸与 manifes
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const appleTitle = (html.match(/apple-mobile-web-app-title" content="([^"]*)"/) || [])[1];
   ok('short_name === apple-mobile-web-app-title ===「星脉」', manifest.short_name === '星脉' && appleTitle === '星脉');
-  ok('name 含主名 MarketPulse', /MarketPulse/.test(manifest.name));
+  // 2026-09-10:品牌纯中文化——name 也是「星脉」(旧双名 MarketPulse 星脉废弃)
+  ok('name ===「星脉」(纯中文品牌)', manifest.name === '星脉');
   const pngSize = (file) => {
     const b = readFileSync(new URL('../' + file, import.meta.url));
     if (b.readUInt32BE(0) !== 0x89504e47) return null; // PNG 魔数

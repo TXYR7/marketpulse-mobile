@@ -245,7 +245,11 @@ function renderStatus() {
     partialChip,
   ].join('');
   setHTML(s, html);
-  $('#phaseBadge').textContent = em.phase || '连接中';
+  // 2026-09-10:阶段徽标分色(桌面 phase-badge 同款语义色)——旧版不分期全 teal,「分歧期」蓝底毫无警示感被吐槽丑
+  const badge = $('#phaseBadge');
+  badge.textContent = em.phase || '连接中';
+  const lvl = em.level || 'yellow';
+  badge.className = 'phase-badge ' + (lvl === 'green' ? 'ok' : lvl === 'red' ? 'bad' : 'warn');
   $('#ladderHint').textContent = '最高 ' + maxBoard + ' 板';
 }
 function chip(cls, label, val) {
@@ -444,7 +448,11 @@ function renderIntraday() {
   renderLadder(ctx);
   renderStructure(ctx);
   renderZt(); renderDowns(); renderRadar();
-  $('#dateLabel').textContent = (state.manualDate || todayStr()).slice(0, 4) + '-' + (state.manualDate || todayStr()).slice(4, 6) + '-' + (state.manualDate || todayStr()).slice(6, 8);
+  // 2026-09-10:日期紧凑格式 09-10 周四(全年同页可见 dateLabel 无需年份;星期几对看盘更有用)
+  const d = state.manualDate || todayStr();
+  const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(d.slice(0, 4), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8))).getDay()];
+  $('#dateLabel').textContent = d.slice(4, 6) + '-' + d.slice(6, 8) + ' 周' + wd;
+  $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
   updateBanner();
   loadGap();
 }

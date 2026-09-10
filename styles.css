@@ -182,10 +182,16 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--teal);
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.55);
 }
-.topbar .date { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.topbar .date { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+/* 品牌区不收缩——星脉+徽标整体保持一行,日期不被挤竖排 */
+.topbar .brand { flex: none; }
 .topbar .phase-badge {
   background: var(--teal-soft); color: var(--teal); border: 1px solid transparent;
 }
+/* 2026-09-10 阶段徽标分色(桌面 phase-badge 同款语义):绿=主升类/黄=分歧观望/红=退潮冰点 */
+.topbar .phase-badge.ok { background: rgba(59, 130, 246, 0.13); color: var(--teal); }
+.topbar .phase-badge.warn { background: var(--amber-tint); color: var(--amber); }
+.topbar .phase-badge.bad { background: var(--danger-tint); color: var(--red); }
 /* 纯图标按钮:无框无底,与左侧 ☰ 对称;旋转动画转内层 .ic,见 app.js spinStart */
 .topbar .refresh-btn {
   border: 0; background: none; color: var(--ink);

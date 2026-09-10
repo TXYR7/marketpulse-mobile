@@ -46,7 +46,6 @@
     <div class="menu-scrim" id="menuScrim"></div>
     <nav class="menu-panel" id="menuPanel">
       <h3>行情工作台</h3>
-      <button class="menu-item" data-view="market"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></span> 全市场</button>
       <button class="menu-item" data-view="trades"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3 12.5h18"/></svg></span> 交易与持仓</button>
       <button class="menu-item" data-view="review"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h4"/></svg></span> 每日复盘</button><!-- 2026-09-09 减法批:决策助手菜单项已删 -->
       <button class="menu-item" data-view="settings"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span> 设置</button>
@@ -119,24 +118,7 @@
            store.js 的 watch 数据层保留(旧数据可导出),只删界面与入口 -->
 
       <!-- 全市场（侧滑菜单） -->
-      <section class="view" id="view-market">
-        <div class="sec-title"><h2>全市场</h2><span class="hint" id="marketTotal">--</span></div>
-        <div class="toolbar">
-          <label class="search"><span aria-hidden="true"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><input id="marketSearch" type="search" placeholder="搜索代码 / 名称" autocomplete="off" /></label>
-          <select id="marketMarket" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-s);padding:0 8px;font-size:13px">
-            <option value="">全部</option>
-            <option value="sh">沪市</option>
-            <option value="sz">深市</option>
-            <option value="bj">北交所</option>
-          </select>
-        </div>
-        <div class="list" id="marketList">
-          <div class="sk-card"><div class="sk-lines"><i class="sk w36"></i><i class="sk w24"></i></div><div class="sk-col"><i class="sk w40"></i></div></div>
-          <div class="sk-card"><div class="sk-lines"><i class="sk w44"></i><i class="sk w28"></i></div><div class="sk-col"><i class="sk w40"></i></div></div>
-          <div class="sk-card"><div class="sk-lines"><i class="sk w32"></i><i class="sk w36"></i></div><div class="sk-col"><i class="sk w40"></i></div></div>
-        </div>
-        <div class="pager" id="marketPager"></div>
-      </section>
+      <!-- 2026-09-10 减法批:全市场视图+菜单项已砍——5900 只分 99 页在手机翻是伪需求,搜个股在东财 app 更快;renderMarket 随视图删 -->
 
       <!-- 交易（侧滑菜单） -->
       <section class="view" id="view-trades">

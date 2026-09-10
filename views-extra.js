@@ -1,77 +1,10 @@
 // views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
-import { fetchAllMarket, searchStock, boardTag } from './data.js';
+import { boardTag } from './data.js';
 import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
 import { evaluatePortfolioRisk } from './analytics.js'; // 2026-09-09 减法批:attributionOf(假精确)+Copilot 系列 import 已删
 import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, debounce } from './views.js';
 
 /* ---------------- 全市场 ---------------- */
-export function renderMarket(ctx) {
-  const el = document.querySelector('#marketList');
-  const status = document.querySelector('#marketTotal');
-  const pagerEl = document.querySelector('#marketPager');
-  const search = document.querySelector('#marketSearch');
-  const mkt = document.querySelector('#marketMarket');
-  if (!el) return;
-
-  function marketRow(r) {
-    const pc = r.changePct > 0 ? 'up-c' : r.changePct < 0 ? 'down-c' : 'flat-c';
-    return '<div class="market-row" data-code="' + r.code + '"><div><div class="nm">' + esc(r.name) + boardTag(r.code) + '</div><div class="code">' + r.code + ' · ' + (r.industry || '—') + '</div></div>' +
-      '<div class="right"><div class="price">' + (r.price != null ? r.price.toFixed(2) : '--') + '</div>' +
-      '<div class="amt ' + pc + '">' + (r.changePct != null ? pctText(r.changePct) : '') + '</div></div></div>';
-  }
-  function paintRows(rows, emptyText) {
-    if (!rows.length) { setHTML(el, '<div class="empty">' + (emptyText || '暂无数据') + '</div>'); return; }
-    setHTML(el, rows.map(marketRow).join(''));
-  }
-  function render() {
-    const am = ctx.state.allMarket || { rows: [], total: 0, page: 1 };
-    status.textContent = '共 ' + am.total + ' 只';
-    paintRows(am.rows, '暂无数据');
-    const totalPages = Math.max(1, Math.ceil(am.total / 60));
-    const phtml = '<button data-pg="prev">上一页</button><span class="pg">' + am.page + ' / ' + totalPages + '</span><button data-pg="next">下一页</button>';
-    setHTML(pagerEl, phtml);
-    // 翻页走模块级委托（见文件底部），这里只暴露导航回调，渲染不再重复绑监听
-    pagerEl.__nav = (dir) => {
-      const cur = ctx.state.allMarket?.page || 1;
-      const tp = Math.max(1, Math.ceil((ctx.state.allMarket?.total || 0) / 60));
-      ctx.state.marketPage = dir === 'prev' ? Math.max(1, cur - 1) : Math.min(tp, cur + 1);
-      load();
-    };
-  }
-  async function load() {
-    try {
-      const q = search.value.trim();
-      if (q) {
-        const rows = await searchStock(q);
-        ctx.state.allMarket = { rows, total: rows.length, page: 1, market: '' }; // B5:搜索结果自带现价/涨跌幅
-      } else {
-        const market = mkt.value;
-        const page = ctx.state.marketPage || 1;
-        const data = await fetchAllMarket({ market, page, pageSize: 60 });
-        ctx.state.allMarket = data;
-      }
-      render();
-    } catch (e) { paintRows([], '加载失败：' + e.message); }
-  }
-  search.oninput = debounce(() => { ctx.state.marketPage = 1; load(); }, 400);
-  mkt.onchange = () => { ctx.state.marketPage = 1; load(); };
-  if (!ctx.state.allMarket) load(); else render();
-}
-
-/* ---------------- 交易与持仓 ---------------- */
-const BUY_REASONS = ['龙头', '一进二', '二进三', '三进四', '分歧回封', '弱转强', '竞价强', '板块爆发', '纯情绪'];
-const SELL_REASONS = ['止盈', '止损', '情绪退潮', '龙头断板', '判断错误'];
-const ERROR_TAGS = ['买在后排', '情绪判断错误', '竞价误判', '追高', '没有执行纪律', '卖飞'];
-const TRADE_EMOTIONS = ['主升期', '高潮', '分歧期', '修复', '退潮初期', '退潮', '冰点', '发酵', '启动'];
-const TRADE_STRATEGIES = ['首板', '一进二', '二进三', '三进四', '分歧回封', '弱转强', '竞价强', '板块爆发', '空仓', '纯情绪'];
-const RESULT_OPTS = ['盈利', '亏损', '平'];
-
-function chipGroup(label, key, opts, selected) {
-  return '<div style="margin:4px 0"><div class="muted">' + label + '</div><div class="chips" data-group="' + key + '">' +
-    opts.map((o) => '<button type="button" class="chip-btn ' + (selected.includes(o) ? 'on' : '') + '" data-v="' + o + '">' + o + '</button>').join('') +
-    '</div></div>';
-}
-
 export function renderTrades(ctx) {
   const el = document.querySelector('#tradesView');
   if (!el) return;
@@ -228,13 +161,7 @@ if (typeof document !== 'undefined') {
   }
   document.addEventListener('click', async (e) => {
     const hit = (s2) => e.target.closest(s2);
-    const pg = hit('[data-pg]');
-    if (pg) {
-      const search = document.querySelector('#marketSearch');
-      if (search && search.value.trim()) return; // 搜索态不翻页（与原行为一致）
-      document.querySelector('#marketPager')?.__nav?.(pg.dataset.pg);
-      return;
-    }
+
     const delBtn = hit('[data-del]');
     if (delBtn) {
       const container = delBtn.closest('#tradesView');

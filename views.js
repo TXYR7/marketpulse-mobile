@@ -109,27 +109,6 @@ export function renderOpportunity(ctx) {
 }
 
 /* ---------------- 梯队（含历史晋级率） ---------------- */
-function aggregatePromotion(historyArr) {
-  const map = {};
-  historyArr.forEach((h) => { map[h.date] = { date: h.date, stocks: h.stocks }; });
-  const dates = Object.keys(map).sort();
-  const byBoard = new Map();
-  let sessions = 0;
-  for (let i = 1; i < dates.length; i += 1) {
-    const r = calculatePromotionStats(map[dates[i - 1]].stocks, map[dates[i]].stocks);
-    if (!r.available) continue;
-    sessions += 1;
-    for (const g of r.byBoard) {
-      if (!byBoard.has(g.board)) byBoard.set(g.board, { board: g.board, denominator: 0, promoted: 0 });
-      const e = byBoard.get(g.board);
-      e.denominator += g.denominator; e.promoted += g.promoted;
-    }
-  }
-  const rows = [...byBoard.values()].sort((a, b) => a.board - b.board).map((g) => ({ ...g, rate: g.denominator ? Number((g.promoted / g.denominator * 100).toFixed(1)) : 0 }));
-  const monitor = buildModeMonitor(map, 20, 5);
-  return { available: sessions > 0, sessions, rows, monitor, rolling: calculateRollingPromotion(map, 20) };
-}
-
 export function renderLadder(ctx) {
   const el = document.querySelector('#ladderFull');
   const p = ctx.state.pools;
@@ -146,36 +125,10 @@ export function renderLadder(ctx) {
       '<span class="cnt">' + cnt + '</span></div>';
   }).join('');
 
-  const hist = ctx.state.history || [];
-  let histHtml = '';
-  if (hist.length >= 2) {
-    const prom = aggregatePromotion(hist);
-    if (prom.available) {
-      const byBoardRows = prom.rows.map((g) => '<div class="ledger-row"><span class="nm">' + g.board + '板 → ' + (g.board + 1) + '板</span>' +
-        '<span class="meta">样本 ' + g.denominator + '</span><span class="pnl">' + g.rate + '%</span></div>').join('');
-      const monitorRows = (prom.monitor.modes || []).map((m) => {
-        const trend = m.trend === 'improving' ? '↑改善' : m.trend === 'declining' ? '↓弱化' : m.trend === 'low_sample' ? '样本少' : '—';
-        return '<div class="ledger-row"><span class="nm">' + m.mode + '</span><span class="meta">近5对 ' + (m.rateRecent ?? '--') + '%</span><span class="pnl">' + trend + '</span></div>';
-      }).join('');
-      histHtml = '<div class="sec-title"><h2>历史晋级率</h2><span class="hint">近 ' + prom.sessions + ' 对交易日</span></div>' +
-        (byBoardRows || '<div class="muted">暂无晋级样本</div>') +
-        '<div class="sec-title"><h2>模式监控</h2><span class="hint">整体晋级率 ' + (prom.rolling.rate ?? '--') + '%</span></div>' +
-        (monitorRows || '<div class="muted">样本不足</div>');
-    } else {
-      histHtml = '<div class="muted">历史样本不足（需 ≥2 个交易日）。点「补录历史」拉取近 30 交易日涨停池。</div>';
-    }
-  } else {
-    histHtml = '<div class="muted">尚未缓存历史涨停池。点下方按钮拉取近 30 个交易日（手机直连东方财富，按交易日去重，约需半分钟）。</div>';
-  }
-
+  // 2026-09-10 减法批:历史晋级率/模式监控/补录历史按钮已砍(11月判决在桌面做,手机翻统计表是伪需求)
   const html =
-    '<div class="ladder-group">' + ladderBars + '</div>' +
-    '<button class="btn" id="histLoadBtn" style="margin:10px 0">' + (ctx.state.historyLoading ? '补录中…' : '补录历史（晋级率/模式监控）') + '</button>' +
-    '<div class="muted" id="histStatus"></div>' + histHtml;
-  if (setHTML(el, html)) {
-    const btn = document.querySelector('#histLoadBtn');
-    if (btn && !ctx.state.historyLoading) btn.addEventListener('click', () => ctx.actions.loadHistory && ctx.actions.loadHistory());
-  }
+    '<div class="ladder-group">' + ladderBars + '</div>';
+  setHTML(el, html);
 }
 
 /* ---------------- 结构（情绪驾驶舱 + 结构树 + 龙头 + 题材 + 相似） ---------------- */
@@ -197,18 +150,6 @@ export function renderStructure(ctx) {
     '<div class="emo-indicators">' + indicators + '</div>' +
     (reasons ? '<div class="emo-reasons">' + reasons + '</div>' : '') + '</div>';
 
-  const st = s.structure || { main: null, branches: [] };
-  const treeBranch = (b, cls) => {
-    const members = (b.members || []).map((m) =>
-      '<div class="m"><span class="b">' + (m.boards || 1) + '板</span><span>' + esc(m.name) + '</span><span>' + (m.changePct != null ? pctText(m.changePct) : '') + '</span></div>'
-    ).join('');
-    const lds = (b.leaders || []).map((l) => '<span class="pill">' + esc(l.name) + ' · ' + l.role + '</span>').join('');
-    return '<div class="' + cls + '"><div class="tree-head"><span class="tn">' + esc(b.name) + '</span><span class="ts">强度 ' + (b.score ?? '--') + ' · ' + (b.limitUpCount ?? '--') + ' 家 · 最高 ' + (b.maxBoard ?? '--') + '板</span></div>' +
-      (lds ? '<div style="margin:4px 0">' + lds + '</div>' : '') +
-      '<div class="tree-members">' + members + '</div></div>';
-  };
-  const tree = (st.main ? treeBranch(st.main, 'tree-main') : '<div class="muted">暂无主线</div>') + (st.branches || []).map((b) => treeBranch(b, 'tree-branch')).join('');
-
   const leaders = (s.leaders || []).slice(0, 12).map((l) => {
     const bd = Object.entries(l.breakdown || {}).filter(([, v]) => v != null).map(([k, v]) => '<span>' + (BD_LABELS[k] || k) + ':' + v + '</span>').join('');
     return '<div class="leader-card" data-code="' + l.code + '"><div class="row1"><div class="nm">' + esc(l.name) + '</div>' +
@@ -224,24 +165,10 @@ export function renderStructure(ctx) {
     return '<div class="rank-row"><span class="idx">' + (i + 1) + '</span><span class="nm">' + esc(t.name) + '</span><span class="cnt">' + t.score + '分 · ' + t.limitUpCount + '家</span>' + chg + '</div>';
   }).join('');
 
-  let similar = '';
-  if (s.history && s.history.length >= 2) {
-    const sim = buildSimilarDays(s.history, s.pools.up, 3);
-    if (sim.available) {
-      const rows = sim.similar.map((d) =>
-        '<div class="ledger-row"><span class="nm">' + d.date + '</span><span class="meta">相似度 ' + d.score + '%</span>' +
-        '<span class="pnl">次日 ' + (d.outcome && d.outcome.up != null ? ('涨' + d.outcome.up + '% / 跌' + d.outcome.down + '%') : '—') + '</span></div>'
-      ).join('');
-      similar = '<div class="sec-title"><h2>相似行情</h2><span class="hint">近 ' + sim.samples + ' 样本</span></div>' + (rows || '<div class="muted">样本不足</div>');
-    }
-  }
-
   const html =
     '<div class="sec-title"><h2>情绪驾驶舱</h2></div>' + cockpit +
-    '<div class="sec-title"><h2>市场结构</h2></div>' + tree +
     '<div class="sec-title"><h2>核心龙头</h2><span class="hint">Top ' + Math.min(12, (s.leaders || []).length) + '</span></div>' + (leaders || '<div class="empty">暂无</div>') +
-    '<div class="sec-title"><h2>题材强度</h2><span class="hint">按强度</span></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>' +
-    similar;
+    '<div class="sec-title"><h2>题材强度</h2><span class="hint">按强度</span></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>';
   setHTML(el, html);
 }
 

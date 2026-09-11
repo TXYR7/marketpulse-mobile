@@ -29,7 +29,7 @@
     <header class="topbar">
       <div class="topbar-row">
         <div style="display:flex;align-items:center;gap:8px">
-          <button class="hamburger" id="menuBtn" aria-label="菜单"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+          <!-- 2026-09-11 减法批:汉堡菜单按钮已随侧滑菜单整删 -->
           <div class="brand"><span class="dot"></span> 星脉 <span class="phase-badge" id="phaseBadge">连接中</span></div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -43,13 +43,8 @@
 
     <div class="ptr" id="ptr"><span class="spin"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></span> 正在刷新…</div>
 
-    <div class="menu-scrim" id="menuScrim"></div>
-    <nav class="menu-panel" id="menuPanel">
-      <h3>行情工作台</h3>
-      <button class="menu-item" data-view="trades"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3 12.5h18"/></svg></span> 交易与持仓</button>
-      <button class="menu-item" data-view="review"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h4"/></svg></span> 每日复盘</button><!-- 2026-09-09 减法批:决策助手菜单项已删 -->
-      <button class="menu-item" data-view="settings"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span> 设置</button>
-    </nav>
+    <!-- 2026-09-11 减法批:侧滑菜单(行情工作台)整链砍除——复盘/设置底部导航直达,
+         交易与持仓在手机端是伪需求(实盘在同花顺/东财,本页纯研究参考) -->
 
     <div class="edge-jump" id="edgeJump">
       <button class="edge-btn" id="jumpTop" type="button" title="直达顶部" aria-label="直达顶部"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 15l-6-6-6 6"/></svg></button>
@@ -110,10 +105,8 @@
       <!-- 全市场（侧滑菜单） -->
       <!-- 2026-09-10 减法批:全市场视图+菜单项已砍——5900 只分 99 页在手机翻是伪需求,搜个股在东财 app 更快;renderMarket 随视图删 -->
 
-      <!-- 交易（侧滑菜单） -->
-      <section class="view" id="view-trades">
-        <div id="tradesView"></div>
-      </section>
+      <!-- 2026-09-11 减法批:交易与持仓视图已随侧滑菜单整删(实盘在同花顺/东财,手机端纯研究参考;
+           桌面端保留完整交易链——记录/复盘/行为偏差在桌面做) -->
 
       <!-- 复盘（侧滑菜单） -->
       <section class="view" id="view-review">

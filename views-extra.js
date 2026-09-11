@@ -1,77 +1,12 @@
-// views-extra.js — 全市场 / 交易 / 复盘 / 决策助手 视图
-import { boardTag } from './data.js';
-import { getTrades, putTrade, delTrade, getReviews, putReview, delReview } from './store.js';
-import { evaluatePortfolioRisk } from './analytics.js'; // 2026-09-09 减法批:attributionOf(假精确)+Copilot 系列 import 已删
-import { esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML } from './views.js';
+// views-extra.js — 每日复盘视图(2026-09-11:交易视图已随侧滑菜单整删,见下注)
+import { getReviews, putReview, delReview } from './store.js';
+import { esc, setHTML } from './views.js';
 
-/* ---------------- 全市场 ---------------- */
-export function renderTrades(ctx) {
-  const el = document.querySelector('#tradesView');
-  if (!el) return;
-  if (!ctx.state.tradesLoaded) { ctx.state.tradesLoaded = true; getTrades().then((t) => { ctx.state.trades = t; paint(); }); }
-  else paint();
-
-  function paint() {
-    const trades = ctx.state.trades || [];
-    const wins = trades.filter((t) => Number(t.pnl) > 0).length;
-    const losses = trades.filter((t) => Number(t.pnl) < 0).length;
-    const totalPnl = trades.reduce((s, t) => s + Number(t.pnl || 0), 0);
-    const winRate = trades.length ? Math.round(wins / trades.length * 100) : 0;
-
-    // 风险：只把「当日且未记卖出价」的流水视为未平仓持仓；
-    // 历史已完成交易（有 pnl/卖出价）不再被当成 open 持仓反复计入风险暴露。
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const positions = trades
-      .filter((t) => t.sellPrice == null && t.date === todayIso)
-      .map((t) => ({ fraction: Number(t.fraction || 0.2), theme: t.theme || '未分类', industry: t.industry || '未分类', status: 'open' }));
-    const risk = evaluatePortfolioRisk({ positions, trades, today: todayIso });
-    const riskHtml = risk.violations.length
-      ? '<div class="risk-card"><div class="plan-verdict" style="color:var(--red)">风险预警</div><ul class="plan-rules">' +
-        risk.violations.map((v) => '<li>' + esc(v.label) + (v.value != null ? '（' + (typeof v.value === 'number' ? Math.round(v.value * 100) + '%' : v.value) + '）' : '') + '</li>').join('') + '</ul></div>'
-      : '<div class="risk-card"><div class="plan-verdict" style="color:var(--green)">仓位与风险在限制内</div><div class="muted">总仓位 ' + Math.round(risk.totalExposure * 100) + '% · 持仓 ' + risk.positions + ' 只 · 连续亏损 ' + risk.losingStreak + ' 笔</div></div>';
-
-    // 画像
-    const byEmotion = {};
-    trades.forEach((t) => { if (t.emotion) byEmotion[t.emotion] = (byEmotion[t.emotion] || 0) + 1; });
-    const topEmotion = Object.entries(byEmotion).sort((a, b) => b[1] - a[1])[0];
-    const persona = '<div class="review-card"><div class="rv-head"><strong>个人画像</strong></div><div class="rv-body note">交易 ' + trades.length + ' 笔 · 胜率 ' + winRate + '% · 累计 ' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' · 常见情绪 ' + (topEmotion ? topEmotion[0] : '—') + '</div></div>';
-
-    const form = '<div class="trade-form" id="tradeForm">' +
-      '<input id="tfCode" placeholder="代码，如 600519" inputmode="numeric" />' +
-      '<input id="tfName" placeholder="名称（可选）" />' +
-      '<div style="display:flex;gap:8px"><input id="tfDate" type="date" value="' + new Date().toISOString().slice(0, 10) + '" style="flex:1" /><input id="tfPnl" type="number" step="0.01" placeholder="盈亏(+/-)" style="flex:1" /></div>' +
-      '<div style="display:flex;gap:8px"><select id="tfResult" style="flex:1">' + RESULT_OPTS.map((o) => '<option value="' + o + '">' + o + '</option>').join('') + '</select>' +
-      '<input id="tfBuy" type="number" step="0.01" placeholder="买入价" style="flex:1" /><input id="tfSell" type="number" step="0.01" placeholder="卖出价" style="flex:1" /></div>' +
-      '<div style="display:flex;gap:8px"><select id="tfEmotion" style="flex:1">' + TRADE_EMOTIONS.map((o) => '<option value="' + o + '">' + o + '</option>').join('') + '</select>' +
-      '<select id="tfStrategy" style="flex:1">' + TRADE_STRATEGIES.map((o) => '<option value="' + o + '">' + o + '</option>').join('') + '</select></div>' +
-      chipGroup('买入理由', 'buyReasons', BUY_REASONS, []) +
-      chipGroup('卖出原因', 'sellReason', SELL_REASONS, []) +
-      chipGroup('错误标签', 'errorTags', ERROR_TAGS, []) +
-      '<input id="tfFraction" type="number" step="0.05" min="0" max="1" placeholder="仓位占比(0-1)，默认0.2" />' +
-      '<button class="btn primary" id="tfSubmit">保存交易</button></div>';
-
-    const ledger = trades.length ? trades.map((t) => {
-      // 2026-09-09 减法批:归因行已删(attributionOf 手拍权重=假精确,桌面端归因卡同日删除,跨端口径统一)
-      // 旧记录可能只存了代码：报价缓存有名字就显示名字
-      const nameOf = (t) => (t.name && t.name !== t.code) ? t.name : ((ctx.state && ctx.state.quotes && ctx.state.quotes[t.code] && ctx.state.quotes[t.code].name) || t.name || t.code);
-      return '<div class="ledger-row"><div><div class="nm">' + esc(nameOf(t)) + ' <span class="pill">' + esc(t.strategy || '') + '</span></div>' +
-        '<div class="meta">' + (t.date || '') + ' · ' + esc((t.buyReasons || []).join('/')) + '</div></div>' +
-        '<div style="text-align:right"><div class="pnl ' + (t.pnl >= 0 ? 'up-c' : 'down-c') + '">' + (t.pnl >= 0 ? '+' : '') + Number(t.pnl).toFixed(2) + '</div>' +
-        '<button class="trade-del" data-del="' + t.id + '">删除</button></div></div>';
-    }).join('') : '<div class="empty">还没有交易记录</div>';
-
-    const html =
-      '<div class="stat-grid">' +
-      '<div class="stat"><div class="v">' + trades.length + '</div><div class="k">交易笔数</div></div>' +
-      '<div class="stat"><div class="v ' + (winRate >= 50 ? 'up-c' : 'down-c') + '">' + winRate + '%</div><div class="k">胜率</div></div>' +
-      '<div class="stat"><div class="v ' + (totalPnl >= 0 ? 'up-c' : 'down-c') + '">' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + '</div><div class="k">累计盈亏</div></div>' +
-      '</div>' + riskHtml + persona + form +
-      '<div class="sec-title"><h2>交易流水</h2></div>' + ledger;
-    el.__ctx = ctx;       // 模块级委托回调据此取到上下文
-    el.__repaint = paint;
-    if (!setHTML(el, html)) return; // 内容未变：不重建（chip 选中态/输入框内容天然保留）
-  }
-}
+/* 2026-09-11 减法批:renderTrades(交易与持仓视图)整链删除——实盘在同花顺/东财,
+   手机端纯研究参考;视图入口已随侧滑菜单砍除。连带埋葬既存 bug:98c7023 批误删
+   RESULT_OPTS 等常量定义而 renderTrades 仍引用(一调用即 ReferenceError)。
+   tradeSubmit/交易删除委托分支同步删除;store.js 的 getTrades/putTrade/delTrade
+   数据层保留(旧记录不丢,桌面端交易链完整保留)。 */
 
 /* ---------------- 每日复盘 ---------------- */
 function buildReviewText(state) {
@@ -122,55 +57,10 @@ export function renderReview(ctx) {
    覆盖：翻页 / chip 多选 / 交易保存删除 / 复盘生成保存删除。
    渲染函数只产出 HTML 并暴露 __ctx/__repaint/__nav，不再「每次渲染重新绑监听」。 */
 if (typeof document !== 'undefined') {
-  const selGroups = (root) => {
-    const groups = {};
-    root.querySelectorAll('.chips').forEach((g) => { groups[g.dataset.group] = [...g.querySelectorAll('.chip-btn.on')].map((b) => b.dataset.v); });
-    return groups;
-  };
-  async function tradeSubmit(container) {
-    const ctx = container?.__ctx; if (!ctx) return;
-    const q = (s2) => container.querySelector(s2);
-    const code = q('#tfCode').value.trim().replace(/\D/g, '');
-    if (!code) { ctx.toast('请输入代码'); return; }
-    const pnl = parseFloat(q('#tfPnl').value);
-    if (isNaN(pnl)) { ctx.toast('请输入盈亏'); return; }
-    const groups = selGroups(container);
-    // 名字留空时：池/报价缓存里有中文名就用它，别把代码存成名字（台账要给人看）
-    let name = q('#tfName').value.trim();
-    if (!name) {
-      const st = ctx.state || {};
-      const pool = st.pools && [].concat(st.pools.up, st.pools.down, st.pools.broken).find((x) => x.code === code);
-      name = (pool && pool.name) || (st.quotes && st.quotes[code] && st.quotes[code].name) || code;
-    }
-    const trade = {
-      id: Date.now() + '-' + code, code, name,
-      date: q('#tfDate').value || new Date().toISOString().slice(0, 10),
-      pnl, result: q('#tfResult').value,
-      buyPrice: parseFloat(q('#tfBuy').value) || null,
-      sellPrice: parseFloat(q('#tfSell').value) || null,
-      emotion: q('#tfEmotion').value,
-      strategy: q('#tfStrategy').value,
-      fraction: parseFloat(q('#tfFraction').value) || 0.2,
-      buyReasons: groups.buyReasons, sellReason: (groups.sellReason || [])[0] || '', errorTags: groups.errorTags,
-      createdAt: Date.now()
-    };
-    await putTrade(trade);
-    ctx.state.trades = await getTrades();
-    ctx.toast('已保存交易');
-    container.__repaint();
-  }
+  // 2026-09-11 减法批:selGroups/tradeSubmit/交易删除/保存委托分支已随交易视图整删
   document.addEventListener('click', async (e) => {
     const hit = (s2) => e.target.closest(s2);
 
-    const delBtn = hit('[data-del]');
-    if (delBtn) {
-      const container = delBtn.closest('#tradesView');
-      const ctx = container?.__ctx; if (!ctx) return;
-      await delTrade(delBtn.dataset.del);
-      ctx.state.trades = await getTrades();
-      container.__repaint();
-      return;
-    }
     const rdel = hit('[data-rdel]');
     if (rdel) {
       const container = rdel.closest('#reviewView');
@@ -180,7 +70,7 @@ if (typeof document !== 'undefined') {
       container.__repaint();
       return;
     }
-    if (hit('#tfSubmit')) { await tradeSubmit(hit('#tradesView')); return; }
+    if (hit('#tfSubmit')) { return; } // 2026-09-11:交易表单已删,占位防误触(元素不存在不会命中)
     if (hit('#rvGen')) {
       const tv = hit('#reviewView');
       const ta = tv?.querySelector('#rvText');
@@ -199,12 +89,8 @@ if (typeof document !== 'undefined') {
       container.__repaint();
       return;
     }
-    // chip 多选：只切类名，提交时按 .on 收集（不再维护 _sel 状态）
-    const chipBtn = hit('.chip-btn[data-v]');
-    if (chipBtn && chipBtn.closest('.chips')) chipBtn.classList.toggle('on');
+    // 2026-09-11 减法批:chip 多选委托已随交易表单整删
   });
-  // 决策助手自由输入：Enter 直接提交（与提问按钮同路径）
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target && e.target.id === 'copilotInput') { e.preventDefault(); submitCopilotInput(e.target); }
-  });
+  // 2026-09-11 减法批:copilotInput Enter 委托已删(submitCopilotInput 09-09 已随决策助手删除,
+  // 此 handler 引用不存在的函数——若用户曾按 Enter 在 id 恰为 copilotInput 的输入框会抛 ReferenceError)
 }

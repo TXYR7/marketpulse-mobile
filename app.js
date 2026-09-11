@@ -8,7 +8,7 @@ import {
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, BD_LABELS } from './views.js';
-import { renderTrades, renderReview } from './views-extra.js'; // 2026-09-09 减法批:renderAI 已随决策助手删除
+import { renderReview } from './views-extra.js'; // 2026-09-09 决策助手删;09-11 renderTrades 已随交易视图整删
 import { APP_VERSION } from './version.js';
 
 const state = {
@@ -16,7 +16,7 @@ const state = {
   refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
-  trades: [], tradesLoaded: false, reviews: [], reviewsLoaded: false,
+  reviews: [], reviewsLoaded: false, // 2026-09-11 减法批:trades/tradesLoaded 已随交易视图整删
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0, lastFetchMs: null,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
@@ -706,23 +706,18 @@ function switchView(v) {
   state.view = v;
   $$('.view').forEach((el) => el.classList.toggle('active', el.id === 'view-' + v));
   $$('.bottomnav button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
-  $$('.menu-item').forEach((m) => m.classList.toggle('on', m.dataset.view === v));
-  closeMenu();
+  // 2026-09-11 减法批:menu-item 高亮/closeMenu 已随侧滑菜单整删
   renderView(v);
 }
 function renderView(v) {
   const ctx = { state, toast, actions: { loadHistory } };
   if (v === 'intraday') renderIntraday();
-  else if (v === 'trades') renderTrades(ctx);
+  // 2026-09-11 减法批:'trades' 分支已随交易视图整删(实盘在同花顺/东财)
   else if (v === 'review') renderReview(ctx);
-  // 2026-09-09 减法批:'ai' 分支已随决策助手删除
-  // 2026-09-10 全盘对齐桌面:'opportunity'/'ladder'/'structure'/'watch' 分支已随视图合并/自选删除
 }
 function renderCurrentView() { renderView(state.view); }
 
-/* ---------------- 侧滑菜单 ---------------- */
-function openMenu() { $('#menuScrim').classList.add('show'); $('#menuPanel').classList.add('show'); }
-function closeMenu() { $('#menuScrim').classList.remove('show'); $('#menuPanel').classList.remove('show'); }
+/* ---------------- 侧滑菜单已删(2026-09-11 减法批) ---------------- */
 
 /* ---------------- 刷新 ---------------- */
 let refreshing = false;
@@ -1168,9 +1163,7 @@ function bind() {
     if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
   });
   $$('.bottomnav button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
-  $$('.menu-item').forEach((m) => m.addEventListener('click', () => switchView(m.dataset.view)));
-  $('#menuBtn').addEventListener('click', openMenu);
-  $('#menuScrim').addEventListener('click', closeMenu);
+  // 2026-09-11 减法批:menu-item 委托已随侧滑菜单整删(零元素,绑定是死代码)
   $('#refreshBtn').addEventListener('click', () => refresh(true));
   // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
   $('#themeBtn').addEventListener('click', () => {

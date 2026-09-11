@@ -1205,39 +1205,40 @@ function setupPTR() {
 }
 
 // 2026-09-11 详情抽屉下拉关闭:grip/头部拖拽热区 + 「滚到顶继续下拉」双入口。
-// 拖拽期 transition 摘除(否则 transform 与 transition 打架跟不了手),松手恢复。
-// 只在顶部 60px 热区内起步,避免吃掉内容区的滚动;
-// sheet 自身已滚到顶且继续下拉时也接管(overscroll-behavior:contain 保证不透传)。
+// 卡顿修法(当天二轮):热区判定只在 touchstart 做一次并缓存——原实现每 touchmove 都
+// getBoundingClientRect(强制布局读)+写 transform,读写交错每秒 60 次是卡顿主因;
+// grip/头部 CSS touch-action:none 让原生滚动不与拖拽抢(治双位移)。
 function setupSheetDrag() {
   const sheet = $('#sheet');
   if (!sheet) return;
-  let startY = null, dy = 0, dragging = false, wasAtTop = true;
-  const inHotzone = (e) => {
-    const t = e.touches[0];
-    return t.clientY - sheet.getBoundingClientRect().top < 60;
-  };
+  let startY = null, dy = 0, dragging = false, eligible = false;
   sheet.addEventListener('touchstart', (e) => {
-    wasAtTop = sheet.scrollTop <= 0;
-    if (!inHotzone(e) && !wasAtTop) { startY = null; return; }
-    startY = e.touches[0].clientY; dy = 0; dragging = false;
+    const t = e.touches[0];
+    const inHotzone = t.clientY - sheet.getBoundingClientRect().top < 60; // 只读这一次
+    eligible = inHotzone || sheet.scrollTop <= 0;
+    if (!eligible) { startY = null; return; }
+    startY = t.clientY; dy = 0; dragging = false;
   }, { passive: true });
   sheet.addEventListener('touchmove', (e) => {
-    if (startY == null) return;
+    if (startY == null || !eligible) return;
     dy = e.touches[0].clientY - startY;
     if (dy <= 0) dy = 0;
-    if (dy > 8 && !wasAtTop && !inHotzone(e)) { startY = null; return; } // 内容中部起步的上滚不管
-    if (dy > 8) {
+    if (!dragging && dy > 8) {
       dragging = true;
       sheet.style.transition = 'none';
-      sheet.style.transform = 'translateY(' + dy + 'px)';
+      sheet.style.willChange = 'transform'; // 提示合成器建层,后续 transform 不再触发布局/绘制
     }
+    if (dragging) sheet.style.transform = 'translateY(' + dy + 'px)';
   }, { passive: true });
   sheet.addEventListener('touchend', () => {
     if (startY == null) return;
-    sheet.style.transition = '';
-    sheet.style.transform = '';
-    if (dragging && dy > 80) closeSheet();
-    startY = null; dragging = false;
+    if (dragging) {
+      sheet.style.transition = '';
+      sheet.style.willChange = '';
+      sheet.style.transform = '';
+      if (dy > 80) closeSheet(); // inline transform 清掉后 .show 摘除,从拖拽位滑出到 100%
+    }
+    startY = null; dragging = false; eligible = false;
   });
 }
 

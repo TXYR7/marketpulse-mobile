@@ -394,6 +394,8 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 }
 .sheet.show { transform: translateY(0); }
 .sheet .grip { width: 48px; height: 5px; background: var(--line); border-radius: 999px; margin: 6px auto 10px; }
+/* 2026-09-11 拖拽热区禁原生滚动:从 grip/头部下拉只动抽屉,不再与内容滚动双位移 */
+.sheet .grip, .sheet .s-head { touch-action: none; }
 .sheet .s-head { display: flex; align-items: baseline; gap: 8px; }
 .sheet .s-name { font-size: 20px; font-weight: 800; }
 .sheet .s-code { color: var(--muted); font-size: 12px; }

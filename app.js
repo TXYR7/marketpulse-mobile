@@ -231,13 +231,13 @@ function renderStatus() {
   const posChip = pa && pa.label !== '--'
     ? '<div class="chip ' + (pa.label === '观望' ? 'risk-mid' : 'sent') + '" title="' + esc((pa.cycle || '--') + '周期容错 ' + (pa.faultTolerance != null ? Math.round(pa.faultTolerance * 100) + '%' : '--') + ' · ' + pa.note) + '"><span>仓位</span><strong>' + esc(pa.label) + '</strong></div>'
     : '';
+  // 2026-09-11 拆解融合批:横幅 9 chip 收编——涨/跌/炸三合一、情绪 chip 可点开指标明细 sheet、
+  // 炸板率/最高板降级(最高板在涨停池 hint、炸板率在雷达炸板风险项里都有)
+  const triple = '<div class="chip triple"><span>涨/跌/炸</span><strong><b class="up-c">' + (p.upCount ?? '--') + '</b><b>/</b><b class="down-c">' + (p.downCount ?? '--') + '</b><b>/</b><b>' + (p.brokenCount ?? '--') + '</b></strong></div>';
+  const emoChip = '<div class="chip sent chip-emo" id="emoChip" role="button" tabindex="0" title="点击查看分指标明细"><span>情绪</span><strong>' + (em.emotionIndex ?? '--') + ' ›</strong></div>';
   const html = [
-    chip('sent', '情绪', em.emotionIndex ?? '--'),
-    chip('up', '涨停', p.upCount),
-    chip('down', '跌停', p.downCount),
-    chip('broken', '炸板', p.brokenCount),
-    chip('', '最高板', maxBoard),
-    chip('', '炸板率', (state.breakRate?.rate ?? '--') + '%'),
+    emoChip,
+    triple,
     chip(em.level === 'red' ? 'risk-high' : em.level === 'orange' ? 'risk-mid' : '', '风险', em.phase || '—'),
     posChip,
     freshChip,
@@ -249,7 +249,8 @@ function renderStatus() {
   badge.textContent = em.phase || '连接中';
   const lvl = em.level || 'yellow';
   badge.className = 'phase-badge ' + (lvl === 'green' ? 'ok' : lvl === 'red' ? 'bad' : 'warn');
-  $('#ladderHint').textContent = '最高 ' + maxBoard + ' 板';
+  // 2026-09-11 拆解融合批:ladderHint 已随独立 section 删,最高板并入涨停池 hint
+  $('#ztHint').textContent = '最高 ' + maxBoard + ' 板 · ' + (p.upCount != null ? '共 ' + p.upCount + ' 只' : '--');
 }
 function chip(cls, label, val) {
   return '<div class="chip ' + cls + '"><span>' + label + '</span><strong>' + (val == null ? '--' : val) + '</strong></div>';
@@ -270,7 +271,7 @@ function ztCard(x) {
   const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
   const pvTip = pv ? esc(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
   const auc = aucInfoOf(x.code);
-  return '<div class="card" data-code="' + x.code + '">' +
+  return '<div class="card" data-code="' + x.code + '" data-boards="' + (x.boards || 1) + '">' + // data-boards 供板位条点格定位(2026-09-11 拆解融合批)
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
     '<div><div class="name">' + esc(x.name) + boardTag(x.code) + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
@@ -343,7 +344,9 @@ function renderZt() {
   const list = $('#ztList');
   if (!state.pools) return; // 首屏骨架由 index.html 提供，数据到达前不覆盖
   const rows = filterZt();
-  $('#ztHint').textContent = state.pools.upCount != null ? '共 ' + state.pools.upCount + ' 只' : '--';
+  // 2026-09-11 拆解融合批:最高板并入此 hint(梯队 section 已删);updateBanner 与此处同写,口径一致
+  const maxB = state.pools.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
+  $('#ztHint').textContent = '最高 ' + maxB + ' 板 · ' + (state.pools.upCount != null ? '共 ' + state.pools.upCount + ' 只' : '--');
   patchCardList(list, rows, ztCard, ztStructSig, pctFieldSig, patchZtCard);
 }
 function downCard(x) {
@@ -361,6 +364,13 @@ function renderDowns() {
   // 折叠时不构建内部 DOM（炸板池常 50~150 行），首次展开才渲染
   if ($('#dtFold').open) patchCardList($('#dtList'), p.down, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无跌停</div>');
   if ($('#zbFold').open) patchCardList($('#zbList'), p.broken, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无炸板</div>');
+}
+// 2026-09-11 拆解融合批:题材/龙头折叠组展开才渲染(同 dtFold 惰性口径);驾驶舱 hero 已删,structure 只出龙头+题材
+function renderStructFold() {
+  const hint = $('#structHint');
+  if (hint) hint.textContent = state.themes?.length ? state.themes.length + ' 条主线' : '--';
+  if (!$('#structFold').open) return;
+  renderStructure({ state, toast, actions: { loadHistory } });
 }
 
 /* ---------------- 昨日涨停 · 今日开盘预期差 ---------------- */
@@ -426,16 +436,19 @@ function renderRadar() {
       (it.reasons && it.reasons.length ? '<div class="reasons">' + it.reasons.map((x) => esc(x)).join(' · ') + '</div>' : '') + '</div>';
   }).join('');
   const cannot = (r.cannotDo || []).map((x) => '<span class="ci">' + esc(x) + '</span>').join('');
-  setHTML(el, items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
+  // 2026-09-11 拆解融合批:驾驶舱「今日操作风格」落位雷达顶(与「禁止」同层——都是今天该怎么打的答案)
+  const em = state.emotion || {};
+  const advice = em.advice ? '<div class="radar-style"><span>今日操作风格</span><b>' + esc(em.advice) + '</b></div>' : '';
+  setHTML(el, advice + items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
     (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''));
 }
 
 function renderIntraday() {
-  // 2026-09-10 全盘对齐桌面:机会/梯队/结构并入盘中页一页到底(渲染函数自 views.js 原样复用)
+  // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
   const ctx = { state, toast, actions: { loadHistory } };
   renderOpportunity(ctx);
   renderLadder(ctx);
-  renderStructure(ctx);
+  renderStructFold();
   renderZt(); renderDowns(); renderRadar();
   // 2026-09-10:日期紧凑格式 09-10 周四(全年同页可见 dateLabel 无需年份;星期几对看盘更有用)
   const d = state.manualDate || todayStr();
@@ -561,6 +574,22 @@ function kvGrid(s, d) {
   return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
 function closeSheet() { state.sheetCode = null; $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); }
+
+// 2026-09-11 拆解融合批:情绪 chip 点开分指标明细(驾驶舱移入横幅的归宿)——复用 scrim+sheet,不动 sheetCode
+function openEmoSheet() {
+  const em = state.emotion || {};
+  const inds = (em.indicators || []).map((i) =>
+    '<div class="ind ' + (i.available ? i.status : 'unavailable') + '"><span class="dot"></span><span class="k">' + esc(i.label) + '</span><span class="v">' + (i.value == null ? '—' : i.value) + '</span></div>'
+  ).join('');
+  const reasons = (em.reasons || []).map((r) => '<span>' + esc(r) + '</span>').join('');
+  const head = '<div class="s-head"><div><div class="s-name">情绪分指标</div><div class="s-code">' + esc(em.phase || '--') + ' · 指数 ' + (em.emotionIndex ?? '--') + ' · 置信度 ' + (em.confidence ?? '--') + '%</div></div></div>';
+  $('#sheetBody').innerHTML = head +
+    (inds ? '<div class="emo-indicators">' + inds + '</div>' : '<div class="muted">暂无指标数据</div>') +
+    (reasons ? '<div class="emo-reasons">' + reasons + '</div>' : '') +
+    '<div class="s-actions"><button class="btn primary" id="emoSheetClose">关闭</button></div>';
+  $('#scrim').classList.add('show'); $('#sheet').classList.add('show');
+  $('#emoSheetClose').addEventListener('click', closeSheet);
+}
 
 // 个股相似案例（对齐桌面 G24）：拉取更长日K（≥26 根才能滑窗匹配），复用 analytics.stockSimilarCases，
 // 展示 top-3 相似形态 + 六维特征 delta + 后续表现按相似度加权。仅在打开抽屉时按需拉取。
@@ -1152,7 +1181,10 @@ function bind() {
     try { localStorage.setItem('mp-theme', next); } catch {}
   });
   // 折叠池首次展开才渲染
+  // 折叠池首次展开才渲染(structFold 题材/龙头同口径——2026-09-11 拆解融合批)
   ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
+  const structFold = $('#structFold');
+  if (structFold) structFold.addEventListener('toggle', renderStructFold);
   // 2026-09-10 减法批:ztSearch/ztSort/ztFilter 绑定已随控件整链删除
   // 2026-09-10 全盘对齐桌面:watchInput 绑定已随自选页删除
   $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
@@ -1183,6 +1215,15 @@ function bind() {
   }
   // 2026-09-10 全盘对齐桌面:清空自选按钮(clearBtn)已随自选页删除
   $('#scrim').addEventListener('click', closeSheet);
+  // 情绪 chip 点开分指标明细(2026-09-11 拆解融合批,横幅每轮重建故用委托)
+  $('#statusStrip').addEventListener('click', (e) => { if (e.target.closest('#emoChip')) openEmoSheet(); });
+  // 板位条点格 → 滚到涨停池对应板位首卡(委托,ladderFull 每轮重建)
+  $('#ladderFull').addEventListener('click', (e) => {
+    const cell = e.target.closest('.lad-cell');
+    if (!cell) return;
+    const target = document.querySelector('#ztList .card[data-boards="' + cell.dataset.board + '"]');
+    if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1200); }
+  });
   setupPTR();
   setupEdgeJump();
 }

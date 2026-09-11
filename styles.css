@@ -382,20 +382,31 @@ main {
 .fold .body { padding: 0 12px 10px; }
 
 /* 梯队 */
-.ladder-group { margin-bottom: 14px; }
-.ladder-group h3 { font-size: 14px; margin: 6px 2px; }
-.bar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-.bar-row .lab { width: 46px; color: var(--muted); font-size: 12px; flex: 0 0 auto; }
-.bar-track {
-  flex: 1; height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+/* 2026-09-11 拆解融合批:纵向 bar-row 随梯队独立 section 删——改横向板位条(涨停池头部) */
+.lad-strip { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; }
+.lad-strip::-webkit-scrollbar { display: none; }
+.lad-cell {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 52px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-s);
+  background: var(--surface); color: inherit; font-family: inherit; cursor: pointer;
+  transition: transform 0.08s var(--ease-out), border-color 0.15s var(--ease-out);
 }
-.bar-fill {
-  height: 100%; width: 100%; background: linear-gradient(90deg, var(--teal), var(--teal-strong)); border-radius: 6px;
-  transform-origin: left center; /* scaleX 动画不触发布局重排 */
-  transition: transform 0.3s var(--ease-out);
-}
-.bar-row .cnt { width: 34px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+.lad-cell b { font-size: 11px; color: var(--muted); font-weight: 700; }
+.lad-cell span { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--data-ink); }
+.lad-cell:active { transform: scale(0.94); border-color: var(--teal); }
+.card.flash { animation: ladFlash 1.2s ease-out; }
+@keyframes ladFlash { 0%, 40% { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); } 100% { box-shadow: none; } }
+/* 雷达顶操作风格行(驾驶舱 advice 落位) */
+.radar-style { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r-s); }
+.radar-style span { color: var(--muted); font-size: 11px; }
+.radar-style b { font-size: 13px; color: var(--teal); }
+/* 横幅涨/跌/炸三合一 chip */
+.chip.triple strong { display: flex; align-items: baseline; gap: 1px; }
+.chip.triple strong b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.chip.triple strong b.down-c { color: var(--green); }
+.chip.triple strong b.up-c { color: var(--red); }
+.chip.chip-emo { cursor: pointer; }
+.chip.chip-emo strong::after { content: ''; }
 
 /* 题材排行 */
 .rank-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--line-soft); }
@@ -532,21 +543,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
   border-radius: 10px; padding: 8px 12px; font-size: 12px; margin: 2px 2px 0;
 }
 
-/* ===== 情绪驾驶舱 ===== */
-.emo {
-  background: linear-gradient(160deg, var(--surface-raised), var(--surface)); border: 1px solid var(--line);
-  border-radius: var(--r-l); padding: 14px; margin: 4px 0 8px; box-shadow: var(--shadow-1);
-}
-.emo-top { display: flex; align-items: center; gap: 14px; }
-.emo-index {
-  font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
-}
-.emo-index.green { color: var(--green); }
-.emo-index.yellow { color: var(--amber); }
-.emo-index.red { color: var(--red); }
-.emo-meta { flex: 1; }
-.emo-phase { font-size: 18px; font-weight: 800; }
-.emo-advice { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* ===== 情绪指标明细(2026-09-11 拆解融合批:驾驶舱 hero 已删,本组样式由情绪 chip 点开的 sheet 续用) ===== */
 .emo-indicators { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 12px; }
 .ind {
   background: var(--surface); border: 1px solid var(--line-soft); border-radius: 9px; padding: 7px 9px;

@@ -64,12 +64,16 @@
         <div class="sec-title"><h2>机会池 · S/A/B 评级</h2><span class="hint" id="oppHint">--</span></div>
         <div id="opp"></div>
 
-        <div class="sec-title"><h2>连板梯队</h2><span class="hint" id="ladderHint">--</span></div>
-        <div id="ladderFull"></div>
-
-        <div id="structure"></div>
+        <!-- 2026-09-11 拆解融合批:题材+龙头收进折叠组(研究信息,盘中默认不看) -->
+        <details class="fold" id="structFold">
+          <summary><span class="fold-title">题材强度 / 核心龙头</span><span class="hint" id="structHint">--</span></summary>
+          <div class="body"><div id="structure"></div></div>
+        </details>
 
         <div class="sec-title"><h2>涨停池</h2><span class="hint" id="ztHint">--</span></div>
+        <!-- 2026-09-11 拆解融合批:连板梯队独立 section 取消,板位条并入涨停池头部(#ladderFull)——
+             梯队=形状、涨停池=明细,同一批票不再两处滚动;点板位格滚到对应首卡 -->
+        <div id="ladderFull"></div>
         <!-- 2026-09-10 减法批:搜索框/排序 seg/过滤 subtab 整链砍除(用户点名没用)——
              固定排序=连板降序·封单次序(与连板梯队视角一致),过滤由上方机会池 S/A/B 卡承担 -->
         <div class="list" id="ztList">

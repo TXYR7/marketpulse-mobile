@@ -111,44 +111,24 @@ export function renderOpportunity(ctx) {
 export function renderLadder(ctx) {
   const el = document.querySelector('#ladderFull');
   const p = ctx.state.pools;
-  if (!p) { el.innerHTML = '<div class="empty">等待行情数据</div>'; return; }
+  if (!p) { el.innerHTML = ''; return; }
+  // 2026-09-11 拆解融合批:梯队并入涨停池头部——纵向 bar-row 改横向紧凑板位条,
+  // 点格滚到涨停池对应板位首卡(涨停池排序=连板降序,首卡即最高板)
   const groups = {};
   p.up.forEach((x) => { groups[x.boards] = (groups[x.boards] || 0) + 1; });
   const keys = Object.keys(groups).map(Number).sort((a, b) => b - a);
-  const max = Math.max(...Object.values(groups));
-  const ladderBars = keys.map((k) => {
-    const cnt = groups[k];
-    const pct = Math.round((cnt / max) * 100);
-    return '<div class="bar-row"><span class="lab">' + k + '板</span>' +
-      '<div class="bar-track"><div class="bar-fill" style="transform:scaleX(' + (pct / 100).toFixed(3) + ')"></div></div>' +
-      '<span class="cnt">' + cnt + '</span></div>';
-  }).join('');
-
-  // 2026-09-10 减法批:历史晋级率/模式监控/补录历史按钮已砍(11月判决在桌面做,手机翻统计表是伪需求)
-  const html =
-    '<div class="ladder-group">' + ladderBars + '</div>';
-  setHTML(el, html);
+  if (!keys.length) { el.innerHTML = ''; return; }
+  const cells = keys.map((k) =>
+    '<button class="lad-cell" data-board="' + k + '" type="button"><b>' + k + '板</b><span>' + groups[k] + '</span></button>'
+  ).join('');
+  setHTML(el, '<div class="lad-strip">' + cells + '</div>');
 }
 
-/* ---------------- 结构（情绪驾驶舱 + 结构树 + 龙头 + 题材 + 相似） ---------------- */
+/* ---------------- 结构（龙头 + 题材;情绪驾驶舱已并入横幅/雷达 2026-09-11 拆解融合批） ---------------- */
 export function renderStructure(ctx) {
   const el = document.querySelector('#structure');
   const s = ctx.state;
   if (!s.pools) { el.innerHTML = '<div class="empty">等待行情数据</div>'; return; }
-  const em = s.emotion || {};
-  const level = em.level || 'yellow';
-  const indicators = (em.indicators || []).map((i) =>
-    '<div class="ind ' + (i.available ? i.status : 'unavailable') + '"><span class="dot"></span><span class="k">' + i.label + '</span><span class="v">' + (i.value == null ? '—' : i.value) + '</span></div>'
-  ).join('');
-  const reasons = (em.reasons || []).map((r) => '<span>' + esc(r) + '</span>').join('');
-  const cockpit =
-    '<div class="emo"><div class="emo-top">' +
-    '<div class="emo-index ' + level + '">' + (em.emotionIndex ?? '--') + '</div>' +
-    '<div class="emo-meta"><div class="emo-phase">' + (em.phase || '--') + '</div><div class="emo-advice">' + esc(em.advice || '') + '</div>' +
-    '<div class="muted">置信度 ' + (em.confidence ?? '--') + '%</div></div></div>' +
-    '<div class="emo-indicators">' + indicators + '</div>' +
-    (reasons ? '<div class="emo-reasons">' + reasons + '</div>' : '') + '</div>';
-
   const leaders = (s.leaders || []).slice(0, 12).map((l) => {
     const bd = Object.entries(l.breakdown || {}).filter(([, v]) => v != null).map(([k, v]) => '<span>' + (BD_LABELS[k] || k) + ':' + v + '</span>').join('');
     return '<div class="leader-card" data-code="' + l.code + '"><div class="row1"><div class="nm">' + esc(l.name) + '</div>' +
@@ -165,7 +145,6 @@ export function renderStructure(ctx) {
   }).join('');
 
   const html =
-    '<div class="sec-title"><h2>情绪驾驶舱</h2></div>' + cockpit +
     '<div class="sec-title"><h2>核心龙头</h2><span class="hint">Top ' + Math.min(12, (s.leaders || []).length) + '</span></div>' + (leaders || '<div class="empty">暂无</div>') +
     '<div class="sec-title"><h2>题材强度</h2><span class="hint">按强度</span></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>';
   setHTML(el, html);

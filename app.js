@@ -1138,6 +1138,9 @@ function bind() {
   // 2026-09-11 一屏到底批:bottomnav 绑定已随导航整删
   // 2026-09-11 减法批:menu-item 委托已随侧滑菜单整删(零元素,绑定是死代码)
   $('#refreshBtn').addEventListener('click', () => refresh(true));
+  // 2026-09-11 详情抽屉下拉关闭(用户点名只能点关闭太死板)——sheet 顶部 60px 拖拽热区,
+  // 跟手位移(transition 摘掉防打架),下拉超 80px 松手关,不足回弹;滚到顶再往下拉也关(自然手势)
+  setupSheetDrag();
   // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
   $('#themeBtn').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
@@ -1198,6 +1201,43 @@ function setupPTR() {
       return;
     }
     $('#ptr').classList.remove('show'); startY = null;
+  });
+}
+
+// 2026-09-11 详情抽屉下拉关闭:grip/头部拖拽热区 + 「滚到顶继续下拉」双入口。
+// 拖拽期 transition 摘除(否则 transform 与 transition 打架跟不了手),松手恢复。
+// 只在顶部 60px 热区内起步,避免吃掉内容区的滚动;
+// sheet 自身已滚到顶且继续下拉时也接管(overscroll-behavior:contain 保证不透传)。
+function setupSheetDrag() {
+  const sheet = $('#sheet');
+  if (!sheet) return;
+  let startY = null, dy = 0, dragging = false, wasAtTop = true;
+  const inHotzone = (e) => {
+    const t = e.touches[0];
+    return t.clientY - sheet.getBoundingClientRect().top < 60;
+  };
+  sheet.addEventListener('touchstart', (e) => {
+    wasAtTop = sheet.scrollTop <= 0;
+    if (!inHotzone(e) && !wasAtTop) { startY = null; return; }
+    startY = e.touches[0].clientY; dy = 0; dragging = false;
+  }, { passive: true });
+  sheet.addEventListener('touchmove', (e) => {
+    if (startY == null) return;
+    dy = e.touches[0].clientY - startY;
+    if (dy <= 0) dy = 0;
+    if (dy > 8 && !wasAtTop && !inHotzone(e)) { startY = null; return; } // 内容中部起步的上滚不管
+    if (dy > 8) {
+      dragging = true;
+      sheet.style.transition = 'none';
+      sheet.style.transform = 'translateY(' + dy + 'px)';
+    }
+  }, { passive: true });
+  sheet.addEventListener('touchend', () => {
+    if (startY == null) return;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    if (dragging && dy > 80) closeSheet();
+    startY = null; dragging = false;
   });
 }
 

@@ -462,7 +462,7 @@ console.log('[B17] 边跳按钮：直达顶部/底部（index.html + app.js 接�
   const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
   ok('index.html 含 #jumpTop / #jumpBottom 边跳按钮', /id="jumpTop"/.test(html) && /id="jumpBottom"/.test(html));
-  ok('app.js setupEdgeJump 接线滚动容器与 scrollTo（reduced-motion 实时读）', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /scrollTo\(\{ top: 0, behavior: behavior\(\) \}\)/.test(appSrc) && /scrollTo\(\{ top: main\.scrollHeight, behavior: behavior\(\) \}\)/.test(appSrc));
+  ok('app.js setupEdgeJump 接线滚动容器与分步滚动（rAF glide，任意触碰可停——2026-09-11 中途可停改版）', /function setupEdgeJump/.test(appSrc) && /setupEdgeJump\(\);/.test(appSrc) && /function glideTo/.test(appSrc) && /main\.addEventListener\('touchstart', stopGlide/.test(appSrc) && /prefers-reduced-motion/.test(appSrc));
   ok('离边超 500px 才现身 + reduced-motion 瞬时跳', /scrollTop > 500/.test(appSrc) && /distBottom > 500/.test(appSrc) && /prefers-reduced-motion/.test(appSrc));
   ok('styles.css 提供 .edge-jump/.edge-btn 显隐类（容器 pointer-events:none + 按钮 visibility 防触点死区/隐形焦点）', /\.edge-jump/.test(css) && /\.edge-btn/.test(css) && /\.edge-btn\.show/.test(css) && /pointer-events: none/.test(css.slice(css.indexOf('.edge-jump'))) && /visibility: hidden/.test(css.slice(css.indexOf('.edge-jump'))));
 }

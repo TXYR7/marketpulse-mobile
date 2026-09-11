@@ -104,7 +104,15 @@ export function renderOpportunity(ctx) {
     block('A 级', tiers.A || [], 'A') +
     block('B 级', tiers.B || [], 'B') +
     (eCount ? '<div class="muted" style="padding:6px 2px">淘汰 ' + eCount + ' 只（综合得分偏低或触发淘汰规则）</div>' : '');
-  setHTML(el, html);
+  // 2026-09-11 修下拉卡顿:签名守卫——成员码序+结构字段(评分/信号/连板/理由)不变则跳过 innerHTML 全量重建
+  // (5s 自动刷新下 score 常变,签名须含 score;纯价变不影响机会池,本池不显示价格)
+  const sig = [sCount, aCount, bCount, eCount,
+    ...(tiers.S || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
+    ...(tiers.A || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
+    ...(tiers.B || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
+  ].join('|');
+  if (el.__oppSig === sig) return;
+  if (setHTML(el, html)) el.__oppSig = sig;
 }
 
 /* ---------------- 梯队（含历史晋级率） ---------------- */
@@ -121,7 +129,10 @@ export function renderLadder(ctx) {
   const cells = keys.map((k) =>
     '<button class="lad-cell" data-board="' + k + '" type="button"><b>' + k + '板</b><span>' + groups[k] + '</span></button>'
   ).join('');
-  setHTML(el, '<div class="lad-strip">' + cells + '</div>');
+  // 2026-09-11 修下拉卡顿:板位分布签名守卫,分布不变跳过重建(5s tick 大多不变)
+  const sig = keys.map((k) => k + ':' + groups[k]).join(',');
+  if (el.__ladSig === sig) return;
+  if (setHTML(el, '<div class="lad-strip">' + cells + '</div>')) el.__ladSig = sig;
 }
 
 /* ---------------- 结构（龙头 + 题材;情绪驾驶舱已并入横幅/雷达 2026-09-11 拆解融合批） ---------------- */

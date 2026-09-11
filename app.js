@@ -438,8 +438,11 @@ function renderRadar() {
   // 2026-09-11 拆解融合批:驾驶舱「今日操作风格」落位雷达顶(与「禁止」同层——都是今天该怎么打的答案)
   const em = state.emotion || {};
   const advice = em.advice ? '<div class="radar-style"><span>今日操作风格</span><b>' + esc(em.advice) + '</b></div>' : '';
-  setHTML(el, advice + items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
-    (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''));
+  // 2026-09-11 修下拉卡顿:签名守卫(星级+各项分+操作风格),不变跳过重建
+  const sig = [r.riskStars, advice, ...r.items.map((it) => it.label + it.score + it.action)].join('|');
+  if (el.__radarSig === sig) return;
+  if (setHTML(el, advice + items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
+    (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''))) el.__radarSig = sig;
 }
 
 function renderIntraday() {
@@ -1187,7 +1190,13 @@ function setupPTR() {
     if (e.touches[0].clientY - startY > 60) $('#ptr').classList.add('show');
   }, { passive: true });
   main.addEventListener('touchend', () => {
-    if ($('#ptr').classList.contains('show')) refresh(true);
+    if ($('#ptr').classList.contains('show')) {
+      // 2026-09-11 修下拉卡顿:等 PTR 收起动画先走一帧再触发刷新——refresh 第一步是 SWR 全量渲染,
+      // 同步跑会把松手的过渡卡成瞬跳;列表区已有签名守卫,真重建也只是变化的部分
+      requestAnimationFrame(() => { $('#ptr').classList.remove('show'); requestAnimationFrame(() => refresh(true)); });
+      startY = null;
+      return;
+    }
     $('#ptr').classList.remove('show'); startY = null;
   });
 }

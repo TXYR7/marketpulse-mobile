@@ -489,6 +489,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .opp-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow-1); transition: transform 0.08s var(--ease-out);
+  content-visibility: auto; contain-intrinsic-size: auto 74px; /* 2026-09-11 修下拉卡顿:与 .card 同款,屏外卡免布局 */
 }
 .opp-card:active { transform: scale(0.985); }
 .opp-card .row1 { display: flex; align-items: center; gap: 8px; }

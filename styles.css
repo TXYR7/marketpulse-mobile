@@ -421,13 +421,19 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 
 /* 2026-09-11 一屏到底批:设置页 CSS(.set-row/.about)已整删 */
 
-/* 下拉刷新(壳内 flex 条目:展开时 main 视口收窄 40px,内容视觉下移与旧行为一致) */
+/* 下拉刷新(2026-09-11 卡顿修:改覆盖层——原为壳内 flex 条目,height 0↔40px 过渡会把
+   main 整体推下/推回 40px,内容在手指底下跳+全页重排两次;现负 margin 占位+transform
+   滑出,纯合成零布局,滑出时盖在 main 顶部 40px 上) */
 .ptr {
-  flex: none;
-  text-align: center; color: var(--teal); font-size: 12px; height: 0; overflow: hidden;
-  transition: height 0.2s var(--ease-out); display: flex; align-items: center; justify-content: center; gap: 6px;
+  flex: none; height: 40px; margin-top: -40px; /* 净占位 0:main 位置恒定 */
+  position: relative; z-index: 6; background: var(--surface-2);
+  border-radius: 0 0 var(--r-m) var(--r-m); box-shadow: var(--shadow-1);
+  text-align: center; color: var(--teal); font-size: 12px;
+  transform: translateY(-100%); /* 藏进 header 底下 */
+  transition: transform 0.2s var(--ease-out);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
 }
-.ptr.show { height: 40px; }
+.ptr.show { transform: translateY(0); }
 .ptr .spin { display: inline-block; animation: spin 0.8s linear infinite; }
 
 /* toast */

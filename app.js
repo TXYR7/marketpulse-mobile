@@ -215,13 +215,12 @@ function renderStatus() {
   const maxBoard = p.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const em = state.emotion || {};
   // 数据新鲜度：正常显示更新时间(到秒)；只有快照时标注「快照」；最近一次刷新失败且无更新则提示
-  const failed = state.lastErrorAt > state.lastSuccessAt;
-  const fetchNote = state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : '';
+  const failed = state.lastErrorAt > state.lastSuccessAt; // fetchNote 已并入下方 freshChip 原地更新
   const freshChip = failed
     ? '<div class="chip risk-high"><span>状态</span><strong>刷新失败</strong></div>'
     : (state.lastSuccessAt
-      ? `<div class="chip sent" title="${esc('更新于 ' + hhmmss(state.lastSuccessAt) + fetchNote)}"><span>更新</span><strong>` + hhmmss(state.lastSuccessAt) + '</strong></div>'
-      : (state.lastGoodAt ? '<div class="chip risk-mid"><span>快照</span><strong>' + hhmm(state.lastGoodAt) + '</strong></div>' : ''));
+      ? '<div class="chip sent" id="freshChip"><span>更新</span><strong id="freshTime">--</strong></div>'
+      : (state.lastGoodAt ? '<div class="chip risk-mid"><span>快照</span><strong id="freshTime">' + hhmm(state.lastGoodAt) + '</strong></div>' : ''));
   const partialChip = p.partial && p.partialMissing && p.partialMissing.length
     ? '<div class="chip risk-mid"><span>缺源</span><strong>' + esc(p.partialMissing.join('/')) + '</strong></div>'
     : '';
@@ -242,7 +241,17 @@ function renderStatus() {
     freshChip,
     partialChip,
   ].join('');
-  setHTML(s, html);
+  // 2026-09-11 卡顿修:strip 签名守卫(结构态+各 chip 数据)——时间每轮必变不进签名,
+  // 原实现 setHTML 字符串比对恒不等,8s 一刷全量重建 6 chip
+  const sig = [em.emotionIndex, em.phase, em.level, p.upCount, p.downCount, p.brokenCount, pa?.label, failed, !!state.lastSuccessAt, !!state.lastGoodAt, p.partial, (p.partialMissing || []).join('/')].join('|');
+  if (s.__sig !== sig) { if (setHTML(s, html)) s.__sig = sig; }
+  // 时间/耗时 tooltip 每轮原地更新(元素恒存:failed 分支无 freshTime,querySelector 判空)
+  const tEl = $('#freshTime');
+  if (tEl && state.lastSuccessAt) {
+    tEl.textContent = hhmmss(state.lastSuccessAt);
+    const fc = $('#freshChip');
+    if (fc) fc.title = '更新于 ' + hhmmss(state.lastSuccessAt) + (state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : '');
+  }
   // 2026-09-10:阶段徽标分色(桌面 phase-badge 同款语义色)——旧版不分期全 teal,「分歧期」蓝底毫无警示感被吐槽丑
   const badge = $('#phaseBadge');
   badge.textContent = em.phase || '连接中';
@@ -1186,21 +1195,22 @@ function bind() {
 
 function setupPTR() {
   const main = document.querySelector('main');
+  const ptr = $('#ptr'); // 2026-09-11 卡顿修:缓存元素——原实现每次 touchmove 都 querySelector
   let startY = null;
   main.addEventListener('touchstart', (e) => { if (main.scrollTop <= 0) startY = e.touches[0].clientY; }, { passive: true });
   main.addEventListener('touchmove', (e) => {
     if (startY == null || main.scrollTop > 0) return; // 双保险:手势中途已滚离顶部则不触发(守卫在 main 成为滚动容器后真实生效)
-    if (e.touches[0].clientY - startY > 60) $('#ptr').classList.add('show');
+    if (e.touches[0].clientY - startY > 60) ptr.classList.add('show'); // 幂等,过渡只走一次
   }, { passive: true });
   main.addEventListener('touchend', () => {
-    if ($('#ptr').classList.contains('show')) {
+    if (ptr.classList.contains('show')) {
       // 2026-09-11 修下拉卡顿:等 PTR 收起动画先走一帧再触发刷新——refresh 第一步是 SWR 全量渲染,
       // 同步跑会把松手的过渡卡成瞬跳;列表区已有签名守卫,真重建也只是变化的部分
-      requestAnimationFrame(() => { $('#ptr').classList.remove('show'); requestAnimationFrame(() => refresh(true)); });
+      requestAnimationFrame(() => { ptr.classList.remove('show'); requestAnimationFrame(() => refresh(true)); });
       startY = null;
       return;
     }
-    $('#ptr').classList.remove('show'); startY = null;
+    ptr.classList.remove('show'); startY = null;
   });
 }
 

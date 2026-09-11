@@ -1243,7 +1243,7 @@ async function init() {
     if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
     // 竞价终态水合（date 校验当日有效）：重开 app 免重抓全池，promo/预期差/抽屉立即有撮合口径
     if (warm && warm.auction && warm.auction.available && String(warm.auction.date) === todayStr()) applyAuctionPayload(warm.auction);
-    state.refreshMs = 5000; // 2026-09-11 一屏到底批:设置已删,固定 5 秒(旧 refreshMs 存量忽略;失败退避逻辑仍在 applyRefreshTimer/refresh)
+    state.refreshMs = 8000; // 2026-09-11 一屏到底批:设置已删,固定 8 秒(同日由 5s 上调——渲染压力减 40%,用户实测新鲜度差别不大;失败退避逻辑仍在)
     bind();
     state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     state.historyLoaded = hist.length > 0;

@@ -108,52 +108,11 @@
       <!-- 2026-09-11 减法批:交易与持仓视图已随侧滑菜单整删(实盘在同花顺/东财,手机端纯研究参考;
            桌面端保留完整交易链——记录/复盘/行为偏差在桌面做) -->
 
-      <!-- 复盘（侧滑菜单） -->
-      <section class="view" id="view-review">
-        <div id="reviewView"></div>
-      </section>
-
-      <!-- 2026-09-09 减法批:决策助手视图已删(与桌面端同口径) -->
-
-      <!-- 设置（侧滑菜单） -->
-      <section class="view" id="view-settings">
-        <div class="sec-title"><h2>设置</h2></div>
-        <div class="set-row">
-          <label for="setRefresh">自动刷新</label>
-          <select id="setRefresh">
-            <option value="0">关闭</option>
-            <option value="8000">8 秒</option>
-            <option value="15000">15 秒</option>
-            <option value="30000">30 秒</option>
-          </select>
-        </div>
-        <div class="set-row">
-          <label for="setDate">行情日期 (YYYYMMDD)</label>
-          <input id="setDate" type="number" inputmode="numeric" placeholder="留空=今日" />
-        </div>
-        <div class="set-row">
-          <label for="setToken">数据接口 Token</label>
-          <input id="setToken" type="text" autocomplete="off" placeholder="留空=内置默认" />
-        </div>
-        <div class="set-row">
-          <label for="setNotify">信号变化通知（前台运行时）</label>
-          <input id="setNotify" type="checkbox" style="flex:0 0 auto;width:20px;height:20px" />
-        </div>
-        <!-- 2026-09-10 全盘对齐桌面:清空自选按钮已随自选页删除 -->
-        <div class="about">
-          版本 <span id="aboutVersion">--</span> · 星脉 · 数据来自东方财富公开接口，由手机浏览器直接获取，无后端服务器。<br />
-          行情有延迟，仅供信息展示，不构成投资建议。<br />
-          封单/成交额/市值单位为元；涨停池价格为厘(÷1000)。非交易时段显示最近交易日快照。
-        </div>
-      </section>
+      <!-- 2026-09-11 一屏到底批:复盘/设置视图+底部导航整链砍除(用户拍板「直接把复盘砍了设置砍了只留盘中」)。
+           复盘数据层保留(store.js 不动,旧记录不丢;桌面端复盘链完整);
+           自动刷新默认 5 秒;历史日期回看=顶栏日期长按;版本号进日期长按弹层。
+           Token/通知开关砍(坏了重装 PWA 的事,概率极低)。 -->
     </main>
-
-    <nav class="bottomnav">
-      <!-- 2026-09-10 全盘对齐桌面:机会/梯队/结构并入盘中页,自选已删——导航 5 键减 3 键 -->
-      <button class="on" data-view="intraday"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9 16v-5M12.5 16V8M16 16v-3"/></svg></span>盘中</button>
-      <button data-view="review"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h6M9 16h4"/></svg></span>复盘</button>
-      <button data-view="settings"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span>设置</button>
-    </nav>
 
     <div class="scrim" id="scrim"></div>
     <div class="sheet" id="sheet">

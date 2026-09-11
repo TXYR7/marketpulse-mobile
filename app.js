@@ -3,26 +3,25 @@ import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBar
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
-  buildExpectationGap, buildSignal, applyGate, diffSignalSnapshot,
+  buildExpectationGap, buildSignal, applyGate,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, BD_LABELS } from './views.js';
-import { renderReview } from './views-extra.js'; // 2026-09-09 决策助手删;09-11 renderTrades 已随交易视图整删
-import { APP_VERSION } from './version.js';
+// 2026-09-11 一屏到底批:renderReview import 已随复盘视图整删(store.js 复盘数据层保留,旧记录不丢)
 
 const state = {
   pools: null, quotes: {}, watch: [], view: 'intraday',
   refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
-  reviews: [], reviewsLoaded: false, // 2026-09-11 减法批:trades/tradesLoaded 已随交易视图整删
+  // 2026-09-11 一屏到底批:reviews/reviewsLoaded/trades 状态已随复盘+交易视图整删
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0, lastFetchMs: null,
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
   auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
-  lastSignalSnapshot: null, notifySignals: false, // D3:信号变化通知
+  // 2026-09-11 一屏到底批:lastSignalSnapshot/notifySignals 已随通知链整删
 };
 
 const $ = (s) => document.querySelector(s);
@@ -420,7 +419,7 @@ async function loadGap(force = false) {
     state.prevPremium = { ...yesterdayPremium(candidates, actualMap), date: state.pools.date };
     renderGap(state.gap);
     // 溢价就绪 → 重算派生并刷新（签名含溢价指纹，此前已算过的会触发本轮重算；无递归：loadGap 同日缓存早退）
-    if (computeDerived(state.pools)) { renderStatus(); renderView(state.view); }
+    if (computeDerived(state.pools)) { renderStatus(); renderCurrentView(); }
   } catch (e) { /* 静默：预期差属增强信息 */ }
 }
 
@@ -701,21 +700,10 @@ function refreshAuctionDetail() {
   if (local) el.innerHTML = AUC_HEAD + local;
 }
 
-/* ---------------- 导航 ---------------- */
-function switchView(v) {
-  state.view = v;
-  $$('.view').forEach((el) => el.classList.toggle('active', el.id === 'view-' + v));
-  $$('.bottomnav button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
-  // 2026-09-11 减法批:menu-item 高亮/closeMenu 已随侧滑菜单整删
-  renderView(v);
-}
-function renderView(v) {
-  const ctx = { state, toast, actions: { loadHistory } };
-  if (v === 'intraday') renderIntraday();
-  // 2026-09-11 减法批:'trades' 分支已随交易视图整删(实盘在同花顺/东财)
-  else if (v === 'review') renderReview(ctx);
-}
-function renderCurrentView() { renderView(state.view); }
+/* ---------------- 导航(2026-09-11 一屏到底批:复盘/设置已删,单视图无需切换) ----------------
+   switchView/renderView 简化为 renderCurrentView 直渲染盘中;视图切换的痕迹
+   (state.view==='intraday' 判断)保留——省得全文件改判空 */
+function renderCurrentView() { renderIntraday(); }
 
 /* ---------------- 侧滑菜单已删(2026-09-11 减法批) ---------------- */
 
@@ -763,11 +751,11 @@ async function refresh(force = false) {
     computeDerived(pools);
     state.pools = pools;
     renderStatus();
-    renderView(state.view); // 只渲染活跃视图；其余视图数据已更新，切过去即最新
+    renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});
-    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); notifySignalChanges(); }).catch(() => {});
+    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); }).catch(() => {}); // 2026-09-11:notifySignalChanges 调用已随通知链删
   } catch (e) {
     state.lastErrorAt = Date.now();
     renderStatus();
@@ -799,26 +787,8 @@ function persistLastGood(pools) {
 document.addEventListener('pagehide', flushLastGood);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushLastGood(); });
 
-// D3:信号变化本地通知（前台运行时;零后端约束下 PeriodicSync/Web Push 均不可行,这是唯一务实方案）
-function buildSignalSnapshot() {
-  const byCode = {};
-  for (const s of (state.pools?.up || [])) {
-    if (!s.tier && !s.promo?.verdict) continue;
-    byCode[s.code] = { tier: s.tier || null, verdict: s.promo?.verdict || null, name: s.name || s.code };
-  }
-  return { byCode };
-}
-async function notifySignalChanges() {
-  try {
-    const next = buildSignalSnapshot();
-    const changes = diffSignalSnapshot(state.lastSignalSnapshot, next);
-    state.lastSignalSnapshot = next; // 冷启动首刷 prev=null → changes 空，不打扰
-    if (!changes.length) return;
-    if (!state.notifySignals || !('Notification' in window) || Notification.permission !== 'granted') return;
-    const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification('星脉 · 信号变化', { body: changes.slice(0, 3).join('；') + (changes.length > 3 ? ` 等 ${changes.length} 项` : ''), tag: 'mp-signals' });
-  } catch { /* 通知失败静默 */ }
-}
+// 2026-09-11 一屏到底批:信号通知链(buildSignalSnapshot/notifySignalChanges)已随设置页整删——
+// 开关无法再打开(恒 false);analytics.js 的 diffSignalSnapshot 函数保留(同步哨兵锁同名一致性)
 // M1 预热持久化：把当日 K线 + 竞价代理 + 竞价终态写入 IDB（防抖），SW 发版/重开 app 后首屏命中内存缓存，免去 ~29 请求完整预热
 // 竞价终态当日定型（hydrate 端按 date === 今日校验），重开 app 不再重抓全池
 let warmPersistTimer = null;
@@ -1162,7 +1132,7 @@ function bind() {
     const age = Date.now() - state.lastSuccessAt;
     if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
   });
-  $$('.bottomnav button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
+  // 2026-09-11 一屏到底批:bottomnav 绑定已随导航整删
   // 2026-09-11 减法批:menu-item 委托已随侧滑菜单整删(零元素,绑定是死代码)
   $('#refreshBtn').addEventListener('click', () => refresh(true));
   // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
@@ -1178,35 +1148,22 @@ function bind() {
   ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
   const structFold = $('#structFold');
   if (structFold) structFold.addEventListener('toggle', renderStructFold);
-  // 2026-09-10 减法批:ztSearch/ztSort/ztFilter 绑定已随控件整链删除
-  // 2026-09-10 全盘对齐桌面:watchInput 绑定已随自选页删除
-  $('#setRefresh').addEventListener('change', (e) => { state.refreshMs = Number(e.target.value); setKV('refreshMs', state.refreshMs); applyRefreshTimer(); });
-  $('#setDate').addEventListener('change', (e) => { state.manualDate = e.target.value.trim(); refresh(); });
-  // B6:接口 token 设置——手机 PWA 无控制台，这是 token 失效时的救命通道（改后即时生效，免重启）
-  const tokenInput = $('#setToken');
-  if (tokenInput) {
-    tokenInput.value = (typeof localStorage !== 'undefined' && localStorage.getItem('mp_ema_token')) || '';
-    tokenInput.addEventListener('change', (e) => {
-      const v = e.target.value.trim();
-      if (v) localStorage.setItem('mp_ema_token', v); else localStorage.removeItem('mp_ema_token');
-      setEmaToken(v);
-      toast(v ? 'Token 已保存并即时生效' : '已恢复默认 Token');
+  // 2026-09-11 一屏到底批:设置页四绑定(refresh/date/token/notify)已随视图整删;
+  // 历史日期回看改顶栏日期长按(极隐蔽入口,常驻零成本)
+  let lpTimer = null;
+  const dateEl = $('#dateLabel');
+  if (dateEl) {
+    dateEl.addEventListener('pointerdown', () => {
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        const v = prompt('查看历史行情日期 (YYYYMMDD),留空=今日', state.manualDate || '');
+        if (v === null) return;
+        state.manualDate = v.trim();
+        refresh();
+      }, 550);
     });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => dateEl.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
   }
-  // D3:信号变化通知开关（前台本地通知；权限请求绑在打开开关的手势上——浏览器策略要求用户手势）
-  const notifyToggle = $('#setNotify');
-  if (notifyToggle) {
-    notifyToggle.checked = Boolean(state.notifySignals);
-    notifyToggle.addEventListener('change', async (e) => {
-      state.notifySignals = e.target.checked;
-      setKV('notifySignals', e.target.checked);
-      if (e.target.checked && 'Notification' in window && Notification.permission === 'default') {
-        try { await Notification.requestPermission(); } catch { /* 拒绝则静默不通知 */ }
-      }
-      toast(e.target.checked ? '信号通知已开启' : '信号通知已关闭');
-    });
-  }
-  // 2026-09-10 全盘对齐桌面:清空自选按钮(clearBtn)已随自选页删除
   $('#scrim').addEventListener('click', closeSheet);
   // 情绪 chip 点开分指标明细(2026-09-11 拆解融合批,横幅每轮重建故用委托)
   $('#statusStrip').addEventListener('click', (e) => { if (e.target.closest('#emoChip')) openEmoSheet(); });
@@ -1265,24 +1222,19 @@ async function init() {
   // SW 注册放最前：弱网首访不至于等几十秒的网络超时后才装上
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   window.addEventListener('unhandledrejection', (e) => { console.warn('[mp] 未处理的 Promise 拒绝：', e.reason); });
-  const verEl = $('#aboutVersion');
-  if (verEl) verEl.textContent = APP_VERSION; // 设置页展示当前版本（与 SW CACHE 同源，发布自动递增）
+  // 2026-09-11 一屏到底批:版本号进日期长按弹层 title;设置页已删
   try {
-    // 设置/快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
-    const [refreshMs, snap, hist, warm, notifySignals] = await Promise.all([
-      getKV('refreshMs', 15000),
+    // 快照/历史/预热缓存并行读，首个网络请求不必排队等 IDB 串行往返
+    const [snap, hist, warm] = await Promise.all([
       getKV('lastGood', null).catch(() => null),
       getAllHistory().catch(() => []),
       getKV('warmCache', null).catch(() => null),
-      getKV('notifySignals', false).catch(() => false),
     ]);
     if (warm && warm.kline) hydrateKlineCache(warm.kline); // 当日 K线命中 → enrichPromo 免重抓
     if (warm && warm.openPct) { state.openPctByCode = warm.openPct; state.openPctDate = warm.openPctDate || ''; }
     // 竞价终态水合（date 校验当日有效）：重开 app 免重抓全池，promo/预期差/抽屉立即有撮合口径
     if (warm && warm.auction && warm.auction.available && String(warm.auction.date) === todayStr()) applyAuctionPayload(warm.auction);
-    state.refreshMs = Number(refreshMs) > 0 ? Number(refreshMs) : 15000;
-    state.notifySignals = Boolean(notifySignals); // D3:信号变化通知开关（默认关）
-    $('#setRefresh').value = String(state.refreshMs);
+    state.refreshMs = 5000; // 2026-09-11 一屏到底批:设置已删,固定 5 秒(旧 refreshMs 存量忽略;失败退避逻辑仍在 applyRefreshTimer/refresh)
     bind();
     state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     state.historyLoaded = hist.length > 0;
@@ -1293,7 +1245,7 @@ async function init() {
       state.lastGoodAt = snap.savedAt || 0;
       computeDerived(snap.pools);
       renderStatus();
-      renderView(state.view);
+      renderCurrentView();
     }
     await refresh();
     applyRefreshTimer();

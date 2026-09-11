@@ -1270,10 +1270,30 @@ function setupEdgeJump() {
   main.addEventListener('scroll', schedule, { passive: true });
   // 视图切换只改 class/hidden（静态设置页无 childList 变更）——补 attributes 观察，否则切视图后按钮显隐滞留
   new MutationObserver(schedule).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
-  const jumpMq = matchMedia('(prefers-reduced-motion: reduce)');
-  const behavior = () => (jumpMq.matches ? 'auto' : 'smooth'); // 实时读：OS 中途切换立即生效（2026-09-08 评审批）
-  top.addEventListener('click', () => main.scrollTo({ top: 0, behavior: behavior() }));
-  bottom.addEventListener('click', () => main.scrollTo({ top: main.scrollHeight, behavior: behavior() }));
+  // 2026-09-11 中途可停:原生 smooth scrollTo 一旦启动无法中止(浏览器无此 API),
+  // 改 rAF 分步驱动——每帧滚一步,任何 touchstart/wheel 立即停;content-visibility 卡片
+  // 随滚动渐进渲染,一步到位的原生 smooth 在长列表上本来就顿,分步+固定步长反而顺
+  let glideRaf = null;
+  const stopGlide = () => { if (glideRaf) { cancelAnimationFrame(glideRaf); glideRaf = null; } };
+  const glideTo = (target) => {
+    stopGlide();
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { main.scrollTop = target; return; }
+    const DURATION = 450; // 总时长 ms,长滚快滚;与原 0.2s PTR/0.28s sheet 过渡同量级
+    const start = main.scrollTop, dist = target - start, t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / DURATION);
+      // easeOutCubic:起步快后减速,松手前渐慢——中途停时不会甩
+      main.scrollTop = start + dist * (1 - Math.pow(1 - k, 3));
+      if (k < 1) glideRaf = requestAnimationFrame(step);
+      else glideRaf = null;
+    };
+    glideRaf = requestAnimationFrame(step);
+  };
+  // 用户任何触碰/滚轮=接手:立即停,停在哪算哪
+  main.addEventListener('touchstart', stopGlide, { passive: true, capture: true });
+  main.addEventListener('wheel', stopGlide, { passive: true, capture: true });
+  top.addEventListener('click', () => glideTo(0));
+  bottom.addEventListener('click', () => glideTo(main.scrollHeight - main.clientHeight));
   update();
 }
 

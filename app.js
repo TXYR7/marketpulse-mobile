@@ -215,12 +215,16 @@ function renderStatus() {
   const maxBoard = p.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   const em = state.emotion || {};
   // 数据新鲜度：正常显示更新时间(到秒)；只有快照时标注「快照」；最近一次刷新失败且无更新则提示
-  const failed = state.lastErrorAt > state.lastSuccessAt; // fetchNote 已并入下方 freshChip 原地更新
-  const freshChip = failed
-    ? '<div class="chip risk-high"><span>状态</span><strong>刷新失败</strong></div>'
-    : (state.lastSuccessAt
-      ? '<div class="chip sent" id="freshChip"><span>更新</span><strong id="freshTime">--</strong></div>'
-      : (state.lastGoodAt ? '<div class="chip risk-mid"><span>快照</span><strong id="freshTime">' + hhmm(state.lastGoodAt) + '</strong></div>' : ''));
+  const failed = state.lastErrorAt > state.lastSuccessAt;
+  // 2026-09-12 合并批:更新时间并入顶栏日期旁(#freshAt),横幅 freshChip/风险 chip 删——
+  // 风险 chip 显示的是阶段名与徽标重复且误标(阶段≠风险),风险本体=雷达星级
+  const freshAt = $('#freshAt');
+  if (freshAt) {
+    if (failed) { freshAt.textContent = ' · 失败'; freshAt.className = 'fresh-at bad'; freshAt.title = '最近刷新失败,展示上次数据'; }
+    else if (state.lastSuccessAt) { freshAt.textContent = ' · ' + hhmmss(state.lastSuccessAt); freshAt.className = 'fresh-at'; freshAt.title = '更新于 ' + hhmmss(state.lastSuccessAt) + (state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : ''); }
+    else if (state.lastGoodAt) { freshAt.textContent = ' · 快照 ' + hhmm(state.lastGoodAt); freshAt.className = 'fresh-at stale'; freshAt.title = '离线快照(未成功连上实时源)'; }
+    else { freshAt.textContent = ''; freshAt.className = 'fresh-at'; freshAt.title = ''; }
+  }
   const partialChip = p.partial && p.partialMissing && p.partialMissing.length
     ? '<div class="chip risk-mid"><span>缺源</span><strong>' + esc(p.partialMissing.join('/')) + '</strong></div>'
     : '';
@@ -229,29 +233,17 @@ function renderStatus() {
   const posChip = pa && pa.label !== '--'
     ? '<div class="chip ' + (pa.label === '观望' ? 'risk-mid' : 'sent') + '" title="' + esc((pa.cycle || '--') + '周期容错 ' + (pa.faultTolerance != null ? Math.round(pa.faultTolerance * 100) + '%' : '--') + ' · ' + pa.note) + '"><span>仓位</span><strong>' + esc(pa.label) + '</strong></div>'
     : '';
-  // 2026-09-11 拆解融合批:横幅 9 chip 收编——涨/跌/炸三合一、情绪 chip 可点开指标明细 sheet、
-  // 炸板率/最高板降级(最高板在涨停池 hint、炸板率在雷达炸板风险项里都有)
   const triple = '<div class="chip triple"><span>涨/跌/炸</span><strong><b class="up-c">' + (p.upCount ?? '--') + '</b><b>/</b><b class="down-c">' + (p.downCount ?? '--') + '</b><b>/</b><b>' + (p.brokenCount ?? '--') + '</b></strong></div>';
   const emoChip = '<div class="chip sent chip-emo" id="emoChip" role="button" tabindex="0" title="点击查看分指标明细"><span>情绪</span><strong>' + (em.emotionIndex ?? '--') + ' ›</strong></div>';
   const html = [
     emoChip,
     triple,
-    chip(em.level === 'red' ? 'risk-high' : em.level === 'orange' ? 'risk-mid' : '', '风险', em.phase || '—'),
     posChip,
-    freshChip,
     partialChip,
   ].join('');
-  // 2026-09-11 卡顿修:strip 签名守卫(结构态+各 chip 数据)——时间每轮必变不进签名,
-  // 原实现 setHTML 字符串比对恒不等,8s 一刷全量重建 6 chip
-  const sig = [em.emotionIndex, em.phase, em.level, p.upCount, p.downCount, p.brokenCount, pa?.label, failed, !!state.lastSuccessAt, !!state.lastGoodAt, p.partial, (p.partialMissing || []).join('/')].join('|');
+  // 2026-09-11 卡顿修:strip 签名守卫(结构态+各 chip 数据)——时间已移顶栏原地更新
+  const sig = [em.emotionIndex, p.upCount, p.downCount, p.brokenCount, pa?.label, p.partial, (p.partialMissing || []).join('/')].join('|');
   if (s.__sig !== sig) { if (setHTML(s, html)) s.__sig = sig; }
-  // 时间/耗时 tooltip 每轮原地更新(元素恒存:failed 分支无 freshTime,querySelector 判空)
-  const tEl = $('#freshTime');
-  if (tEl && state.lastSuccessAt) {
-    tEl.textContent = hhmmss(state.lastSuccessAt);
-    const fc = $('#freshChip');
-    if (fc) fc.title = '更新于 ' + hhmmss(state.lastSuccessAt) + (state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : '');
-  }
   // 2026-09-10:阶段徽标分色(桌面 phase-badge 同款语义色)——旧版不分期全 teal,「分歧期」蓝底毫无警示感被吐槽丑
   const badge = $('#phaseBadge');
   badge.textContent = em.phase || '连接中';
@@ -1013,7 +1005,7 @@ function updateBanner() {
   const banner = $('#intradayBanner');
   if (!p.upCount && !p.downCount) {
     banner.classList.remove('hide');
-    banner.textContent = '未获取到行情数据（可能非交易时段，或该日期无数据）。可到「设置」手动输入交易日，或交易时段再试。';
+    banner.textContent = '未获取到行情数据（可能非交易时段，或该日期无数据）。可长按顶部日期输入交易日，或交易时段再试。'; // 2026-09-12:设置页已删,引导改长按日期
   } else if (!tradingNow()) {
     banner.classList.remove('hide');
     banner.textContent = '非交易时段 · 显示最近交易日快照（手动点 ↻ 获取最新）';

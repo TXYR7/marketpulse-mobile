@@ -177,6 +177,10 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.55);
 }
 .topbar .date { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+/* 2026-09-12 合并批:更新时间并入日期区(失败红/快照琥珀/正常灰) */
+.topbar .date .fresh-at { font-weight: 400; font-variant-numeric: tabular-nums; }
+.topbar .date .fresh-at.bad { color: var(--red); }
+.topbar .date .fresh-at.stale { color: var(--amber); }
 /* 品牌区不收缩——星脉+徽标整体保持一行,日期不被挤竖排 */
 .topbar .brand { flex: none; }
 .topbar .phase-badge {

@@ -58,7 +58,11 @@
       <!-- 盘中(2026-09-10 全盘对齐桌面:一页到底,机会/梯队/结构并入;自选页整链删) -->
       <section class="view active" id="view-intraday">
         <div class="banner hide" id="intradayBanner"></div>
-        <!-- 2026-09-10 对齐桌面重排版:信息从重到轻——机会(答案层)最前 -->
+        <!-- 2026-09-12 雷达升顶批(方案二,用户拍板):先看风险限制,再看机会——
+             「风险优先」取代 09-10「机会最前」,止手闸常驻首屏,机会池紧随其后 -->
+        <div class="sec-title"><h2>风险雷达</h2></div>
+        <div id="radar"></div>
+
         <div class="sec-title"><h2>机会池 · S/A/B 评级</h2><span class="hint" id="oppHint">--</span></div>
         <div id="opp"></div>
 
@@ -90,15 +94,11 @@
           <div class="body"><div class="list" id="zbList"></div></div>
         </details>
 
-        <!-- 2026-09-09 减法批:预期差收进折叠(与桌面端迁复盘同口径)——9:26 看一眼后整天是死重,
-             常驻展开还把风险雷达压到屏幕底部;折叠后雷达上浮为首屏可达的止手闸 -->
+        <!-- 2026-09-09 减法批:预期差收进折叠(与桌面端迁复盘同口径)——9:26 看一眼后整天是死重 -->
         <details class="fold" id="gapFold">
           <summary><span class="fold-title">昨日涨停 · 今日开盘预期差</span><span id="gapSummary" class="hint">--</span></summary>
           <div class="body"><div class="list" id="gapRows"></div></div>
         </details>
-
-        <div class="sec-title"><h2>风险雷达</h2></div>
-        <div id="radar"></div>
       </section>
       <!-- 2026-09-10 全盘对齐桌面:view-opportunity/view-ladder/view-structure 三个独立视图已删——
            内容容器(#opp/#ladderFull/#structure)迁入 view-intraday,渲染函数(views.js)原样复用;

@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent } from './data.js'; // 2026-09-12 相似案例源统一批:+腾讯K线
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -589,17 +589,19 @@ function openEmoSheet() {
 
 // 个股相似案例（对齐桌面 G24）：拉取更长日K（≥26 根才能滑窗匹配），复用 analytics.stockSimilarCases，
 // 展示 top-3 相似形态 + 六维特征 delta + 后续表现按相似度加权。仅在打开抽屉时按需拉取。
+// 2026-09-12 相似案例源统一批:60 根 K 线固定走腾讯源(与桌面兜底同源同参)——
+// 东财 push2his 端点对部分宽带出口连接层掐断,桌面长期走腾讯兜底,两端各用各的源
+// 会让相似日数字漂移;统一腾讯源后两端逐位一致。独立会话级缓存,不混入
+// enrichPromo 的东财源 klineCacheByDate(避免同功能跨源数据混杂)。
+const simBarsCache = new Map();
 async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');
   if (!el) return;
-  // B3:先查 K 线缓存（enrichPromo 只存 8 根，不够滑窗须重拉）；拉到 60 根后入缓存——
-  // 同一只票二次开抽屉秒出相似案例，且当日 enrichPromo 的 missing 直接消失
-  const dateKey = state.pools?.date || todayStr();
-  let bars = cachedKlineBars(code, dateKey);
+  let bars = simBarsCache.get(code) || null;
   if (bars && bars.length < 26) bars = null;
   if (!bars) {
-    try { bars = await fetchKlineLite(code, 60); } catch (e) { bars = null; }
-    if (bars && bars.length) storeKlineBars(code, dateKey, bars);
+    try { bars = await fetchKlineTencent(code, 60); } catch (e) { bars = null; }
+    if (bars && bars.length) simBarsCache.set(code, bars);
   }
   if (!bars || bars.length < 26) { el.innerHTML = '<div class="muted">相似日表现：暂无足够历史日K</div>'; return; }
   const r = stockSimilarCases(bars, { window: 20, horizon: 5, limit: 3 });

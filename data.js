@@ -315,6 +315,21 @@ export async function fetchKlineLite(code, lmt = 8) {
   }).filter((b) => b.close > 0 && b.volume > 0);
   return bars;
 }
+// 腾讯日K(前复权):与桌面 fetchKlineFromTencent 同源同参(320,qfq 取尾 lmt 根)。
+// 2026-09-12 相似案例源统一批:东财 push2his 端点对部分宽带出口有连接层掐断(桌面长期被逼
+// 腾讯兜底),两端各用各的源会让相似日数字漂移——相似案例固定走腾讯,两端永远同源逐位一致。
+// 桌面 server.js 的腾讯兜底解析格式(date 数组/索引列)在此按同口径实现。
+export async function fetchKlineTencent(code, lmt = 60) {
+  const sym = (/^(6|5)/.test(String(code)) ? 'sh' : 'sz') + String(code);
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${sym},day,,,${Math.max(lmt, 60)},qfq&_=${Date.now()}`;
+  const data = await getJSON(url, 2, 8000);
+  const node = data?.data?.[sym] || {};
+  const rows = node.qfqday || node.day || [];
+  return rows.slice(-lmt).map((b) => ({
+    date: String(b[0]).replace(/-/g, ''),
+    open: Number(b[1]), close: Number(b[2]), high: Number(b[3]), low: Number(b[4]), volume: Number(b[5]),
+  })).filter((b) => b.close > 0 && b.volume > 0);
+}
 export function cachedKlineBars(code, tradeDate) {
   const hit = klineCacheByDate.get(String(code));
   return hit && hit.dateKey === String(tradeDate) ? hit.bars : null;

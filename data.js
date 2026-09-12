@@ -51,6 +51,44 @@ export function todayStr(d = shanghaiNow()) {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// ===== 交易日历(2026-09-13 休市批) =====
+// 与桌面 trading-calendar.js 的 BUILTIN_HOLIDAYS 同源平行副本——改表必须两端同步
+// (登记于桌面 docs/tech-debt.md)。手机端不需要桌面的 observed/overrides(靠 DB),
+// 临时休市(日历未列)靠 loadHistory 的 emptyDates 学习兜底:拉空记档,次日不再打。
+export const BUILTIN_HOLIDAYS = new Set([
+  // 2025 上海/深圳证券交易所休市日(周末由算法处理)
+  '20250101', '20250128', '20250129', '20250130', '20250131', '20250203', '20250204',
+  '20250404', '20250501', '20250502', '20250505', '20250602',
+  '20251001', '20251002', '20251003', '20251006', '20251007', '20251008',
+  // 2026 年法定节假日对应的交易所休市日
+  '20260101', '20260102', '20260216', '20260217', '20260218', '20260219', '20260220', '20260223',
+  '20260406', '20260501', '20260504', '20260505', '20260619',
+  '20260925', '20261001', '20261002', '20261005', '20261006', '20261007',
+  // 2027 预置,仅作离线兜底
+  '20270101', '20270205', '20270208', '20270209', '20270210', '20270211',
+  '20270405', '20270503', '20270504', '20270505', '20270609',
+  '20270915', '20271001', '20271004', '20271005', '20271006', '20271007'
+]);
+export function isTradingDay(key) {
+  const k = String(key || '');
+  if (!/^\d{8}$/.test(k)) return false;
+  const d = new Date(Number(k.slice(0, 4)), Number(k.slice(4, 6)) - 1, Number(k.slice(6, 8)));
+  const wd = d.getDay();
+  return wd !== 0 && wd !== 6 && !BUILTIN_HOLIDAYS.has(k);
+}
+// 最近交易日(含 from 自身):休市日打开 app 用它回拉上一交易日的池,不再打空接口
+export function lastTradingDate(fromKey, maxLookback = 15) {
+  const base = /^\d{8}$/.test(String(fromKey))
+    ? new Date(Number(fromKey.slice(0, 4)), Number(fromKey.slice(4, 6)) - 1, Number(fromKey.slice(6, 8)))
+    : shanghaiNow();
+  for (let off = 0; off <= maxLookback; off += 1) {
+    const d = new Date(base.getTime() - off * 86_400_000);
+    const k = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    if (isTradingDay(k)) return k;
+  }
+  return todayStr(base); // 兜底:日历连败(理论不可能)回退自身
+}
+
 export function fmtTime(n) {
   if (n == null) return '--';
   const s = String(n).padStart(6, '0');

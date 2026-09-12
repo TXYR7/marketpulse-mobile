@@ -12,7 +12,7 @@ import {
   applyGate, auctionVerdict
 } from '../analytics.js';
 import {
-  shanghaiNow, todayStr, mergePools, sealQuality,
+  shanghaiNow, todayStr, mergePools, sealQuality, isTradingDay, lastTradingDate,
   shouldRefetchGap, mapSearchRow, setEmaToken,
   cachedKlineBars, storeKlineBars, exportKlineCache, hydrateKlineCache, fetchPools, fetchQuotes, fetchKlineLite,
   parseAuctionTrend, collectAuctionSnapshot, auctionVolRatio, pickAuctionCoreCodes
@@ -509,6 +509,14 @@ console.log('[B19] 评审批次级项：Copilot 炸板预警常量收拢 + 图�
     verifyOk = true;
   } catch { verifyOk = false; }
   ok('verify-icons.mjs 退出码 0（maskable 安全区 PASS 且标记判定未空转）', verifyOk);
+}
+
+console.log('[B20] 休市批:交易日历(与桌面 trading-calendar.js BUILTIN_HOLIDAYS 同源平行副本)');
+{
+  ok('周末判定:周六日非交易日', !isTradingDay('20260912') && !isTradingDay('20260913') && isTradingDay('20260911'));
+  ok('节假日判定:2026 内置表(春节/清明/五一/端午/国庆)', !isTradingDay('20260217') && !isTradingDay('20260406') && !isTradingDay('20260501') && !isTradingDay('20260619') && !isTradingDay('20261001'));
+  ok('最近交易日回拉:周六→周五,国庆假期→节前', lastTradingDate('20260912') === '20260911' && lastTradingDate('20261001') === '20260930');
+  ok('非法输入守卫:非 8 位日期 false', !isTradingDay('') && !isTradingDay('2026-10-01') && !isTradingDay(null));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

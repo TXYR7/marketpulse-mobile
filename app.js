@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, fetchAuctionTrend, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag } from './data.js';
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, fetchAuctionTrend, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate } from './data.js';
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -451,8 +451,9 @@ function renderIntraday() {
   renderLadder(ctx);
   renderStructFold();
   renderZt(); renderDowns(); renderRadar();
-  // 2026-09-10:日期紧凑格式 09-10 周四(全年同页可见 dateLabel 无需年份;星期几对看盘更有用)
-  const d = state.manualDate || todayStr();
+  // 2026-09-10:日期紧凑格式 09-10 周四;2026-09-13 休市批:显示数据的日期而非今天
+  // (休市日回拉上一交易日,标签必须跟着数据走,否则周六显示"09-13 周六"配周五数据)
+  const d = state.manualDate || state.pools?.date || todayStr();
   const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(d.slice(0, 4), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8))).getDay()];
   $('#dateLabel').textContent = d.slice(4, 6) + '-' + d.slice(6, 8) + ' 周' + wd;
   $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
@@ -758,7 +759,11 @@ async function refresh(force = false) {
   spinStart();
   const fetchStart = performance.now();
   try {
-    const date = state.manualDate || todayStr();
+    // 2026-09-13 休市批:休市日自动回拉最近交易日的池——不再拿周六/节假日打空接口
+    // (空响应还会把 IDB 里的上一交易日好快照覆盖成空池);手动指定日期不拦(用户显式要求)
+    const today = todayStr();
+    state.marketClosed = !state.manualDate && !isTradingDay(today);
+    const date = state.manualDate || (state.marketClosed ? lastTradingDate(today) : today);
     if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
     // 冷启动（无本地数据垫底）用 fail-fast 配置：挂起/离线时最坏 ~13s 落到离线态（此前 3×9s≈28s）；
     // 热刷新保持完整重试韧性（有 SWR 旧数据在屏，慢点无妨）
@@ -1033,6 +1038,11 @@ function updateBanner() {
   if (!p.upCount && !p.downCount) {
     banner.classList.remove('hide');
     banner.textContent = '未获取到行情数据（可能非交易时段，或该日期无数据）。可长按顶部日期输入交易日，或交易时段再试。'; // 2026-09-12:设置页已删,引导改长按日期
+  } else if (state.marketClosed) {
+    // 2026-09-13 休市批:周末/节假日明示——数据定格在上一交易日,数字不动是正常的
+    const d = p.date || '';
+    banner.classList.remove('hide');
+    banner.textContent = '休市中 · 显示 ' + d.slice(4, 6) + '-' + d.slice(6, 8) + ' 快照（数据定格，下拉可复检）';
   } else if (!tradingNow()) {
     banner.classList.remove('hide');
     banner.textContent = '非交易时段 · 显示最近交易日快照（手动点 ↻ 获取最新）';
@@ -1044,10 +1054,11 @@ function updateBanner() {
   } else banner.classList.add('hide');
 }
 function tradingNow() {
-  const d = shanghaiNow();
-  if (d.getDay() === 0 || d.getDay() === 6) return false;
-  const t = d.getHours() * 60 + d.getMinutes();
-  return (t >= 555 && t <= 690) || (t >= 780 && t <= 900);
+  // 2026-09-13 休市批:周六日判断升级为交易日历(节假日也拦,如十一);窗口不变
+  if (!isTradingDay(todayStr())) return false;
+  const t = shanghaiNow();
+  const m = t.getHours() * 60 + t.getMinutes();
+  return (m >= 555 && m <= 690) || (m >= 780 && m <= 900);
 }
 function applyRefreshTimer() {
   if (state.timer) clearInterval(state.timer);

@@ -1353,6 +1353,7 @@ async function init() {
       state.pools = snap.pools;
       state.fromSnapshot = true;
       state.lastGoodAt = snap.savedAt || 0;
+      state.marketClosed = !state.manualDate && !isTradingDay(todayStr()); // 2026-09-13 检查批:水合渲染先于首次 refresh,此处不设会闪「非交易时段」错横幅
       computeDerived(snap.pools);
       renderStatus();
       renderCurrentView();

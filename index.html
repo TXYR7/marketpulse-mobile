@@ -41,8 +41,6 @@
       <div class="status-strip" id="statusStrip"></div>
     </header>
 
-    <div class="ptr" id="ptr"><span class="spin"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></span> 正在刷新…</div>
-
     <!-- 2026-09-11 减法批:侧滑菜单(行情工作台)整链砍除——复盘/设置底部导航直达,
          交易与持仓在手机端是伪需求(实盘在同花顺/东财,本页纯研究参考) -->
 
@@ -52,6 +50,10 @@
     </div>
 
     <main>
+      <!-- 2026-09-12 检查批修:PTR 移入 main 内做绝对定位覆盖层(原 body 直下子项+负 margin+
+           translateY(-100%) 的「藏进 header 底下」几何算错——隐藏态视觉落在 header 底部区,
+           z-index:6 盖住状态条还拦点击;移入 main 后锚定滚动区顶部,任何状态碰不到 header) -->
+      <div class="ptr" id="ptr"><span class="spin"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></span> 正在刷新…</div>
       <!-- 盘中(2026-09-10 全盘对齐桌面:一页到底,机会/梯队/结构并入;自选页整链删) -->
       <section class="view active" id="view-intraday">
         <div class="banner hide" id="intradayBanner"></div>

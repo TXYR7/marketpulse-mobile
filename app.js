@@ -1067,9 +1067,15 @@ function applyRefreshTimer() {
 }
 function refreshTick() {
   if (document.hidden) return; // 后台标签页不白耗流量/电量
-  if (!tradingNow()) return;
+  // 2026-09-13 检查批修:休市日失败重试——休市日 tradingNow 恒 false,init 刷新若碰上
+  // 网络抖动失败,「· 失败」会挂一整天无人兜底(交易日有本 tick 连续重试,休市日是真空档)。
+  // 放行条件:休市中 && 最近一次是失败 && 距失败 ≥30s(8s tick 天然节流,防打锤);
+  // 一旦成功 lastSuccessAt 反超,tick 回归空转
+  const holidayRetry = state.marketClosed && state.lastErrorAt > state.lastSuccessAt && Date.now() - state.lastErrorAt >= 30_000;
+  if (!tradingNow() && !holidayRetry) return;
   // 回看历史交易日：数据已是该日就不再重拉不变的历史，手动 ↻ 才强制
   if (state.manualDate && state.pools && String(state.pools.date) === String(state.manualDate)) return;
+  if (!tradingNow()) { refresh(); return; } // 休市重试不走竞价采集
   maybeAuctionTick(); // 竞价采集独立节流（live 60s / final 当日单次），不阻塞主刷新
   refresh();
 }

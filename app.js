@@ -535,8 +535,8 @@ async function openSheet(code) {
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     (promoFoldInner ? '<details class="fold sheet-fold" id="promoFold"><summary><span class="fold-title">晋级检查表 · 八维</span></summary><div class="body">' + promoFoldInner + '</div></details>' : '') +
-    (state.manualDate ? '' : '<details class="fold sheet-fold" id="aucFold"' + (aucWin ? ' open' : '') + '><summary><span class="fold-title">集合竞价 · 09:15-09:25</span></summary><div class="body"><div id="detailAuction"></div></div></details>') +
-    '<details class="fold sheet-fold" id="simFold"><summary><span class="fold-title">相似案例</span><span class="hint">点开加载</span></summary><div class="body"><div id="detailSimilarCases"></div></div></details>' +
+    (state.manualDate ? '' : '<details class="fold sheet-fold" id="aucFold"' + (aucWin ? ' open' : '') + '><summary><span class="fold-title">集合竞价 · 09:15-09:25</span></summary><div class="body"><div class="s-auction" id="detailAuction"></div></div></details>') +
+    '<details class="fold sheet-fold" id="simFold"><summary><span class="fold-title">相似案例</span><span class="hint">点开加载</span></summary><div class="body"><div class="s-similar" id="detailSimilarCases"></div></div></details>' +
     '<details class="fold sheet-fold" id="detFold"><summary><span class="fold-title">行情明细</span></summary><div class="body"><div id="sheetKvDet">' + kvDet(stock, d) + '</div></div></details>' +
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
@@ -1011,7 +1011,19 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
       // 抽屉正开着池内涨停股时同步重渲染：promo 刚定稿立即回填检查表
       //（此前只刷 renderZt，开着抽屉点开的股检查表永不出现）。
       // 此时报价已被 fetchOpenPct 回流、K线在缓存 → 重渲染零网络、瞬时完成。
-      if (state.sheetCode && byCode[state.sheetCode]) openSheet(state.sheetCode);
+      // 2026-09-12 检查批修:promo 回填走整抽屉重渲染,会把用户已展开的折叠组收起+
+      // 相似案例 loaded 标记丢失(再点重复拉)——快照 open/loaded,渲染后恢复
+      // (先恢复 loaded 再置 open:toggle 事件会触发惰性加载分支,loaded 已在则跳过)
+      if (state.sheetCode && byCode[state.sheetCode]) {
+        const openFolds = $$('.sheet-fold').filter((f) => f.open).map((f) => ({ id: f.id, loaded: f.dataset.loaded || '' }));
+        openSheet(state.sheetCode);
+        for (const snap of openFolds) {
+          const f = document.getElementById(snap.id);
+          if (!f) continue;
+          if (snap.loaded) f.dataset.loaded = snap.loaded;
+          f.open = true;
+        }
+      }
     }
   } finally { state.promoInFlight = false; }
 }

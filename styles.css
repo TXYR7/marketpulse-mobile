@@ -199,15 +199,15 @@ button { font-family: inherit; cursor: pointer; }
 .topbar .refresh-btn:active { transform: scale(0.92); opacity: .7; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* 2026-09-12 打磨:4 chip 平分整行(原 9 chip 滚动布局退役)——overflow-x/滚动条隐藏规则删,chip 改弹性撑满+内容居中 */
 .status-strip {
   display: flex; gap: 6px; margin: 8px -12px 0; padding: 0 12px 8px;
-  background: var(--surface); overflow-x: auto;
-  scrollbar-width: none;
+  background: var(--surface);
 }
-.status-strip::-webkit-scrollbar { display: none; }
 .chip {
-  flex: 0 0 auto; background: var(--surface-2); border: 0;
-  border-radius: var(--r-s); padding: 5px 10px; display: flex; flex-direction: column; min-width: 54px;
+  flex: 1 1 auto; background: var(--surface-2); border: 0;
+  border-radius: var(--r-s); padding: 6px 10px; display: flex; flex-direction: column;
+  align-items: center; text-align: center; min-width: 54px;
 }
 .chip span { color: var(--muted); font-size: 10px; }
 .chip strong { font-size: 15px; font-variant-numeric: tabular-nums; }

@@ -646,10 +646,10 @@ function applyGate(stock, ctx = {}) {
   gates.push({ name: '风险闸', pass: !riskBlocked, note: riskBlocked ? '存在高危风险项' : '风险可承受' });
   const modeOk = !ctx.phase || (ctx.allowedModes || []).includes(ctx.mode) || ctx.mode === '首板' || ctx.mode === '板块核心';
   gates.push({ name: '模式匹配', pass: modeOk, note: ctx.mode || '' });
-  if (ctx.phaseRisk) gates.push({ name: 'NoTrade·退潮', pass: false, note: '市场退潮/冰点，禁止' });
-  if (ctx.circuitPaused) gates.push({ name: 'NoTrade·熔断', pass: false, note: '策略熔断' });
-  if (ctx.dataAbnormal) gates.push({ name: 'NoTrade·数据异常', pass: false, note: '数据源异常' });
-  if (ctx.themeMissing) gates.push({ name: 'NoTrade·主线不明', pass: false, note: '主线为空' });
+  if (ctx.phaseRisk) gates.push({ name: '禁手·退潮', pass: false, note: '市场退潮/冰点，禁止' });
+  if (ctx.circuitPaused) gates.push({ name: '禁手·熔断', pass: false, note: '策略熔断' });
+  if (ctx.dataAbnormal) gates.push({ name: '禁手·数据异常', pass: false, note: '数据源异常' });
+  if (ctx.themeMissing) gates.push({ name: '禁手·主线不明', pass: false, note: '主线为空' });
   const pass = gates.every((gate) => gate.pass);
   return { pass, final: pass ? '允许' : '禁止', gates };
 }
@@ -776,7 +776,7 @@ function buildSimilarDays(days = [], todayStocks = [], limit = 3) {
 // G24 个股相似案例（mobile 移植自桌面 analytics.js）：复用 klineFeatures 构造个股窗口特征向量，
 // 与自身历史各窗口做欧氏距离，取 top-N 相似片段 + 后续 horizon 日收益作为「案例结果」。
 // marketSimilarity 是盘面级（比两个市场快照向量），无法直接比单只股票，故此处新增平行实现。
-const STOCK_SIMILAR_NOTE = '相似度用 量能变化 / 缺口未补 / MA5·MA20 乖离 / 5日收益 / 波动率 / 回踩首板 六维（欧氏距离·按实际维度数归一），由该股自身日K滑动窗口构造，匹配历史上形态最相近的片段并复盘其后续表现。';
+const STOCK_SIMILAR_NOTE = '相似度用 量能变化 / 缺口未补 / 5·20日均线乖离 / 5日收益 / 波动率 / 回踩首板 六维（欧氏距离·按实际维度数归一），由该股自身日K滑动窗口构造，匹配历史上形态最相近的片段并复盘其后续表现。';
 
 function stockShapeVector(slice = []) {
   const f = klineFeatures(slice);
@@ -818,7 +818,7 @@ function describeShapeFeatures(cur, hist) {
   const map = [
     ['量能变化', cur.volChg1d, hist.volChg1d],
     ['缺口未补', cur.gap, hist.gap],
-    ['MA5·MA20 乖离', cur.maSpread, hist.maSpread],
+    ['5·20日均线乖离', cur.maSpread, hist.maSpread],
     ['5日收益', cur.ret5, hist.ret5],
     ['波动率', cur.vol5, hist.vol5],
     ['回踩首板', cur.pullback, hist.pullback]

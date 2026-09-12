@@ -252,9 +252,7 @@ function renderStatus() {
   // 2026-09-11 拆解融合批:ladderHint 已随独立 section 删,最高板并入涨停池 hint
   $('#ztHint').textContent = '最高 ' + maxBoard + ' 板 · ' + (p.upCount != null ? '共 ' + p.upCount + ' 只' : '--');
 }
-function chip(cls, label, val) {
-  return '<div class="chip ' + cls + '"><span>' + label + '</span><strong>' + (val == null ? '--' : val) + '</strong></div>';
-}
+// 2026-09-12 检查批:chip() 助手已删——顶栏合并批后零调用方(横幅四颗全是字面模板)
 
 /* ---------------- 渲染：盘中涨停池 ---------------- */
 // 竞价信息（卡片行/抽屉共用）：撮合口径优先，竞价中用虚拟价；回看历史日不显示（竞价仅当日有效）
@@ -1158,7 +1156,7 @@ function bind() {
   // 2026-09-11 一屏到底批:设置页四绑定(refresh/date/token/notify)已随视图整删;
   // 历史日期回看改顶栏日期长按(极隐蔽入口,常驻零成本)
   let lpTimer = null;
-  const dateEl = $('#dateLabel');
+  const dateEl = document.querySelector('.topbar .date'); // 2026-09-12 检查批:长按目标改整块「日期+时间」(原绑 #dateLabel 内层,时间部分长按无反应,与交付说明不符)
   if (dateEl) {
     dateEl.addEventListener('pointerdown', () => {
       lpTimer = setTimeout(() => {

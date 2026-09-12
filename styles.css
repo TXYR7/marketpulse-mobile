@@ -213,14 +213,6 @@ button { font-family: inherit; cursor: pointer; }
 .chip strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 .chip.sent { background: var(--data-soft); }
 .chip.sent strong { color: var(--data-ink); }
-.chip.up { background: var(--up-tint); }
-.chip.up strong { color: var(--red); }
-.chip.down { background: var(--down-tint); }
-.chip.down strong { color: var(--green); }
-.chip.broken { background: var(--amber-tint); }
-.chip.broken strong { color: var(--amber); }
-.chip.risk-high { background: var(--danger-tint); }
-.chip.risk-high strong { color: var(--red); }
 .chip.risk-mid { background: var(--amber-tint); }
 .chip.risk-mid strong { color: var(--amber); }
 
@@ -326,6 +318,7 @@ main {
 /* 横幅涨/跌/炸三合一 chip */
 .chip.triple strong { display: flex; align-items: baseline; gap: 1px; }
 .chip.triple strong b { font-size: 15px; font-variant-numeric: tabular-nums; }
+/* 2026-09-12 检查批:.chip.up/.down/.broken/.risk-high 四组色类已删(9-chip 时代孤儿,现存=.sent/.risk-mid/.triple) */
 .chip.triple strong b.down-c { color: var(--green); }
 .chip.triple strong b.up-c { color: var(--red); }
 .chip.chip-emo { cursor: pointer; }

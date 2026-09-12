@@ -519,4 +519,11 @@ console.log('[B20] 休市批:交易日历(与桌面 trading-calendar.js BUILTIN_
   ok('非法输入守卫:非 8 位日期 false', !isTradingDay('') && !isTradingDay('2026-10-01') && !isTradingDay(null));
 }
 
+console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate 从 JSON 来是数字,曾致 d.slice 炸刷新)');
+{
+  const row = (c) => ({ c, n: '股' + c, lbc: 1, p: 15000, zdp: 10, fund: null, ltsz: null, zbc: 0, hybk: 'AI' });
+  const r = mergePools('20260911', [{ status: 'fulfilled', value: { data: { pool: [row('600001')], qdate: 20260911, tc: 1 } } }, { status: 'fulfilled', value: { data: { pool: [], qdate: 20260911, tc: 0 } } }, { status: 'fulfilled', value: { data: { pool: [], qdate: 20260911, tc: 0 } } }]);
+  ok('mergePools date 为 string（东财 qdate 数字入参也归一）', typeof r.date === 'string' && r.date === '20260911');
+}
+
 console.log(`\nAll ${pass} smoke checks passed.`);

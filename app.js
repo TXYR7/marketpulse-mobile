@@ -453,7 +453,7 @@ function renderIntraday() {
   renderZt(); renderDowns(); renderRadar();
   // 2026-09-10:日期紧凑格式 09-10 周四;2026-09-13 休市批:显示数据的日期而非今天
   // (休市日回拉上一交易日,标签必须跟着数据走,否则周六显示"09-13 周六"配周五数据)
-  const d = state.manualDate || state.pools?.date || todayStr();
+  const d = state.manualDate || String(state.pools?.date || '') || todayStr(); // String():旧 IDB 快照的 date 是数字(qdate 原样),拔类型雷
   const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(d.slice(0, 4), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8))).getDay()];
   $('#dateLabel').textContent = d.slice(4, 6) + '-' + d.slice(6, 8) + ' 周' + wd;
   $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
@@ -1040,7 +1040,7 @@ function updateBanner() {
     banner.textContent = '未获取到行情数据（可能非交易时段，或该日期无数据）。可长按顶部日期输入交易日，或交易时段再试。'; // 2026-09-12:设置页已删,引导改长按日期
   } else if (state.marketClosed) {
     // 2026-09-13 休市批:周末/节假日明示——数据定格在上一交易日,数字不动是正常的
-    const d = p.date || '';
+    const d = String(p.date || '');
     banner.classList.remove('hide');
     banner.textContent = '休市中 · 显示 ' + d.slice(4, 6) + '-' + d.slice(6, 8) + ' 快照（数据定格，下拉可复检）';
   } else if (!tradingNow()) {

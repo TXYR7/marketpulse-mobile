@@ -209,7 +209,10 @@ export function mergePools(date, settled) {
   if (!down) failed.push('跌停池');
   if (!broken) failed.push('炸板池');
   return {
-    date: up?.data?.qdate || down?.data?.qdate || broken?.data?.qdate || date,
+    // 2026-09-13 检查批修:qdate 从东财 JSON 来是数字——pools.date 历史上一直是 number,
+    // 所有旧消费方都自觉 String() 强转;休市批的日期标签/横幅首次直接 .slice 而炸
+    // (d.slice is not a function = 用户报告的刷新失败)。出口统一字符串,拔掉类型地雷
+    date: String(up?.data?.qdate || down?.data?.qdate || broken?.data?.qdate || date),
     up: ups,
     down: downs,
     broken: brokens,

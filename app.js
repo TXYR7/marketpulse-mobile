@@ -7,7 +7,7 @@ import {
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, BD_LABELS } from './views.js';
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
 // 2026-09-11 一屏到底批:renderReview import 已随复盘视图整删(store.js 复盘数据层保留,旧记录不丢)
 
 const state = {
@@ -500,17 +500,20 @@ async function openSheet(code) {
     '<div class="s-price" id="sheetPrice"><b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
     '<small class="' + pctClass(pct) + '">' + pctText(pct) + '</small></div></div>';
 
-  let tierHtml = '';
-  if (stock.tier) {
-    tierHtml = '<div class="s-tier">' + tierBadge(stock.tier) + ' <b>评分 ' + (stock.score ?? '--') + '</b></div>';
-    const bd = stock.breakdown || {};
-    const bars = Object.entries(bd).filter(([, v]) => v != null).map(([k, v]) => {
-      const max = { height: 35, theme: 20, position: 15, coordination: 5, turnover: 8, seal: 10, firstSeal: 7, breaks: 5 }[k] || 10;
-      const w = Math.min(100, Math.round(v / max * 100));
-      return '<div class="bd-row"><span class="k">' + (BD_LABELS[k] || k) + '</span><div class="bd-bar"><i style="width:' + w + '%"></i></div><span>' + v + '</span></div>';
-    }).join('');
-    if (bars) tierHtml += '<div class="s-breakdown">' + bars + '</div>';
-  }
+  // 2026-09-12 折叠版批(用户拍板「先做折叠版感受一下」):抽屉改两层——
+  // 10秒层=结论行/信号/关键数字四格常驻;检查表/竞价/相似/行情明细收进折叠组。
+  // 评分构成条砍(与八维检查表信息重复);竞价 9:15-9:26 窗口自动展开(盘中决策刚需)。
+  const pv = stock.promo && stock.promo.available !== false;
+  let verdictHtml = '<div class="s-verdict">';
+  if (stock.tier) verdictHtml += '<span class="sv-line">' + tierBadge(stock.tier) + ' <b>评分 ' + (stock.score ?? '--') + '</b></span>';
+  if (pv) {
+    const vcls = stock.promo.verdict === '可接力' ? 'pass' : stock.promo.verdict === '观望' ? 'warn' : 'fail';
+    verdictHtml += '<span class="sp-verdict verdict-' + vcls + '"><b>' + esc(stock.promo.verdict) + '</b><span>' + stock.promo.score +
+      ' · 容错 ' + (stock.promo.faultTolerance != null ? Math.round(stock.promo.faultTolerance * 100) + '%' : '--') + '</span></span>';
+    if ((stock.promo.hardFails || []).length) verdictHtml += '<span class="sv-fail">硬否决：' + esc(stock.promo.hardFails.join('、')) + '</span>';
+  } else if (!stock.tier) verdictHtml += '<span class="muted">暂无评级</span>';
+  verdictHtml += '</div>';
+
   let signalHtml = '';
   if (stock.signal) {
     const sg = stock.signal;
@@ -518,27 +521,34 @@ async function openSheet(code) {
       (sg.triggers && sg.triggers.length ? '<div class="muted">触发条件：' + sg.triggers.join(' / ') + '</div>' : '') +
       (sg.risks && sg.risks.length ? '<div class="muted" style="color:var(--red)">风险：' + sg.risks.join(' / ') + '</div>' : '') + '</div>';
   }
-  // 晋级评估八维检查表（交易体系规则引擎）
-  let promoHtml = '';
-  const promo = stock.promo;
-  if (promo && promo.available !== false && Array.isArray(promo.checklist)) {
+  // 晋级八维检查表 → 折叠组内容(verdict 行已上移 10 秒层)
+  let promoFoldInner = '';
+  if (pv && Array.isArray(stock.promo.checklist)) {
     const icons = { pass: '✓', warn: '!', fail: '✕', na: '–' };
-    const vcls = promo.verdict === '可接力' ? 'pass' : promo.verdict === '观望' ? 'warn' : 'fail';
-    promoHtml = '<div class="s-promo"><div class="sp-verdict verdict-' + vcls + '"><b>' + esc(promo.verdict) + '</b><span>评分 ' + promo.score +
-      ' · 周期容错 ' + (promo.faultTolerance != null ? Math.round(promo.faultTolerance * 100) + '%' : '--') +
-      ((promo.hardFails || []).length ? ' · 触发：' + esc(promo.hardFails.join('、')) : '') + '</span></div>' +
-      promo.checklist.map((row) => '<div class="promo-row status-' + row.status + '"><i>' + (icons[row.status] || '·') + '</i><span class="k">' + esc(row.label) + '</span><em>' + esc(row.note) + '</em></div>').join('') +
+    promoFoldInner = '<div class="s-promo">' +
+      stock.promo.checklist.map((row) => '<div class="promo-row status-' + row.status + '"><i>' + (icons[row.status] || '·') + '</i><span class="k">' + esc(row.label) + '</span><em>' + esc(row.note) + '</em></div>').join('') +
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
-  body.innerHTML = head + tierHtml + signalHtml + promoHtml +
-    (state.manualDate ? '' : '<div class="s-auction" id="detailAuction"><div class="s-auc-head">集合竞价 · 09:15-09:25</div><div class="muted">竞价数据加载中…</div></div>') +
-    '<div id="sheetKv">' + kvGrid(stock, d) + '</div>' +
+  // 竞价窗口(9:15-9:26 上海时间):竞价组默认展开——盘中点开连板股看竞价是刚需场景
+  const aucWin = !state.manualDate && (() => { const n = shanghaiNow(); const m = n.getHours() * 60 + n.getMinutes(); return m >= 555 && m <= 566; })();
+  body.innerHTML = head + verdictHtml + signalHtml +
+    '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
-    '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似案例加载中…</div></div>' +
-    '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>'; // 2026-09-10 减法批:复制代码按钮已砍(用户点名没用)
+    (promoFoldInner ? '<details class="fold sheet-fold" id="promoFold"><summary><span class="fold-title">晋级检查表 · 八维</span></summary><div class="body">' + promoFoldInner + '</div></details>' : '') +
+    (state.manualDate ? '' : '<details class="fold sheet-fold" id="aucFold"' + (aucWin ? ' open' : '') + '><summary><span class="fold-title">集合竞价 · 09:15-09:25</span></summary><div class="body"><div id="detailAuction"></div></div></details>') +
+    '<details class="fold sheet-fold" id="simFold"><summary><span class="fold-title">相似案例</span><span class="hint">点开加载</span></summary><div class="body"><div id="detailSimilarCases"></div></div></details>' +
+    '<details class="fold sheet-fold" id="detFold"><summary><span class="fold-title">行情明细</span></summary><div class="body"><div id="sheetKvDet">' + kvDet(stock, d) + '</div></div></details>' +
+    '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
-  loadSimilarCases(code);
-  if (!state.manualDate) loadAuctionDetail(code);
+  // 深挖层惰性加载:相似案例首次展开才拉 60 根日K(旧版每次开抽屉都拉);
+  // 竞价窗口外首次展开才拉;窗口内(默认展开)立即拉
+  const simFold = $('#simFold');
+  if (simFold) simFold.addEventListener('toggle', () => { if (simFold.open && !simFold.dataset.loaded) { simFold.dataset.loaded = '1'; loadSimilarCases(code); } });
+  const aucFold = $('#aucFold');
+  if (aucFold) {
+    if (aucWin) loadAuctionDetail(code);
+    else aucFold.addEventListener('toggle', () => { if (aucFold.open && !aucFold.dataset.loaded) { aucFold.dataset.loaded = '1'; loadAuctionDetail(code); } });
+  }
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
   // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出
@@ -557,18 +567,25 @@ function patchSheetQuote(stock, d) {
   const el = $('#sheetPrice');
   if (el) el.innerHTML = '<b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
     '<small class="' + pctClass(pct) + '">' + pctText(pct) + '</small>';
-  const kv = $('#sheetKv');
-  if (kv) kv.innerHTML = kvGrid(stock, d);
+  // 2026-09-12 折叠版批:报价回填只更新行情明细组(主力/超大单随行);10秒层四格是池字段不随报价变
+  const kv = $('#sheetKvDet');
+  if (kv) kv.innerHTML = kvDet(stock, d);
 }
-function kvGrid(s, d) {
+// 2026-09-12 折叠版批:kv 拆两层——四格决策关键数常驻(10秒层),五格研究明细进折叠组
+function kvEss(s) {
   const rows = [
     ['封单资金', s.seal != null ? fmtMoney(s.seal) : '--'],
-    ['成交额', s.amount != null ? fmtMoney(s.amount) : '--'],
     ['换手率', s.turnover != null ? s.turnover.toFixed(1) + '%' : '--'],
-    ['流通市值', s.circ != null ? fmtMoney(s.circ) : '--'],
     ['首封', fmtTime(s.firstSeal)],
-    ['末封', fmtTime(s.lastSeal)],
     ['炸板次数', s.breaks != null ? s.breaks : '--'],
+  ];
+  return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
+}
+function kvDet(s, d) {
+  const rows = [
+    ['成交额', s.amount != null ? fmtMoney(s.amount) : '--'],
+    ['流通市值', s.circ != null ? fmtMoney(s.circ) : '--'],
+    ['末封', fmtTime(s.lastSeal)],
     ['主力净流入', d.main != null ? fmtMoney(d.main) : '--'],
     ['超大单净流入', d.super != null ? fmtMoney(d.super) : '--'],
   ];
@@ -677,20 +694,20 @@ function auctionDetailHtml(code) {
   const matched = item && item.matched ? { price: item.matchPrice, amount: item.auctionAmount, volumeHands: item.volumeHands, sealedBuyShares: item.sealedBuyShares } : null;
   return renderAuctionBody([], matched, item);
 }
-const AUC_HEAD = '<div class="s-auc-head">集合竞价 · 09:15-09:25</div>';
+// 2026-09-12 折叠版批:AUC_HEAD 删(折叠组标题已含「集合竞价 · 09:15-09:25」)
 async function loadAuctionDetail(code) {
   const el = $('#detailAuction');
   if (!el || state.sheetCode !== code) return;
   const local = auctionDetailHtml(code);
-  if (local) { el.innerHTML = AUC_HEAD + local; return; }
+  if (local) { el.innerHTML = local; return; }
   // 非核心/池外股：adhoc 单票拉取（trends/get 全天含竞价段，任意时点可取当日竞价）
   try {
     const trend = await fetchAuctionTrend(code, { tries: 2, timeoutMs: 6000 });
     if (state.sheetCode !== code || !$('#detailAuction')) return;
-    if (!trend.minutes.length && !trend.matched) { el.innerHTML = AUC_HEAD + '<div class="muted">今日无竞价数据（非交易日或未开始）</div>'; return; }
-    el.innerHTML = AUC_HEAD + renderAuctionBody(trend.minutes, trend.matched, null);
+    if (!trend.minutes.length && !trend.matched) { el.innerHTML = '<div class="muted">今日无竞价数据（非交易日或未开始）</div>'; return; }
+    el.innerHTML = renderAuctionBody(trend.minutes, trend.matched, null);
   } catch (e) {
-    if (state.sheetCode === code) el.innerHTML = AUC_HEAD + '<div class="muted">竞价数据获取失败</div>';
+    if (state.sheetCode === code) el.innerHTML = '<div class="muted">竞价数据获取失败</div>';
   }
 }
 // 竞价采集落位后：若抽屉正开着该股且有本地数据，原地刷新竞价区（不覆盖 adhoc 进行中的加载态）
@@ -699,7 +716,7 @@ function refreshAuctionDetail() {
   const el = $('#detailAuction');
   if (!el) return;
   const local = auctionDetailHtml(state.sheetCode);
-  if (local) el.innerHTML = AUC_HEAD + local;
+  if (local) el.innerHTML = local;
 }
 
 /* ---------------- 导航(2026-09-11 一屏到底批:复盘/设置已删,单视图无需切换) ----------------

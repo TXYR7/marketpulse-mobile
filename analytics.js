@@ -894,7 +894,12 @@ function stockSimilarCases(bars = [], { window = 20, horizon = 5, limit = 3 } = 
   const curVec = stockShapeVector(rows.slice(-window));
   if (!curVec) return { available: false, similar: [], outcome: { up: null, flat: null, down: null }, samples: 0, vectorNote: STOCK_SIMILAR_NOTE };
   const candidates = [];
-  for (let i = 2 * window; i <= rows.length - horizon - 1; i += 1) {
+  // 2026-09-13 检查批修:候选窗口必须与当前段(末 window 根)零重叠——原 i 上限
+  // length-horizon-1 在 60 根池下全部候选重叠当前段(最狠 15/20 根),top-3 实为
+  // 「自己匹配自己」的近期段。收紧为 i <= length-window-horizon:候选段 [i-window+1,i]
+  // 整体在当前段之前,outcome bar i+horizon 也不越过当前段起点,无未来函数。
+  // 代价:需 length >= 3*window + horizon + 1(=86 根)才有候选——调用方须拉 ≥120 根。
+  for (let i = 2 * window; i <= rows.length - window - horizon; i += 1) {
     const vec = stockShapeVector(rows.slice(i - window + 1, i + 1));
     if (!vec) continue;
     candidates.push({ end: i, date: rows[i].date, score: shapeScore(curVec, vec), features: describeShapeFeatures(curVec, vec) });

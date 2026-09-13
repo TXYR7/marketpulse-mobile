@@ -607,9 +607,13 @@ function buildPlanHtml(stock) {
   const boards = Math.max(1, Number(stock.boards) || 1);
   const [lo, hi] = boards >= 3 ? assessmentRules.openBandBoard3Plus : assessmentRules.openBandBoard2;
   const rows = [];
-  // 买点:竞价合格区间 + 信号触发条件(引擎原话)
-  const triggers = (stock.signal?.triggers || []).slice(0, 2).join(' · ');
-  rows.push(['buy', '买点', `竞价高开 ${lo}~${hi}%(${boards}板合格区间)` + (triggers ? ' · ' + esc(triggers) : '')]);
+  // 买点:竞价合格区间 + 信号触发条件(引擎原话)——跌停池股票不显示(引擎从未给跌停股
+  // 买点,无差别套模板是误导;炸板股保留,弱转强次日模式成立)
+  const inDownPool = (state.pools?.down || []).some((x) => x.code === stock.code);
+  if (!inDownPool) {
+    const triggers = (stock.signal?.triggers || []).slice(0, 2).join(' · ');
+    rows.push(['buy', '买点', `竞价高开 ${lo}~${hi}%(${boards}板合格区间)` + (triggers ? ' · ' + esc(triggers) : '')]);
+  }
   // 回避:硬否决清单(引擎原话,不新编)
   const avoids = (stock.promo?.hardFails || []).slice(0, 2);
   if (avoids.length) rows.push(['avoid', '回避', esc(avoids.join(' / '))]);
@@ -649,12 +653,18 @@ async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');
   if (!el) return;
   let bars = simBarsCache.get(code) || null;
-  if (bars && bars.length < 26) bars = null;
+  if (bars && bars.length < 86) bars = null; // 2026-09-13 检查批修:零重叠候选环需 >=86 根
   if (!bars) {
-    try { bars = await fetchKlineTencent(code, 60); } catch (e) { bars = null; }
+    try { bars = await fetchKlineTencent(code, 120); } catch (e) { bars = null; }
+    // 2026-09-13 检查批修:盘中未收盘的当日半根 bar 丢弃(形态未定型,拿盘中价当收盘
+    // 会让相似日数字盘中漂移);收盘定型(沪时 >=15:05)后保留。出场引擎红档口径相反
+    // (判「正在爆量大阴」必须吃当日 bar),两者分开是对的
+    const n = shanghaiNow();
+    const mins = n.getHours() * 60 + n.getMinutes();
+    if (bars && bars.length && bars[bars.length - 1].date === todayStr() && mins >= 9 * 60 && mins < 15 * 60 + 5) bars = bars.slice(0, -1);
     if (bars && bars.length) simBarsCache.set(code, bars);
   }
-  if (!bars || bars.length < 26) { el.innerHTML = '<div class="muted">相似日表现：暂无足够历史日K</div>'; return; }
+  if (!bars || bars.length < 86) { el.innerHTML = '<div class="muted">相似日表现：暂无足够历史日K</div>'; return; }
   const r = stockSimilarCases(bars, { window: 20, horizon: 5, limit: 3 });
   if (!r.available || !r.similar.length || !r.outcome || (r.outcome.up == null && r.outcome.flat == null && r.outcome.down == null)) { el.innerHTML = '<div class="muted">相似日表现：暂未匹配到可比形态</div>'; return; }
   // 2026-09-13 精简批(用户拍板):只留后续表现一行——三张形态卡+方法论长文砍,

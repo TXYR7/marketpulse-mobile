@@ -44,8 +44,12 @@ function makeBars(n) {
 
 console.log('[A1] stockSimilarCases 形状');
 {
-  const r = stockSimilarCases(makeBars(60), { window: 20, horizon: 5, limit: 3 });
-  ok('available 为真', r.available === true);
+  // 2026-09-13 检查批修:候选环收紧为与当前段零重叠(需 >=86 根)——60 根旧池现在
+  // available=false 是正确行为(修前 60 根候选全重叠当前段=自己匹配自己)
+  const r = stockSimilarCases(makeBars(120), { window: 20, horizon: 5, limit: 3 });
+  ok('available 为真(120 根零重叠池)', r.available === true);
+  const r60 = stockSimilarCases(makeBars(60), { window: 20, horizon: 5, limit: 3 });
+  ok('60 根旧池无零重叠候选 → available=false 诚实不硬算', r60.available === false && r60.similar.length === 0);
   ok('similar 非空', Array.isArray(r.similar) && r.similar.length > 0);
   ok('score 降序整数 [0,100]', r.similar.every((c, i, a) => Number.isInteger(c.score) && c.score >= 0 && c.score <= 100 && (i === 0 || a[i - 1].score >= c.score)));
   ok('每条含 date+score+features', r.similar.every((c) => c.date && Number.isFinite(c.score) && Array.isArray(c.features)));

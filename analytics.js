@@ -827,6 +827,65 @@ function describeShapeFeatures(cur, hist) {
   return map.map(([label, c, h]) => ({ label, cur: round3(c), hist: round3(h) }));
 }
 
+const EXIT_RULES = {
+  highBoardMin: 5,          // ① 游资票墓碑线/爆量大阴规则要求 ≥5 板
+  graveShadowBodyRatio: 2,  // ① 墓碑线：上影 ≥ 实体 ×2 且下影 ≤ 实体
+  graveBodyPctMax: 3,       // ① 墓碑线实体 |涨跌| ≤3%（小实体/十字星）
+  burstVolRatio: 2,         // ① 爆量大阴：量 ≥ 5 日均量 ×2
+  bigRedPctMin: 3,          // ① 爆量大阴阴线跌幅 ≥3%
+  quietDays: 3,             // ② 小龙头：连续 ≥3 日小阴小阳
+  quietPctMax: 3,           // ② 小阴小阳 |涨跌| ≤3%
+  limitUpPct: 9.5           // ② 突然涨停判定 ≥9.5%（含 20cm 板的近似下限）
+};
+
+function exitSignalsOf(bars = [], ctx = {}) {
+  const rows = (bars || []).filter((b) => b && Number.isFinite(Number(b.close)) && Number(b.close) > 0);
+  if (rows.length < 6) return []; // 需要 ≥6 根：5 日均量 + 形态窗口
+  const last = rows[rows.length - 1];
+  const pctOf = (b) => Number(b.preClose) > 0 ? (Number(b.close) - Number(b.preClose)) / Number(b.preClose) * 100 : null;
+  const bodyPct = pctOf(last);
+  if (bodyPct === null) return [];
+  const O = Number(last.open), C = Number(last.close), H = Number(last.high), L = Number(last.low);
+  const body = Math.abs(C - O);
+  const upperShadow = H - Math.max(O, C);
+  const lowerShadow = Math.min(O, C) - L;
+  const vol = Number(last.volume) || 0;
+  const avgVol5 = rows.slice(-6, -1).reduce((s, b) => s + (Number(b.volume) || 0), 0) / 5;
+  // 板数：ctx 优先（今日池），缺则按 K 线连续涨停级大阳估算（诚实标注"约"）
+  let boards = ctx.boards != null ? Number(ctx.boards) : null;
+  let boardsEstimated = false;
+  if (boards === null) {
+    // 从最后一根往回数连续涨停级大阳；形态日（墓碑线/大阴）本身不是涨停，从其前一根数起
+    let start = rows.length - 1;
+    const lastPct = pctOf(rows[start]);
+    if (lastPct === null || lastPct < EXIT_RULES.limitUpPct) start -= 1;
+    let n = 0;
+    for (let i = start; i >= 0; i -= 1) { const p = pctOf(rows[i]); if (p !== null && p >= EXIT_RULES.limitUpPct) n += 1; else break; }
+    boards = n > 0 ? n : null;
+    boardsEstimated = boards !== null;
+  }
+  const out = [];
+  // ① 游资票 ≥5 板 + 顶部墓碑线 / 爆量大阴（心法：五个板之后出现墓碑线或带爆量的大阴线就是离场的时候）
+  if (boards !== null && boards >= EXIT_RULES.highBoardMin) {
+    const grave = body > 0 && upperShadow >= body * EXIT_RULES.graveShadowBodyRatio && lowerShadow <= body && Math.abs(bodyPct) <= EXIT_RULES.graveBodyPctMax;
+    const burstRed = C < O && bodyPct <= -EXIT_RULES.bigRedPctMin && avgVol5 > 0 && vol >= avgVol5 * EXIT_RULES.burstVolRatio;
+    const boardLabel = boardsEstimated ? `约 ${boards} 板` : `${boards} 板`;
+    if (grave) out.push({ rule: 'grave-stone', action: '建议离场', severity: 'high', note: `${boardLabel}顶部墓碑线（上影 ${Number((upperShadow / C * 100).toFixed(1))}%、实体 ${Number((body / C * 100).toFixed(1))}%）——心法：游资票五个板后墓碑线即离场` });
+    if (burstRed) out.push({ rule: 'burst-big-red', action: '建议离场', severity: 'high', note: `${boardLabel}爆量大阴（量 ${Number((vol / avgVol5).toFixed(1))}× 均量、跌 ${Math.abs(bodyPct).toFixed(1)}%）——心法：五个板后带爆量的大阴线即离场` });
+  }
+  // ② 小龙头连续小阴小阳后突然涨停（心法：小龙头以小阴小阳上涨，突然有一天涨停板就是离场的时候）
+  const prior = rows.slice(-EXIT_RULES.quietDays - 1, -1);
+  const quietRun = prior.length === EXIT_RULES.quietDays && prior.every((b) => { const p = pctOf(b); return p !== null && Math.abs(p) <= EXIT_RULES.quietPctMax; });
+  if (quietRun && bodyPct >= EXIT_RULES.limitUpPct) {
+    out.push({ rule: 'sudden-limit-after-quiet', action: '建议离场', severity: 'high', note: `连续 ${EXIT_RULES.quietDays} 日小阴小阳后突然涨停 ${bodyPct.toFixed(1)}%——心法：小龙头突然涨停即离场` });
+  }
+  // ③ 弱转强套利不高开/平开就走（心法：目的就是套利，不高开或平开都要走）；openPct=当日开盘溢价，由调用方供
+  if (ctx.mode === '弱转强' && ctx.openPct != null && Number(ctx.openPct) <= 0) {
+    out.push({ rule: 'weak-strong-no-gap', action: '建议离场', severity: 'high', note: `弱转强套利开盘 ${Number(ctx.openPct)}%（未高开）——心法：不高开或平开都要走` });
+  }
+  return out;
+}
+
 function stockSimilarCases(bars = [], { window = 20, horizon = 5, limit = 3 } = {}) {
   const rows = (Array.isArray(bars) ? bars : []).filter((b) => b && Number.isFinite(Number(b.close)) && Number(b.close) > 0);
   if (rows.length < window + horizon + 1) {
@@ -1467,5 +1526,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, assessPromotion, auctionVerdict, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot
+  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot
 };

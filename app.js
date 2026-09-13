@@ -3,8 +3,8 @@ import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBar
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
-  buildExpectationGap, buildSignal, applyGate,
-  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases
+  buildExpectationGap, buildSignal, applyGate, assessmentRules,
+  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
@@ -534,10 +534,14 @@ async function openSheet(code) {
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     promoHtml +
+    '<div id="sheetPlan"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似日表现计算中…</div></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
+  // 2026-09-13 操作参考卡:先渲染(红档缺席),出场形态后台算完原地补——抽屉零等待弹出
+  $('#sheetPlan').innerHTML = buildPlanHtml(stock);
+  loadExitSignals(code, stock).then(() => { if (state.sheetCode === code) { const el = $('#sheetPlan'); if (el) el.innerHTML = buildPlanHtml(stock); } });
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
   // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出
@@ -594,6 +598,53 @@ function openEmoSheet() {
 // 会让相似日数字漂移;统一腾讯源后两端逐位一致。独立会话级缓存,不混入
 // enrichPromo 的东财源 klineCacheByDate(避免同功能跨源数据混杂)。
 const simBarsCache = new Map();
+
+// 2026-09-13 操作参考卡(用户拍板):买点/回避/失效/仓位——纯拼装既有输出,零新阈值,判决冻结兼容。
+// 卖出侧无持仓语义:「失效条件」两档——红档=出场引擎在真实K线上判出的当下已触发形态,
+// 灰档=站岗条件(发生了就走)。卖出理由=买入逻辑失效(断板=晋级失效/爆量大阴=高位分歧/竞价不及预期=承接证伪)。
+const planBarsCache = new Map();
+function buildPlanHtml(stock) {
+  const boards = Math.max(1, Number(stock.boards) || 1);
+  const [lo, hi] = boards >= 3 ? assessmentRules.openBandBoard3Plus : assessmentRules.openBandBoard2;
+  const rows = [];
+  // 买点:竞价合格区间 + 信号触发条件(引擎原话)
+  const triggers = (stock.signal?.triggers || []).slice(0, 2).join(' · ');
+  rows.push(['buy', '买点', `竞价高开 ${lo}~${hi}%(${boards}板合格区间)` + (triggers ? ' · ' + esc(triggers) : '')]);
+  // 回避:硬否决清单(引擎原话,不新编)
+  const avoids = (stock.promo?.hardFails || []).slice(0, 2);
+  if (avoids.length) rows.push(['avoid', '回避', esc(avoids.join(' / '))]);
+  // 失效-红档:出场形态引擎(Tencent 真实K线;exitSignalsOf 同步哨兵锁两端一致)
+  const exits = stock.__exits || [];
+  for (const x of exits) rows.push(['hit', '失效 ▲', esc(x.note)]);
+  // 失效-灰档:站岗条件(按板位/模式给适用条款)
+  const watch = [];
+  if (boards >= 2) watch.push('断板当日走 · 盘中炸板不回封当日走');
+  else watch.push('盘中炸板不回封当日走');
+  const gapRow = (state.gap?.candidates || []).find((c) => c.code === stock.code);
+  if (gapRow && gapRow.expectedMid != null) watch.push(`次日开盘不及 +${gapRow.expectedMid}%(预期中值)`);
+  if (stock.buyType === '弱转强') watch.push('次日开盘 ≤0%(套利不成即走)');
+  rows.push(['watch', '失效', esc(watch.join(' · '))]);
+  // 仓位:市场级赢面档(养家表)
+  const pa = state.positionAdvice;
+  if (pa && pa.label && pa.label !== '--') rows.push(['pos', '仓位', esc(pa.label) + '(' + (pa.winrateSource === 'measured' ? '实测校准' : '情绪代理') + ')']);
+  return '<div class="s-plan">' + rows.map(([cls, k, v]) =>
+    '<div class="plan-row ' + cls + '"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>').join('') +
+    '<div class="muted" style="margin-top:6px">体系规则拼装,非投资建议 · 判决前阈值冻结</div></div>';
+}
+async function loadExitSignals(code, stock) {
+  // 出场形态判定:腾讯 60 根(复用相似案例通道),补 preClose 后喂 exitSignalsOf
+  let bars = planBarsCache.get(code) || null;
+  if (!bars || bars.length < 8) {
+    try { bars = await fetchKlineTencent(code, 60); } catch (e) { bars = null; }
+    if (bars && bars.length) {
+      bars = bars.map((b, i) => ({ ...b, preClose: i > 0 ? bars[i - 1].close : null }));
+      planBarsCache.set(code, bars);
+    }
+  }
+  if (!bars || bars.length < 6) { stock.__exits = []; return; }
+  stock.__exits = exitSignalsOf(bars, { boards: stock.boards != null ? Number(stock.boards) : undefined, mode: stock.buyType, openPct: state.auctionPctByCode[code] ?? null });
+}
+
 async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');
   if (!el) return;

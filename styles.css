@@ -660,6 +660,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 
 /* 详情抽屉：个股相似案例（对齐桌面 G24） */
 .s-similar { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.s-similar + .s-similar { margin-top: 8px; border-top: 0; padding-top: 0; } /* 2026-09-15 明日参考批:相邻两段共用一条分隔线,不双线 */
 /* 2026-09-13 精简批:相似案例只留「后续表现」一行;sim-card/sf-* 等研究卡样式已随砍 */
 .sim-outcome { display: flex; align-items: baseline; gap: 8px; font-size: 13px; flex-wrap: wrap; }
 .sim-outcome span { color: var(--muted); font-size: 12px; }

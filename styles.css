@@ -6,6 +6,8 @@
   --surface: #18181b;
   --surface-2: #212126;
   --surface-raised: #212126;
+  --surface-glass: rgba(24, 24, 27, 0.82); /* 玻璃黑卡:半透明压星空底(桌面 f9662e1 同批) */
+  --surface-raise: rgba(33, 33, 38, 0.45); /* 卡内抬升小件(指标格/kv/条带) */
   --line: #353539;
   --line-soft: #26262b;
   --ink: #fafafa;
@@ -46,6 +48,8 @@ html[data-theme="light"] {
   --surface: #ffffff;
   --surface-2: #f4f4f5;
   --surface-raised: #f7f9fd;
+  --surface-glass: rgba(255, 255, 255, 0.85);
+  --surface-raise: rgba(255, 255, 255, 0.6);
   --line: #e4e4e7;
   --line-soft: #ededf0;
   --ink: #18181b;
@@ -202,7 +206,7 @@ button { font-family: inherit; cursor: pointer; }
 /* 2026-09-12 打磨:4 chip 平分整行(原 9 chip 滚动布局退役)——overflow-x/滚动条隐藏规则删,chip 改弹性撑满+内容居中 */
 .status-strip {
   display: flex; gap: 6px; margin: 8px -12px 0; padding: 0 12px 8px;
-  background: var(--surface);
+  background: var(--surface-glass);
 }
 .chip {
   flex: 1 1 auto; background: var(--surface-2); border: 0;
@@ -256,7 +260,7 @@ main {
    卡片级才让视口外的单卡跳过渲染(300+ 卡长列表滚动帧率) */
 .list { display: flex; flex-direction: column; gap: 8px; }
 .card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
+  background: var(--surface-glass); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 10px 12px; display: flex; align-items: center; gap: 10px;
   box-shadow: var(--shadow-1);
   transition: transform 0.08s var(--ease-out);
@@ -285,7 +289,7 @@ main {
 .star { color: var(--amber); }
 
 /* 折叠区 */
-.fold { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
+.fold { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--surface-glass); backdrop-filter: blur(6px); box-shadow: var(--shadow-1); }
 .fold > summary {
   list-style: none; padding: 11px 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
 }
@@ -312,7 +316,7 @@ main {
 .card.flash { animation: ladFlash 1.2s ease-out; }
 @keyframes ladFlash { 0%, 40% { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); } 100% { box-shadow: none; } }
 /* 雷达顶操作风格行(驾驶舱 advice 落位) */
-.radar-style { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r-s); }
+.radar-style { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; padding: 8px 10px; background: var(--surface-raise); border-radius: var(--r-s); }
 .radar-style span { color: var(--muted); font-size: 11px; }
 .radar-style b { font-size: 13px; color: var(--teal); }
 /* 横幅涨/跌/炸三合一 chip */
@@ -354,7 +358,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 
 /* 骨架屏（首屏加载占位） */
 .sk-card {
-  background: var(--surface); border: 0; border-radius: var(--r-m);
+  background: var(--surface-glass); border: 0; border-radius: var(--r-m);
   padding: 12px; display: flex; gap: 10px; align-items: center;
 }
 .sk { display: block; height: 12px; border-radius: 6px; background: var(--surface-2); position: relative; overflow: hidden; }
@@ -385,7 +389,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 .scrim.show { opacity: 1; pointer-events: auto; }
 .sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
-  background: var(--surface); border-top-left-radius: var(--r-l); border-top-right-radius: var(--r-l);
+  background: var(--surface-glass); backdrop-filter: blur(6px); border-top-left-radius: var(--r-l); border-top-right-radius: var(--r-l);
   box-shadow: var(--shadow-2);
   padding: 8px 16px calc(20px + var(--safe-b)); transform: translateY(100%);
   transition: transform 0.28s var(--ease-out); max-height: 82vh; overflow-y: auto; overscroll-behavior: contain;
@@ -401,7 +405,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 .sheet .s-price b { font-size: 21px; font-variant-numeric: tabular-nums; }
 .sheet .s-price small { display: block; color: var(--muted); font-size: 11px; }
 .kv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
-.kv { background: var(--surface-2); border-radius: 10px; padding: 8px 10px; }
+.kv { background: var(--surface-raise); border-radius: 10px; padding: 8px 10px; }
 .kv span { color: var(--muted); font-size: 11px; display: block; }
 .kv strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 .s-actions { display: flex; gap: 10px; margin-top: 16px; }
@@ -425,7 +429,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
    z-index:6 的隐藏态盖住状态条并拦截点击——移入 main 后此几何不可能再发生) */
 .ptr {
   position: absolute; top: 0; left: 0; right: 0; height: 40px; z-index: 6;
-  background: var(--surface-2);
+  background: var(--surface-glass); backdrop-filter: blur(4px);
   border-radius: 0 0 var(--r-m) var(--r-m); box-shadow: var(--shadow-1);
   text-align: center; color: var(--teal); font-size: 12px;
   display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -452,7 +456,7 @@ html[data-theme="light"] .btag-bj { color: #7c3aed; background: rgba(124, 58, 23
 /* ===== 情绪指标明细(2026-09-11 拆解融合批:驾驶舱 hero 已删,本组样式由情绪 chip 点开的 sheet 续用) ===== */
 .emo-indicators { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 12px; }
 .ind {
-  background: var(--surface); border: 1px solid var(--line-soft); border-radius: 9px; padding: 7px 9px;
+  background: var(--surface-raise); border: 1px solid var(--line-soft); border-radius: 9px; padding: 7px 9px;
   display: flex; align-items: center; gap: 8px;
 }
 .ind .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
@@ -494,7 +498,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .tier-head .t { font-size: 15px; font-weight: 800; }
 .tier-head .c { color: var(--muted); font-size: 12px; }
 .opp-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
+  background: var(--surface-glass); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow-1); transition: transform 0.08s var(--ease-out);
   content-visibility: auto; contain-intrinsic-size: auto 74px; /* 2026-09-11 修下拉卡顿:与 .card 同款,屏外卡免布局 */
 }
@@ -511,7 +515,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 
 /* 预案 / 风险雷达 / 报告类卡片 */
 .risk-card, .report-card, .review-card, .leader-card, .market-row, .tree-branch {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m);
+  background: var(--surface-glass); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: var(--r-m);
   padding: 12px; margin: 8px 0; box-shadow: var(--shadow-1);
 }
 .leader-card, .market-row, .review-card { transition: transform 0.08s var(--ease-out); }
@@ -628,7 +632,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .promo-badge.fail { background: var(--danger-tint); color: var(--red); }
 /* 2026-09-12 折叠版批:抽屉两层——结论行(10秒层) + 检查表/竞价/相似/明细折叠组;
    评分构成条 CSS 已随砍(bd-*) */
-.s-verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r-m); }
+.s-verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 8px 10px; background: var(--surface-raise); border-radius: var(--r-m); }
 .s-verdict .sv-line b { font-size: 14px; }
 .s-verdict .sv-fail { flex-basis: 100%; color: var(--red); font-size: 12px; font-weight: 700; }
 .s-verdict .sp-verdict { margin-bottom: 0; }
@@ -693,7 +697,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .edge-jump { position: fixed; right: 12px; bottom: calc(var(--safe-b) + 16px); z-index: 29; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .edge-btn {
   width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
-  background: var(--surface-raised); color: var(--muted);
+  background: var(--surface-glass); backdrop-filter: blur(4px); color: var(--muted);
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-1);
   opacity: 0; visibility: hidden; transform: translateY(6px); pointer-events: none;

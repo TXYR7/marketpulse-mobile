@@ -444,6 +444,32 @@ function renderRadar() {
     (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''))) el.__radarSig = sig;
 }
 
+
+// 2026-09-15 明日参考批(用户拍板,桌面做涨跌率/手机做算得了的晋级率):同板位历史晋级率——
+// 跨全历史所有相邻交易日累计(非只昨日),n=分母只数;三纪律同桌面:样本量必显示/Wilson 下界/「参考」措辞
+function boardPromoRef(hist, today) {
+  const buckets = {};
+  for (let i = 1; i < hist.length; i += 1) {
+    const r = calculatePromotionStats(hist[i - 1].stocks, hist[i].stocks);
+    if (!r.available) continue;
+    for (const g of r.byBoard) {
+      const key = g.board >= 4 ? '4+' : String(g.board);
+      if (!buckets[key]) buckets[key] = { n: 0, up: 0 };
+      buckets[key].n += g.denominator;
+      buckets[key].up += g.promoted;
+    }
+  }
+  return buckets;
+}
+function wilsonLower(up, n) {
+  if (!n) return null;
+  const z = 1.96, p = up / n;
+  const denom = 1 + z * z / n;
+  const center = p + z * z / (2 * n);
+  const margin = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n));
+  return Number((Math.max(0, (center - margin) / denom) * 100).toFixed(1));
+}
+
 function renderIntraday() {
   // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
   const ctx = { state, toast, actions: { loadHistory } };
@@ -536,9 +562,29 @@ async function openSheet(code) {
     promoHtml +
     '<div id="sheetPlan"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似日表现计算中…</div></div>' +
+    '<div class="s-similar" id="boardPromoRef"></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
+  // 2026-09-15 明日参考:同板位历史晋级率(本地可算,纯展示)——同步渲染无网络
+  {
+    const el2 = $('#boardPromoRef');
+    const h = state.history || [];
+    const ref = h.length >= 2 ? boardPromoRef(h, state.pools?.date) : {};
+    const b = Math.max(1, Number(stock.boards) || 1);
+    const cell = ref[b >= 4 ? '4+' : String(b)] || null;
+    if (el2) {
+      if (cell && cell.n >= 20) {
+        const w = wilsonLower(cell.up, cell.n);
+        el2.innerHTML = '<div class="sim-outcome"><span>明日参考 · 同板位晋级</span><b class="up-c">晋 ' + w + '%<small>(下界)</small></b><b>n=' + cell.n + '</b></div>';
+        el2.title = '历史全部 ' + cell.n + ' 只 ' + (b >= 4 ? '4板及以上' : b + '板') + '的次日晋级率(Wilson 95% 下界) · 参考,非预测';
+      } else if (cell) {
+        el2.innerHTML = '<div class="muted">明日参考:样本积累中(n=' + cell.n + ',达 20 后显示)</div>';
+      } else {
+        el2.innerHTML = '<div class="muted">明日参考:需历史数据积累</div>';
+      }
+    }
+  }
   // 2026-09-13 操作参考卡:先渲染(红档缺席),出场形态后台算完原地补——抽屉零等待弹出
   $('#sheetPlan').innerHTML = buildPlanHtml(stock);
   loadExitSignals(code, stock).then(() => { if (state.sheetCode === code) { const el = $('#sheetPlan'); if (el) el.innerHTML = buildPlanHtml(stock); } });

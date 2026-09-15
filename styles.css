@@ -717,3 +717,10 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .plan-row.avoid .v, .plan-row.hit .v { color: var(--red); font-weight: 700; }
 .plan-row.hit .k { color: var(--red); }
 .plan-row.pos .v { color: var(--data-ink); font-weight: 700; }
+
+/* 2026-09-15 情报批同步:监控标记/详情警示/概念命中 */
+.mon-flag { display: inline-flex; align-items: center; height: 13px; padding: 0 3px; margin-left: 3px; border-radius: 3px; font-style: normal; font-size: 9px; font-weight: 700; line-height: 1; vertical-align: 1px; color: var(--amber, #f79009); background: rgba(247, 144, 9, .12); border: 1px solid rgba(247, 144, 9, .3); }
+.s-risk { margin: 6px 0 2px; padding: 6px 10px; border-left: 3px solid var(--amber, #f79009); background: rgba(247, 144, 9, .08); color: var(--amber, #ffb224); font-size: 12px; border-radius: 4px; }
+.s-concepts { margin-top: 8px; }
+.con-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.con-tag { padding: 2px 8px; border-radius: 4px; background: var(--teal-soft, rgba(59, 130, 246, .08)); color: var(--teal-strong, #60a5fa); font-size: 11px; }

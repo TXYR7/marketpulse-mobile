@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent } from './data.js'; // 2026-09-12 相似案例源统一批:+腾讯K线
+import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -263,6 +263,26 @@ function aucInfoOf(code) {
   const pct = it.matched ? it.matchPct : (it.livePct ?? null);
   return pct == null ? null : { pct, matched: !!it.matched };
 }
+let monitorPoolAt = 0;
+async function refreshMonitorPool() { // 2026-09-15 避雷批:监控池 30 分钟节流(静态名单,低频)
+  if (Date.now() - monitorPoolAt < 30 * 60 * 1000) return;
+  monitorPoolAt = Date.now();
+  try {
+    state.monitorPool = await fetchMonitorPool();
+    document.querySelectorAll('.card[data-code]').forEach((card) => {
+      const nameEl = card.querySelector('.name');
+      if (!nameEl || nameEl.querySelector('.mon-flag')) return;
+      const mon = (state.monitorPool || []).find((m) => m.code === card.dataset.code);
+      if (mon) nameEl.insertAdjacentHTML('beforeend', '<i class="mon-flag" title="重点监控至' + esc(mon.end) + '">监</i>');
+    });
+  } catch { /* 静默:无标记即无警示,下轮池刷新重试 */ }
+}
+
+function monFlag(code) { // 2026-09-15 避雷批:重点监控池标记(交易所风险警示,卡片名旁琥珀「监」)
+  const mon = (state.monitorPool || []).find((m) => m.code === code);
+  return mon ? '<i class="mon-flag" title="重点监控至' + esc(mon.end) + '">监</i>' : '';
+}
+
 function ztCard(x) {
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   const pv = x.promo && x.promo.available !== false ? x.promo : null;
@@ -271,7 +291,7 @@ function ztCard(x) {
   const auc = aucInfoOf(x.code);
   return '<div class="card" data-code="' + x.code + '" data-boards="' + (x.boards || 1) + '">' + // data-boards 供板位条点格定位(2026-09-11 拆解融合批)
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
-    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + '</div>' +
+    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + monFlag(x.code) + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
     (auc ? '<div class="auc">竞价 <b class="' + pctClass(auc.pct) + '">' + pctText(auc.pct) + '</b><em>' + (auc.matched ? '撮合' : '虚拟') + '</em></div>' : '') + '</div>' +
     '<div class="right">' +
@@ -556,7 +576,10 @@ async function openSheet(code) {
       stock.promo.checklist.map((row) => '<div class="promo-row status-' + row.status + '"><i>' + (icons[row.status] || '·') + '</i><span class="k">' + esc(row.label) + '</span><em>' + esc(row.note) + '</em></div>').join('') +
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
+  const mon = (state.monitorPool || []).find((m) => m.code === code);
   body.innerHTML = head + verdictHtml + signalHtml +
+    (mon ? '<div class="s-risk">⚠ 交易所重点监控中 · 至' + esc(mon.end) + '</div>' : '') +
+    '<div class="s-concepts" id="sheetConcepts" hidden><span class="muted">概念命中 · 当下在炒</span><div class="con-tags" id="sheetConceptTags"></div></div>' +
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     promoHtml +
@@ -566,6 +589,12 @@ async function openSheet(code) {
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
+  fetchHotConcepts(code).then((list) => { // 2026-09-15 概念命中(东财 CORS 开,失败静默)
+    const box = $('#sheetConcepts');
+    if (!box) return;
+    box.hidden = !list.length;
+    if (list.length) $('#sheetConceptTags').innerHTML = list.slice(0, 8).map((c) => '<span class="con-tag">' + esc(c.concept) + '</span>').join('');
+  }).catch(() => {});
   // 2026-09-15 明日参考:同板位历史晋级率(本地可算,纯展示)——同步渲染无网络
   {
     const el2 = $('#boardPromoRef');
@@ -781,6 +810,7 @@ async function refresh(force = false) {
     persistLastGood(pools); // 先落原始池（未挂派生字段，体积小），失败静默
     computeDerived(pools);
     state.pools = pools;
+    if (!state.monitorPool) refreshMonitorPool(); // 2026-09-15 避雷批:首次池成功后拉一次(30 分钟 TTL 内不重拉;失败静默)
     renderStatus();
     renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓

@@ -516,3 +516,26 @@ export async function collectAuctionSnapshot(mode = 'final', stocks = [], coreCo
   }
   return { date: String(todayCompact), mode, count: items.length, failed, truncated: mode === 'final' && stocks.length > AUCTION_SNAPSHOT_MAX, items, core };
 }
+
+// ===== 2026-09-15 情报批同步(源=a-stock-data SKILL.md;CORS 实测:监控池/概念命中/昨日涨停全开,同花顺/异动不通故不同步) =====
+export async function fetchMonitorPool() { // 东财重点监控池(交易所风险警示+生效窗,静态 JSON 零鉴权)
+  const r = await fetch('https://mobappconfig.securities.eastmoney.com/emcfg/stock_monitor.json', { headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error('stock_monitor ' + r.status);
+  const rows = await r.json();
+  const today = todayStr().replace(/-/g, '');
+  return (Array.isArray(rows) ? rows : [])
+    .filter((x) => String(x.VALIDATESTARTDATE || '').replace(/-/g, '') <= today && today <= String(x.VALIDATEENDDATE || '').replace(/-/g, ''))
+    .map((x) => ({ code: String(x.STKCODE || ''), name: String(x.STKNAME || ''), end: String(x.VALIDATEENDDATE || '') }));
+}
+
+export async function fetchHotConcepts(code) { // 东财个股概念命中(当下被市场归到哪些概念在炒,POST+CORS 开)
+  const prefix = /^(6|9)/.test(code) ? 'SH' : /^[48]/.test(code) ? 'BJ' : 'SZ';
+  const r = await fetch('https://emappdata.eastmoney.com/stockrank/getHotStockRankList', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ appId: 'appId01', globalId: '786e4c21-70dc-435a-93bb-38', srcSecurityCode: prefix + code })
+  });
+  if (!r.ok) throw new Error('hotConcepts ' + r.status);
+  const data = (await r.json()).data || [];
+  return data.map((x) => ({ concept: x.conceptName, hit: x.hitCount })).slice(0, 10);
+}

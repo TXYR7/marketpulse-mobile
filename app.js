@@ -220,7 +220,11 @@ function renderStatus() {
   // 风险 chip 显示的是阶段名与徽标重复且误标(阶段≠风险),风险本体=雷达星级
   const freshAt = $('#freshAt');
   if (freshAt) {
-    if (failed) { freshAt.textContent = ' · 失败'; freshAt.className = 'fresh-at bad'; freshAt.title = '最近刷新失败,展示上次数据'; }
+    // 2026-09-16 界面优化批⑤:收盘定格标识(与桌面会话条同口径)——数字不会再变须明说,防把收盘数据当盘中读
+    const now = shanghaiNow();
+    const afterClose = isTradingDay(todayStr()) && (now.getHours() > 15 || (now.getHours() === 15 && now.getMinutes() >= 5));
+    if (afterClose && !failed) { freshAt.textContent = ' · 已收盘'; freshAt.className = 'fresh-at stale'; freshAt.title = '收盘定格数据,明日开盘恢复刷新'; }
+    else if (failed) { freshAt.textContent = ' · 失败'; freshAt.className = 'fresh-at bad'; freshAt.title = '最近刷新失败,展示上次数据'; }
     else if (state.lastSuccessAt) { freshAt.textContent = ' · ' + hhmmss(state.lastSuccessAt); freshAt.className = 'fresh-at'; freshAt.title = '更新于 ' + hhmmss(state.lastSuccessAt) + (state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : ''); }
     else if (state.lastGoodAt) { freshAt.textContent = ' · 快照 ' + hhmm(state.lastGoodAt); freshAt.className = 'fresh-at stale'; freshAt.title = '离线快照(未成功连上实时源)'; }
     else { freshAt.textContent = ''; freshAt.className = 'fresh-at'; freshAt.title = ''; }

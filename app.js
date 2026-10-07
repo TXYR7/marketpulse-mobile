@@ -7,7 +7,7 @@ import {
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
-import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
+import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, revealList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
 // 2026-09-11 一屏到底批:renderReview import 已随复盘视图整删(store.js 复盘数据层保留,旧记录不丢)
 
 const state = {
@@ -1225,9 +1225,15 @@ function bind() {
   });
   // 折叠池首次展开才渲染
   // 折叠池首次展开才渲染(structFold 题材/龙头同口径——2026-09-11 拆解融合批)
-  ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
+  // 2026-10-07 卡片打开动画批:展开时给 body 挂一次入场(收起不挂,原生 details 已有 .fold[open] fadeIn)
+  const foldReveal = (foldSel, render) => () => {
+    render();
+    const fold = $(foldSel);
+    if (fold && fold.open) revealList(fold.querySelector('.body') || fold);
+  };
+  ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', foldReveal(sel, renderDowns)));
   const structFold = $('#structFold');
-  if (structFold) structFold.addEventListener('toggle', renderStructFold);
+  if (structFold) structFold.addEventListener('toggle', foldReveal('#structFold', renderStructFold));
   // 2026-09-11 一屏到底批:设置页四绑定(refresh/date/token/notify)已随视图整删;
   // 历史日期回看改顶栏日期长按(极隐蔽入口,常驻零成本)
   let lpTimer = null;

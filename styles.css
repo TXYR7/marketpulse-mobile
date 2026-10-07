@@ -247,6 +247,14 @@ main {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
+/* 2026-10-07 卡片打开动画批:列表成员真变化时挂一次(views.js revealList),前 5 张错峰入场。
+   复用 viewin keyframes;原地 patch(8-15s 轮询)不挂,详见 views.js revealList 注释。 */
+.list-reveal > * { animation: viewin 0.18s var(--ease-out) both; }
+.list-reveal > *:nth-child(1) { animation-delay: 0ms; }
+.list-reveal > *:nth-child(2) { animation-delay: 30ms; }
+.list-reveal > *:nth-child(3) { animation-delay: 60ms; }
+.list-reveal > *:nth-child(4) { animation-delay: 90ms; }
+.list-reveal > *:nth-child(5) { animation-delay: 120ms; }
 
 .sec-title { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 2px 8px; }
 .sec-title h2 { font-size: 15px; margin: 0; letter-spacing: 0.3px; }

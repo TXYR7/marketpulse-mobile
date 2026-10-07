@@ -12,6 +12,18 @@ export function setHTML(el, html) {
   return true;
 }
 
+// 2026-10-07 卡片打开动画批:列表成员真变化时挂一次入场(前 5 张错峰 30ms,styles.css .list-reveal)。
+// 200ms 后撤类——类残留会让下一次挂载不重播(与 revealList 的 remove+add 重启动手法配合)。
+// ⚠ 只在 patchCardList 的「整体重建」分支调用;原地 patch(8-15s 轮询)绝不挂,否则每轮重播。
+export function revealList(el) {
+  if (!el) return;
+  el.classList.remove('list-reveal');
+  void el.offsetWidth;
+  el.classList.add('list-reveal');
+  clearTimeout(el._revealT);
+  el._revealT = setTimeout(() => el.classList.remove('list-reveal'), 220);
+}
+
 // 2026-09-10 减法批:debounce 已随涨停池搜索框(最后一个调用方)删除
 
 // 行级 diff：列表成员与顺序不变时，只原地更新变化的字段（价格/涨跌/封单等），
@@ -33,6 +45,9 @@ export function patchCardList(list, rows, cardHtmlFn, sigFn, fieldSigFn, patchFn
         node.dataset.sig = sigFn(rows[i]);
         node.dataset.fs = fieldSigFn(rows[i]);
       }
+      // 2026-10-07 卡片打开动画批:成员真变了才挂入场(淡入+8px上移 180ms,styles.css .list-reveal)。
+      // 下面的原地 patch 分支(价格/涨跌每 8-15s 刷新)不挂——挂上去每轮重播比不加还难受。
+      revealList(list);
     }
     return;
   }

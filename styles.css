@@ -300,7 +300,9 @@ main {
 .fold { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--surface-glass); backdrop-filter: blur(6px); box-shadow: var(--shadow-1); }
 .fold > summary {
   list-style: none; padding: 11px 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+  transition: transform 0.15s var(--ease-out), background 0.15s var(--ease-out); /* 2026-10-07 按压反馈:原零 transition */
 }
+.fold > summary:active { transform: scale(0.98); } /* 折叠池头按下缩放(面积大用 .98) */
 .fold > summary::-webkit-details-marker { display: none; }
 .fold > summary::before { content: "▸"; color: var(--muted); font-size: 12px; margin-right: 8px; transition: transform 0.15s var(--ease-out); }
 .fold[open] > summary::before { transform: rotate(90deg); }
@@ -333,7 +335,8 @@ main {
 /* 2026-09-12 检查批:.chip.up/.down/.broken/.risk-high 四组色类已删(9-chip 时代孤儿,现存=.sent/.risk-mid/.triple) */
 .chip.triple strong b.down-c { color: var(--green); }
 .chip.triple strong b.up-c { color: var(--red); }
-.chip.chip-emo { cursor: pointer; }
+.chip.chip-emo { cursor: pointer; transition: transform 0.15s var(--ease-out); } /* +transition 2026-10-07 按压反馈 */
+.chip.chip-emo:active { transform: scale(0.96); } /* 情绪 chip 点开 sheet 的按压反馈 */
 .chip.chip-emo strong::after { content: ''; }
 
 /* 题材排行 */

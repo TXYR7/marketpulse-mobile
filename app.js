@@ -1225,15 +1225,11 @@ function bind() {
   });
   // 折叠池首次展开才渲染
   // 折叠池首次展开才渲染(structFold 题材/龙头同口径——2026-09-11 拆解融合批)
-  // 2026-10-07 卡片打开动画批:展开时给 body 挂一次入场(收起不挂,原生 details 已有 .fold[open] fadeIn)
-  const foldReveal = (foldSel, render) => () => {
-    render();
-    const fold = $(foldSel);
-    if (fold && fold.open) revealList(fold.querySelector('.body') || fold);
-  };
-  ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', foldReveal(sel, renderDowns)));
+  // 2026-10-07 卡片打开动画批:dtFold/zbFold 走 patchCardList(成员变化时已自带 .list-reveal 入场),
+  // 这里不再对 .body 挂(否则两层叠加);structFold 走 setHTML 无列表入场,由这里给 .body 挂一次。
+  ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
   const structFold = $('#structFold');
-  if (structFold) structFold.addEventListener('toggle', foldReveal('#structFold', renderStructFold));
+  if (structFold) structFold.addEventListener('toggle', () => { renderStructFold(); if (structFold.open) revealList(structFold.querySelector('.body') || structFold); });
   // 2026-09-11 一屏到底批:设置页四绑定(refresh/date/token/notify)已随视图整删;
   // 历史日期回看改顶栏日期长按(极隐蔽入口,常驻零成本)
   let lpTimer = null;

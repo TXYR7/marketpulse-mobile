@@ -4,7 +4,8 @@ import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate, assessmentRules,
-  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf
+  assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf,
+  detectPreSealAlerts, buildAuctionWatchlist
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, revealList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
@@ -21,6 +22,7 @@ const state = {
   openPctByCode: {}, openPctDate: '', promoInFlight: false, positionAdvice: null, mentalNotes: [],
   auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
+  preSealOff: false, // 抢时间批:封板前预警总开关(false=开;设置里可关,关了只 toast 不弹通知/震动/声音)
   // 2026-09-11 一屏到底批:lastSignalSnapshot/notifySignals 已随通知链整删
 };
 
@@ -185,6 +187,7 @@ function computeDerived(pools) {
   const mentalNotes = contextNotes({ phase, limit: 3 });
 
   Object.assign(state, { themes, leaders, opportunities, emotion, riskRadar, structure, plan, breakRate, phase, positionAdvice, mentalNotes });
+  detectPreSeal(); // 抢时间批:封板前预警本地检测(与桌面 server 端同函数,App 开着时页内三提醒)
   state.lastPayload = {
     tradeDate: pools.date, limitUpCount: upCount, limitDownCount: downCount,
     status: { phase: emotion.phase, level: emotion.level, emotionIndex: emotion.emotionIndex, maxBoard },
@@ -494,6 +497,119 @@ function wilsonLower(up, n) {
   return Number((Math.max(0, (center - margin) / denom) * 100).toFixed(1));
 }
 
+/* ---------------- 抢时间批·封板前预警(2026-10-10) ----------------
+   本地检测(与桌面 server 端同函数 detectPreSealAlerts):只盯机会股∪龙头,涨7.5%未封或30秒急拉>3%。
+   页内三提醒(App 开着时):SW showNotification(系统通知) + 震动 + WebAudio 短音 + 行高亮。
+   人不在电脑旁的推送由桌面端 ntfy 承担(见桌面 server.js pushPreSeal);此处只管 App 在前台时的提醒。 */
+let preSealPrevSnap = new Map();
+const preSealCooldown = new Map();
+function detectPreSeal() {
+  const pools = state.pools;
+  if (!pools || state.manualDate) return;
+  const watchCodes = [];
+  for (const t of ['S', 'A', 'B']) for (const s of (state.opportunities?.tiers?.[t] || [])) if (s.code) watchCodes.push(s.code);
+  for (const l of (state.leaders || [])) if (l?.code) watchCodes.push(l.code);
+  const now = Date.now();
+  const cdMs = 30 * 60_000;
+  const inCooldown = (key) => { const t = preSealCooldown.get(key); return Boolean(t && now - t < cdMs); };
+  const events = detectPreSealAlerts({ stocks: pools.up || [], watchCodes, prevSnap: preSealPrevSnap, now, inCooldown });
+  preSealPrevSnap = new Map((pools.up || []).filter((s) => Number.isFinite(Number(s.changePercent ?? parseFloat(s.gain)))).map((s) => [String(s.code), { pct: Number(s.changePercent ?? parseFloat(s.gain)), t: now }]));
+  if (!events.length) return;
+  for (const ev of events) { preSealCooldown.set(`${ev.code}:${ev.kind}`, now); firePreSealAlert(ev); }
+}
+// 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
+function firePreSealAlert(ev) {
+  const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
+  const text = ev.kind === 'sealApproach' ? `${label} 逼近涨停 ${ev.pct}%（未封）` : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+  const title = ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警';
+  toast(text);
+  if (state.preSealOff) return; // 设置里关了就只 toast 不打扰
+  // 系统通知:走已注册的 SW(showNotification),App 前台也能弹统一系统通知
+  try {
+    if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+      navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, { body: text, tag: `preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body: text, tag: `preseal-${ev.code}` });
+    }
+  } catch { /* 通知失败静默 */ }
+  try { if (navigator.vibrate) navigator.vibrate(ev.kind === 'sealApproach' ? [200, 100, 200] : 150); } catch { /* 震动失败静默 */ }
+  playAlertSound(ev.kind);
+  markPreSealRow(ev.code);
+}
+let _alertCtx = null;
+function playAlertSound(kind) {
+  try {
+    _alertCtx = _alertCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (_alertCtx.state === 'suspended') _alertCtx.resume().catch(() => {});
+    const now = _alertCtx.currentTime;
+    const seq = kind === 'sealApproach' ? [[880, 0], [1174, 0.14]] : [[660, 0], [880, 0.12]];
+    for (const [freq, off] of seq) {
+      const osc = _alertCtx.createOscillator(); const gain = _alertCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + off);
+      gain.gain.exponentialRampToValueAtTime(0.3, now + off + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.16);
+      osc.connect(gain); gain.connect(_alertCtx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.18);
+    }
+  } catch { /* 声音失败静默 */ }
+}
+function markPreSealRow(code) {
+  document.querySelectorAll(`[data-code="${code}"]`).forEach((el) => { el.classList.add('preseal-flash'); setTimeout(() => el.classList.remove('preseal-flash'), 6000); });
+}
+if (typeof window !== 'undefined') { window.firePreSealAlert = firePreSealAlert; window.renderAuctionWatchlist = renderAuctionWatchlist; window.detectPreSeal = detectPreSeal; } // 测试注入点(PWA 验证用,无生产副作用)
+
+// 通知授权引导:权限未授 + 用户没点过「不用」才显示横条;点「开启」经手势申请权限。
+// 设置页已砍(2026-09-11),用一次性横条替代,不重建设置页(尊重砍单决定)。
+function setupNotifBanner() {
+  const banner = $('#notifBanner');
+  if (!banner || !('Notification' in window)) return;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('mp_notif_dismissed') === '1'; } catch { /* ignore */ }
+  if (Notification.permission === 'granted' || dismissed) return;
+  banner.hidden = false;
+  $('#notifEnableBtn').addEventListener('click', async () => {
+    try {
+      const perm = await Notification.requestPermission();
+      banner.hidden = true;
+      if (perm === 'granted') toast('封板前预警通知已开启');
+      else if (perm === 'denied') toast('通知被拒绝,可在浏览器设置里重新允许');
+    } catch { banner.hidden = true; }
+  });
+  $('#notifDismissBtn').addEventListener('click', () => {
+    banner.hidden = true;
+    try { localStorage.setItem('mp_notif_dismissed', '1'); } catch { /* ignore */ }
+  });
+}
+
+// 抢时间批·盘前竞价打板候选名单(2026-10-10):与桌面 renderAuctionWatchlist 同逻辑。
+// 数据源=本地 state.auction(撮合)+opportunities(机会级)+leaders(龙头)+gap(超预期),无竞价数据隐藏折叠。
+function renderAuctionWatchlist() {
+  const fold = $('#awFold');
+  if (!fold) return;
+  const wl = buildAuctionWatchlist({ auction: state.auction || {}, opportunities: state.opportunities || {}, leaders: state.leaders || [], gap: state.gap || {}, limit: 8 });
+  if (!wl.available || !wl.items.length) { fold.hidden = true; return; }
+  const sig = wl.items.map((i) => i.code + i.matchPct).join(',');
+  if (state._awSig === sig) { fold.hidden = false; return; } // 内容未变不重绘(15s 轮询防抖)
+  state._awSig = sig;
+  fold.hidden = false;
+  const phase = wl.phase === 'live' ? '竞价进行中' : '9:25 撮合';
+  $('#awSummary').textContent = `${phase} · ${wl.items.length} 只`;
+  setHTML($('#awRows'), wl.items.map((it, idx) => `
+    <div class="aw-row" data-code="${esc(it.code)}" role="button" tabindex="0">
+      <span class="aw-rank">${idx + 1}</span>
+      <span class="aw-main"><strong>${esc(it.name)}</strong><small>${esc(it.code)}${it.boards ? ` · ${it.boards}板` : ''}</small></span>
+      <strong class="aw-pct ${it.matchPct > 0 ? 'up' : it.matchPct < 0 ? 'down' : ''}">${it.matchPct > 0 ? '+' : ''}${it.matchPct}%</strong>
+      <span class="aw-meta">${it.volRatio != null ? `<small>量比 ${it.volRatio}</small>` : ''}${it.tier ? `<b class="aw-tier aw-tier-${esc(it.tier)}">${esc(it.tier)}级</b>` : ''}</span>
+      ${it.tag ? `<span class="aw-tag">${esc(it.tag)}</span>` : ''}
+    </div>`).join(''));
+  $$('#awRows .aw-row').forEach((row) => {
+    const open = () => openSheet(row.dataset.code);
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  });
+}
+
 function renderIntraday() {
   // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
   const ctx = { state, toast, actions: { loadHistory } };
@@ -509,6 +625,7 @@ function renderIntraday() {
   $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
   updateBanner();
   loadGap();
+  renderAuctionWatchlist(); // 抢时间批:9:25 竞价打板候选名单(本地算,竞价有数据才显示)
 }
 
 /* ---------------- 渲染:自选已删(2026-09-10 全盘对齐桌面) ----------------
@@ -1398,6 +1515,7 @@ async function init() {
     await refresh();
     applyRefreshTimer();
     maybeAuctionTick(); // 冷启动落在竞价窗口内时立即采集（不等首个 15s tick）
+    setupNotifBanner(); // 抢时间批:通知授权引导(权限未授且未点过才显示,用户手势申请)
   } catch (e) {
     console.error('[mp] 启动失败：', e);
     try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }

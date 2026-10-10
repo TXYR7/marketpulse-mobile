@@ -99,6 +99,12 @@
           <summary><span class="fold-title">昨日涨停 · 今日开盘预期差</span><span id="gapSummary" class="hint">--</span></summary>
           <div class="body"><div class="list" id="gapRows"></div></div>
         </details>
+
+        <!-- 抢时间批·盘前竞价打板候选(2026-10-10):9:25 撮合后本地算出名单,开盘前定目标 -->
+        <details class="fold" id="awFold" hidden>
+          <summary><span class="fold-title">今日打板候选 · 竞价定目标</span><span id="awSummary" class="hint">--</span></summary>
+          <div class="body"><div class="list" id="awRows"></div></div>
+        </details>
       </section>
       <!-- 2026-09-10 全盘对齐桌面:view-opportunity/view-ladder/view-structure 三个独立视图已删——
            内容容器(#opp/#ladderFull/#structure)迁入 view-intraday,渲染函数(views.js)原样复用;
@@ -124,6 +130,14 @@
     </div>
 
     <div class="toast" id="toast" role="status"></div>
+
+    <!-- 抢时间批·通知授权引导(2026-10-10):设置页已砍,用一次性横条让用户手势授权封板前预警通知。
+         已授权/已点过则不出现(localStorage 记住);点「开启」申请 Notification 权限。 -->
+    <div class="notif-banner" id="notifBanner" hidden>
+      <span>开启封板前预警通知,盯盘不漏</span>
+      <button type="button" id="notifEnableBtn">开启</button>
+      <button type="button" class="notif-dismiss" id="notifDismissBtn">不用</button>
+    </div>
 
     <script src="app.js" type="module"></script>
   </body>

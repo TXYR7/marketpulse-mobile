@@ -26,6 +26,18 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// 抢时间批·封板前预警(2026-10-10):点通知聚焦/打开 App。通知由页面 reg.showNotification 发出
+// (App 前台场景);后台推送由桌面 ntfy 承担,SW 不做周期轮询(范围界定,避免 SW 复杂化)。
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const exist = all.find((c) => 'focus' in c);
+    if (exist) return exist.focus();
+    return self.clients.openWindow('./');
+  })());
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.hostname.includes('eastmoney.com')) return; // 数据接口直连，不缓存

@@ -9,7 +9,7 @@ import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
   calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays,
-  applyGate, auctionVerdict
+  applyGate, auctionVerdict, detectPreSealAlerts, buildAuctionWatchlist
 } from '../analytics.js';
 import {
   shanghaiNow, todayStr, mergePools, sealQuality, isTradingDay, lastTradingDate,
@@ -528,6 +528,25 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   const row = (c) => ({ c, n: '股' + c, lbc: 1, p: 15000, zdp: 10, fund: null, ltsz: null, zbc: 0, hybk: 'AI' });
   const r = mergePools('20260911', [{ status: 'fulfilled', value: { data: { pool: [row('600001')], qdate: 20260911, tc: 1 } } }, { status: 'fulfilled', value: { data: { pool: [], qdate: 20260911, tc: 0 } } }, { status: 'fulfilled', value: { data: { pool: [], qdate: 20260911, tc: 0 } } }]);
   ok('mergePools date 为 string（东财 qdate 数字入参也归一）', typeof r.date === 'string' && r.date === '20260911');
+}
+
+// 抢时间批·手机移植:封板前预警 + 竞价打板名单(与桌面 analytics.js 逐字同步,C1 哨兵锁口径)
+{
+  const stocks = [
+    { code: '600001', name: '龙头A', changePercent: 8.2, isLimitUp: false },
+    { code: '600002', name: '已封B', changePercent: 10.0, isLimitUp: true },
+    { code: '600004', name: '急拉D', changePercent: 5.5, isLimitUp: false },
+  ];
+  const watch = ['600001', '600002', '600004'];
+  const prev = new Map([['600004', { pct: 2.0, t: 100000 - 15000 }]]);
+  const ev = detectPreSealAlerts({ stocks, watchCodes: watch, prevSnap: prev, now: 100000 });
+  ok('detectPreSealAlerts 触发 sealApproach+surge 且排除已封', ev.length === 2 && ev.some((e) => e.kind === 'sealApproach') && ev.some((e) => e.kind === 'surge') && !ev.some((e) => e.code === '600002'));
+  const wl = buildAuctionWatchlist({
+    auction: { available: true, items: [{ code: '600001', name: '龙头A', boards: 3, matchPct: 8.5, volRatio: 3.2, sealedBuyShares: 0 }] },
+    opportunities: { tiers: { S: [{ code: '600001' }], A: [], B: [] } }, leaders: [{ code: '600001' }], gap: { candidates: [] },
+  });
+  ok('buildAuctionWatchlist 出名单且带机会级标签', wl.available && wl.items.length === 1 && wl.items[0].tier === 'S');
+  ok('buildAuctionWatchlist 空竞价返回 unavailable', buildAuctionWatchlist({ auction: { available: false } }).available === false);
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

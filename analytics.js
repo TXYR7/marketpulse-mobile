@@ -1271,8 +1271,87 @@ const PARAM_MANIFEST = {
       firstBoardPremium: { green: 3, yellow: 1 },
       highBoardPremium: { green: 2, yellow: 0 }
     }
+  },
+  // 抢时间批·盘中封板前预警(2026-10-10)——只盯机会股+龙头,阈值可调
+  preSealAlert: {
+    sealApproachPct: 7.5,   // 加速触板:涨幅 ≥7.5% 且未封板
+    surgeWindowMs: 30_000,  // 急拉窗口:30 秒
+    surgePct: 3,            // 该窗口内涨幅 >3%
+    cooldownMs: 30 * 60_000 // 每票每类告警冷却 30 分钟
   }
 };
+
+// 抢时间批·盘中封板前预警(2026-10-10)：在股票封死之前提前提示，让「打板」决策赶在涨停前。
+// 纯函数：给定本轮股票 + 上轮涨幅快照 + 参数 + 冷却判据，返回要提醒的事件（不触发任何 I/O）。
+// 目标名单 = 机会股 tiers ∪ 龙头（用户拍板「只买龙头最强」，名单小而准）；已封/已炸/停牌/一字不重复报。
+function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(), now = Date.now(), params = PARAM_MANIFEST.preSealAlert, inCooldown = () => false } = {}) {
+  const p = params || {};
+  const sealApproachPct = Number.isFinite(p.sealApproachPct) ? p.sealApproachPct : 7.5;
+  const surgeWindowMs = Number.isFinite(p.surgeWindowMs) ? p.surgeWindowMs : 30_000;
+  const surgePct = Number.isFinite(p.surgePct) ? p.surgePct : 3;
+  const watch = new Set((watchCodes || []).map(String));
+  if (!watch.size || !Array.isArray(stocks)) return [];
+  const events = [];
+  for (const stock of stocks) {
+    const code = String(stock?.code ?? '');
+    if (!code || !watch.has(code)) continue;
+    const pct = Number(stock.changePercent ?? parseFloat(stock.gain));
+    if (!Number.isFinite(pct)) continue;
+    // 已封板（isLimitUp 按板块 9.5/19.5/29.5 阈值）/停牌 /非上涨 不报——预警只关心「还没封、正在冲」的
+    if (stock.isLimitUp === true || stock.suspended || pct <= 0) continue;
+    // 加速触板：涨幅进入 sealApproachPct ~ 未封区间
+    if (pct >= sealApproachPct && !inCooldown(`${code}:sealApproach`)) {
+      events.push({ code, name: stock.name || code, kind: 'sealApproach', pct: Math.round(pct * 100) / 100, t: now });
+      continue; // 同一只同轮只出一类，避免双报
+    }
+    // 急拉：窗口内涨幅 > surgePct（需上轮快照且时间差在窗口内）
+    const prev = prevSnap.get(code);
+    if (prev && typeof prev.pct === 'number' && now - prev.t <= surgeWindowMs && pct - prev.pct > surgePct && !inCooldown(`${code}:surge`)) {
+      events.push({ code, name: stock.name || code, kind: 'surge', pct: Math.round(pct * 100) / 100, rise: Math.round((pct - prev.pct) * 100) / 100, t: now });
+    }
+  }
+  return events;
+}
+
+// 抢时间批·盘前竞价定目标(2026-10-10):竞价结束(9:25)自动出「今日打板候选名单」。
+// 纯函数:复用机会股 ∪ 龙头 ∪ gap超预期 ∪ 竞价高开 的并集,按 竞价撮合涨幅+量比 排序,带标注。
+// 不新增选股算法——只是把已有的 gap/机会股/竞价三块数据聚合成一张可盯的名单,让决策提前到开盘前。
+// 返回 { available, items:[{code,name,boards,matchPct,volRatio,sealShares,tier,gapStatus,tag}], reason }
+function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [], gap = {}, limit = 8 } = {}) {
+  if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集' };
+  const aucByCode = new Map((auction.items || []).map((it) => [String(it.code), it]));
+  const tierByCode = new Map();
+  for (const tier of ['S', 'A', 'B']) for (const s of (opportunities?.tiers?.[tier] || [])) tierByCode.set(String(s.code), tier);
+  const leaderCodes = new Set((leaders || []).map((l) => String(l.code)));
+  const gapByCode = new Map((gap?.candidates || []).map((c) => [String(c.code), c]));
+  const candidates = new Map();
+  // 并集来源:机会股、龙头、gap超预期(这三类是「本来就要盯的」)+ 竞价高开≥3%的票(竞价里冒头的)
+  for (const [code, tier] of tierByCode) candidates.set(code, { tier });
+  for (const code of leaderCodes) if (!candidates.has(code)) candidates.set(code, { tier: null });
+  for (const [code, g] of gapByCode) if (g.status === '超预期' && !candidates.has(code)) candidates.set(code, { tier: null });
+  for (const it of (auction.items || [])) {
+    const pct = Number(it.matchPct);
+    if (Number.isFinite(pct) && pct >= 3 && !candidates.has(String(it.code))) candidates.set(String(it.code), { tier: null });
+  }
+  const rows = [];
+  for (const [code, meta] of candidates) {
+    const it = aucByCode.get(code);
+    if (!it) continue;
+    const matchPct = Number(it.matchPct);
+    if (!Number.isFinite(matchPct)) continue; // 无撮合价的不进名单
+    const g = gapByCode.get(code);
+    const tags = [];
+    if (g?.status === '超预期') tags.push('竞价超预期');
+    if (Number(it.volRatio) >= 2) tags.push('竞价放量');
+    if (Number(it.sealedBuyShares) > 0) tags.push('一字封单排队');
+    if (meta.tier) tags.push(`${meta.tier}级机会`);
+    // 排序分:撮合涨幅为主 + 量比加成(放量高开更可信)
+    const score = matchPct + Math.min(Number(it.volRatio) || 0, 5) * 0.5 + (g?.status === '超预期' ? 1 : 0);
+    rows.push({ code, name: it.name || code, boards: it.boards ?? null, matchPct: Math.round(matchPct * 100) / 100, volRatio: it.volRatio ?? null, sealShares: it.sealedBuyShares ?? null, tier: meta.tier || null, gapStatus: g?.status || null, tag: tags.join('·'), score });
+  }
+  rows.sort((a, b) => b.score - a.score);
+  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选', asOf: auction.asOf || null, phase: auction.phase || 'final' };
+}
 
 // 情绪阶段 → 三大周期（连板晋级体系的周期天花板）
 function cycleOf(phase) {
@@ -1531,5 +1610,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot
+  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot
 };

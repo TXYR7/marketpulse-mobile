@@ -532,23 +532,32 @@ async function pushNtfy(title, lines) {
 }
 /* ---------------- C2 探测:periodicSync + SW 本地通知 ---------------- */
 // 长按星脉填主题末尾加 ?probe 触发。探测本机 Chrome 对 PWA 的 periodicSync(C2 锁屏准点的唯一可控前提)。
-// periodicSync 注册成功 → C2 可做;被拒/缺失 → Chrome 默认不给 PWA,需开 flag(见返回提示)。结果 toast+console。
+// 结果分条大字慢速连播 toast(防闪太快看不清),并存 KV mpC2Probe 供诊断。
 async function runC2Probe() {
-  const lines = [];
+  const steps = [];
   try {
     if ('serviceWorker' in navigator && 'periodicSync' in ServiceWorkerRegistration.prototype) {
       try {
         const reg = await navigator.serviceWorker.ready;
         await reg.periodicSync.register('mp-probe', { minInterval: 60 * 60 * 1000 });
         await reg.periodicSync.unregister('mp-probe');
-        lines.push('periodicSync: 支持 ✅ → C2 可做(锁屏准点)');
-      } catch (e) { lines.push(`periodicSync: 被拒 ${e.name} → 需 Chrome flag:${e.name === 'NotSupportedError' ? 'chrome://flags/#enable-generic-extra-permission-requests 与 #periodic-background-sync' : '查看 console'}`); }
-    } else lines.push('periodicSync: 不支持 ❌ → C2 做不到锁屏准点');
-  } catch (e) { lines.push('periodicSync: 异常 ' + e.message); }
-  lines.push('通知权限: ' + (('Notification' in window) ? Notification.permission : '不支持'));
-  console.log('[C2 探测]', lines.join(' | '));
-  toast(lines[0]);
-  if (lines[1]) setTimeout(() => toast(lines[1]), 1800);
+        steps.push('1/3 支持 periodicSync');
+        steps.push('2/3 结论: 能锁屏准时');
+        steps.push('3/3 我去加后台代码');
+      } catch (e) {
+        steps.push('1/3 有 periodicSync');
+        steps.push('2/3 结论: 被拒绝 ' + e.name);
+        steps.push('3/3 要开 Chrome flag');
+      }
+    } else {
+      steps.push('1/3 没有 periodicSync');
+      steps.push('2/3 结论: 不能锁屏准时');
+      steps.push('3/3 只能切后台短窗');
+    }
+  } catch (e) { steps.push('探测异常 ' + e.message); }
+  console.log('[C2 探测]', steps.join(' | '));
+  try { setKV('mpC2Probe', { at: Date.now(), steps }); } catch {}
+  steps.forEach((s, i) => setTimeout(() => toast(s), i * 2200)); // 每条停 2.2 秒,慢慢看
 }
 
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮

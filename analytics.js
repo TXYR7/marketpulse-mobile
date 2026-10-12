@@ -1317,9 +1317,10 @@ function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(
 // 纯函数:复用机会股 ∪ 龙头 ∪ gap超预期 ∪ 竞价高开 的并集,按 竞价撮合涨幅+量比 排序,带标注。
 // 不新增选股算法——只是把已有的 gap/机会股/竞价三块数据聚合成一张可盯的名单,让决策提前到开盘前。
 // 返回 { available, items:[{code,name,boards,matchPct,volRatio,sealShares,tier,gapStatus,tag}], reason }
-function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [], gap = {}, limit = 8 } = {}) {
+function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [], gap = {}, stocks = [], limit = 8 } = {}) {
   if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集' };
   const aucByCode = new Map((auction.items || []).map((it) => [String(it.code), it]));
+  const stockByCode = new Map((stocks || []).map((s) => [String(s.code), s]));
   const tierByCode = new Map();
   for (const tier of ['S', 'A', 'B']) for (const s of (opportunities?.tiers?.[tier] || [])) tierByCode.set(String(s.code), tier);
   const leaderCodes = new Set((leaders || []).map((l) => String(l.code)));
@@ -1339,18 +1340,26 @@ function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [],
     if (!it) continue;
     const matchPct = Number(it.matchPct);
     if (!Number.isFinite(matchPct)) continue; // 无撮合价的不进名单
+    // 2026-10-12 修:盘中验证——竞价高开但盘中跳水/炸板的不能推荐(用户报三柏硕近乎天地,打板接盘)
+    const live = stockByCode.get(code);
+    const livePct = live ? Number(live.changePercent ?? parseFloat(live.gain)) : null;
+    const isLimitUp = live?.isLimitUp === true;
+    // 规则:当前涨幅 <3% 或 已炸板(竞价高开但盘中翻绿)→ 剔除;涨停或仍强势(≥5%)→ 保留
+    if (livePct !== null && (livePct < 3 || (!isLimitUp && livePct < 5 && matchPct > 3))) continue;
     const g = gapByCode.get(code);
     const tags = [];
     if (g?.status === '超预期') tags.push('竞价超预期');
     if (Number(it.volRatio) >= 2) tags.push('竞价放量');
     if (Number(it.sealedBuyShares) > 0) tags.push('一字封单排队');
     if (meta.tier) tags.push(`${meta.tier}级机会`);
-    // 排序分:撮合涨幅为主 + 量比加成(放量高开更可信)
-    const score = matchPct + Math.min(Number(it.volRatio) || 0, 5) * 0.5 + (g?.status === '超预期' ? 1 : 0);
+    if (isLimitUp) tags.push('已涨停');
+    else if (livePct !== null && livePct >= 8) tags.push('接近涨停');
+    // 排序分:撮合涨幅为主 + 量比加成(放量高开更可信);盘中仍强势的加权
+    const score = matchPct + Math.min(Number(it.volRatio) || 0, 5) * 0.5 + (g?.status === '超预期' ? 1 : 0) + (isLimitUp ? 2 : livePct !== null && livePct >= 8 ? 1 : 0);
     rows.push({ code, name: it.name || code, boards: it.boards ?? null, matchPct: Math.round(matchPct * 100) / 100, volRatio: it.volRatio ?? null, sealShares: it.sealedBuyShares ?? null, tier: meta.tier || null, gapStatus: g?.status || null, tag: tags.join('·'), score });
   }
   rows.sort((a, b) => b.score - a.score);
-  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选', asOf: auction.asOf || null, phase: auction.phase || 'final' };
+  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选(盘中已剔除跳水/炸板)', asOf: auction.asOf || null, phase: auction.phase || 'final' };
 }
 
 // 情绪阶段 → 三大周期（连板晋级体系的周期天花板）

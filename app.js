@@ -530,6 +530,27 @@ async function pushNtfy(title, lines) {
     await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
   } catch { /* ntfy 发送失败静默,不打断三提醒 */ }
 }
+/* ---------------- C2 探测:periodicSync + SW 本地通知 ---------------- */
+// 长按星脉填主题末尾加 ?probe 触发。探测本机 Chrome 对 PWA 的 periodicSync(C2 锁屏准点的唯一可控前提)。
+// periodicSync 注册成功 → C2 可做;被拒/缺失 → Chrome 默认不给 PWA,需开 flag(见返回提示)。结果 toast+console。
+async function runC2Probe() {
+  const lines = [];
+  try {
+    if ('serviceWorker' in navigator && 'periodicSync' in ServiceWorkerRegistration.prototype) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.periodicSync.register('mp-probe', { minInterval: 60 * 60 * 1000 });
+        await reg.periodicSync.unregister('mp-probe');
+        lines.push('periodicSync: 支持 ✅ → C2 可做(锁屏准点)');
+      } catch (e) { lines.push(`periodicSync: 被拒 ${e.name} → 需 Chrome flag:${e.name === 'NotSupportedError' ? 'chrome://flags/#enable-generic-extra-permission-requests 与 #periodic-background-sync' : '查看 console'}`); }
+    } else lines.push('periodicSync: 不支持 ❌ → C2 做不到锁屏准点');
+  } catch (e) { lines.push('periodicSync: 异常 ' + e.message); }
+  lines.push('通知权限: ' + (('Notification' in window) ? Notification.permission : '不支持'));
+  console.log('[C2 探测]', lines.join(' | '));
+  toast(lines[0]);
+  if (lines[1]) setTimeout(() => toast(lines[1]), 1800);
+}
+
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
 function firePreSealAlert(ev) {
   const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
@@ -1388,9 +1409,11 @@ function bind() {
       lpTimer = setTimeout(() => {
         lpTimer = null;
         getKV('pushNtfyUrl', '').then((cur) => {
-          const v = prompt('推送地址 ntfy 主题\n(留空=关闭,形如 https://ntfy.sh/xxx)', cur || '');
+          const v = prompt('推送地址 ntfy 主题\n(留空=关闭,形如 https://ntfy.sh/xxx;后加 ?probe 跑 C2 探测)', cur || '');
           if (v === null) return;
-          setKV('pushNtfyUrl', v.trim()).then(() => toast(v.trim() ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
+          const s = v.trim();
+          if (/\?probe$/.test(s)) { setKV('pushNtfyUrl', s.replace(/\?probe$/, '')).catch(() => {}); runC2Probe(); return; } // 探测模式:清掉后缀存正式地址,跑探测
+          setKV('pushNtfyUrl', s).then(() => toast(s ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
         }).catch(() => {});
       }, 550);
     });

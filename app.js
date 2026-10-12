@@ -1411,18 +1411,20 @@ function bind() {
     });
     ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => dateEl.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
   }
-  // C3 配置入口:长按左上「星脉」标题(独立于日期长按,设置页已砍不重建,用一次性 prompt 隐蔽入口)
+  // C2 配置入口:长按左上「星脉」标题(独立于日期长按,设置页已砍不重建,用一次性 prompt 隐蔽入口)。
+  // 输入以 ?probe 结尾 → 触发 C2 探测并存净地址;否则存净地址。探测结果 toast 慢速连播,无需记住后缀。
   const brandEl = document.querySelector('.topbar .brand');
   if (brandEl) {
     brandEl.addEventListener('pointerdown', () => {
       lpTimer = setTimeout(() => {
         lpTimer = null;
         getKV('pushNtfyUrl', '').then((cur) => {
-          const v = prompt('推送地址 ntfy 主题\n(留空=关闭,形如 https://ntfy.sh/xxx;后加 ?probe 跑 C2 探测)', cur || '');
+          const v = prompt('推送地址 ntfy 主题\n(留空=关闭,形如 https://ntfy.sh/xxx;末尾加 ?probe 跑锁屏能力探测)', cur || '');
           if (v === null) return;
           const s = v.trim();
-          if (/\?probe$/.test(s)) { setKV('pushNtfyUrl', s.replace(/\?probe$/, '')).catch(() => {}); runC2Probe(); return; } // 探测模式:清掉后缀存正式地址,跑探测
-          setKV('pushNtfyUrl', s).then(() => toast(s ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
+          const probe = /\?probe$/.test(s);
+          setKV('pushNtfyUrl', probe ? s.replace(/\?probe$/, '') : s).then(() => toast(s ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
+          if (probe) runC2Probe();
         }).catch(() => {});
       }, 550);
     });

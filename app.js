@@ -23,6 +23,7 @@ const state = {
   auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
   preSealOff: false, // 抢时间批:封板前预警总开关(false=开;设置里可关,关了只 toast 不弹通知/震动/声音)
+  bgUntil: 0, // C1 后台宽限:切后台后不立即停刷,在窗口内继续 tick 让 detectPreSeal 还能命中(见 refreshTick/visibilitychange)
   // 2026-09-11 一屏到底批:lastSignalSnapshot/notifySignals 已随通知链整删
 };
 
@@ -517,6 +518,18 @@ function detectPreSeal() {
   if (!events.length) return;
   for (const ev of events) { preSealCooldown.set(`${ev.code}:${ev.kind}`, now); firePreSealAlert(ev); }
 }
+// C3 本地封板前预警→ntfy:App/SW 命中后直接 POST 到用户配置的 ntfy 主题(通道与桌面 server 一致,锁屏送达率比 PWA SW 通知高)。
+// 配置存 IDB kv 的 pushNtfyUrl(形如 https://ntfy.sh/<主题>);未配置则静默跳过。
+// JSON publish 三条实测规则(同桌面 notify.js,2026-10-12):打根路径 /、priority 数字、tags 数组——缺一条即 400 或退化成裸 JSON。
+async function pushNtfy(title, lines) {
+  try {
+    const url = await getKV('pushNtfyUrl', '');
+    if (!url || !/^https?:\/\//i.test(url)) return; // 未配置即跳过(用户没填就不发)
+    const root = new URL(url).origin + '/';
+    const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 4, tags: ['warning', 'bell'] });
+    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+  } catch { /* ntfy 发送失败静默,不打断三提醒 */ }
+}
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
 function firePreSealAlert(ev) {
   const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
@@ -532,6 +545,7 @@ function firePreSealAlert(ev) {
       new Notification(title, { body: text, tag: `preseal-${ev.code}` });
     }
   } catch { /* 通知失败静默 */ }
+  pushNtfy(`MarketPulse · ${label} ${ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警'}`, [text, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]); // C3:再发一路 ntfy(锁屏送达率比 PWA SW 通知高,通道与桌面推送一致)
   try { if (navigator.vibrate) navigator.vibrate(ev.kind === 'sealApproach' ? [200, 100, 200] : 150); } catch { /* 震动失败静默 */ }
   playAlertSound(ev.kind);
   markPreSealRow(ev.code);
@@ -1212,7 +1226,9 @@ function applyRefreshTimer() {
   if (state.refreshMs > 0) state.timer = setInterval(refreshTick, state.refreshMs);
 }
 function refreshTick() {
-  if (document.hidden) return; // 后台标签页不白耗流量/电量
+  // C1 后台宽限:切后台不立即停——在 bgUntil 窗口内继续刷,让封板前预警后台也能命中并推 ntfy(人切走接电话/刷别的 App 仍能提醒)。
+  // 窗口过后才停(省流量/电量)。纯后台(锁屏久置)到窗后即停,不受此宽限(锁屏准点见 plan C2,未做)。
+  if (document.hidden && Date.now() >= state.bgUntil) return; // 窗口外的后台标签页不白耗流量/电量
   // 2026-09-13 检查批修:休市日失败重试——休市日 tradingNow 恒 false,init 刷新若碰上
   // 网络抖动失败,「· 失败」会挂一整天无人兜底(交易日有本 tick 连续重试,休市日是真空档)。
   // 放行条件:休市中 && 最近一次是失败 && 距失败 ≥30s(8s tick 天然节流,防打锤);
@@ -1321,7 +1337,9 @@ function bind() {
   });
   // 回前台立即补一次刷新（数据过期才拉），后台期间定时器已由 refreshTick 跳过
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden || !tradingNow()) return;
+    if (document.hidden) { state.bgUntil = Date.now() + 5 * 60_000; return; } // C1 切后台开 5 分钟宽限窗(见 refreshTick)
+    state.bgUntil = 0; // 回前台即关窗,恢复正常前台节流
+    if (!tradingNow()) return;
     maybeAuctionTick(); // 回前台落在竞价窗口内时立即补采集
     const age = Date.now() - state.lastSuccessAt;
     if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
@@ -1362,6 +1380,21 @@ function bind() {
       }, 550);
     });
     ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => dateEl.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
+  }
+  // C3 配置入口:长按左上「星脉」标题(独立于日期长按,设置页已砍不重建,用一次性 prompt 隐蔽入口)
+  const brandEl = document.querySelector('.topbar .brand');
+  if (brandEl) {
+    brandEl.addEventListener('pointerdown', () => {
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        getKV('pushNtfyUrl', '').then((cur) => {
+          const v = prompt('推送地址 ntfy 主题\n(留空=关闭,形如 https://ntfy.sh/xxx)', cur || '');
+          if (v === null) return;
+          setKV('pushNtfyUrl', v.trim()).then(() => toast(v.trim() ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
+        }).catch(() => {});
+      }, 550);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => brandEl.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
   }
   $('#scrim').addEventListener('click', closeSheet);
   // 情绪 chip 点开分指标明细(2026-09-11 拆解融合批,横幅每轮重建故用委托)

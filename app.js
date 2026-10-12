@@ -617,28 +617,7 @@ function markPreSealRow(code) {
 }
 if (typeof window !== 'undefined') { window.firePreSealAlert = firePreSealAlert; window.renderAuctionWatchlist = renderAuctionWatchlist; window.detectPreSeal = detectPreSeal; } // 测试注入点(PWA 验证用,无生产副作用)
 
-// 通知授权引导:权限未授 + 用户没点过「不用」才显示横条;点「开启」经手势申请权限。
-// 设置页已砍(2026-09-11),用一次性横条替代,不重建设置页(尊重砍单决定)。
-function setupNotifBanner() {
-  const banner = $('#notifBanner');
-  if (!banner || !('Notification' in window)) return;
-  let dismissed = false;
-  try { dismissed = localStorage.getItem('mp_notif_dismissed') === '1'; } catch { /* ignore */ }
-  if (Notification.permission === 'granted' || dismissed) return;
-  banner.hidden = false;
-  $('#notifEnableBtn').addEventListener('click', async () => {
-    try {
-      const perm = await Notification.requestPermission();
-      banner.hidden = true;
-      if (perm === 'granted') toast('封板前预警通知已开启');
-      else if (perm === 'denied') toast('通知被拒绝,可在浏览器设置里重新允许');
-    } catch { banner.hidden = true; }
-  });
-  $('#notifDismissBtn').addEventListener('click', () => {
-    banner.hidden = true;
-    try { localStorage.setItem('mp_notif_dismissed', '1'); } catch { /* ignore */ }
-  });
-}
+// 2026-10-12 减法:通知授权引导横条(setupNotifBanner)整删——见 init 内注释。主推送走 ntfy,不需浏览器通知权限。
 
 // 抢时间批·盘前竞价打板候选名单(2026-10-10):与桌面 renderAuctionWatchlist 同逻辑。
 // 数据源=本地 state.auction(撮合)+opportunities(机会级)+leaders(龙头)+gap(超预期),无竞价数据隐藏折叠。
@@ -1596,8 +1575,9 @@ async function init() {
     await refresh();
     applyRefreshTimer();
     maybeAuctionTick(); // 冷启动落在竞价窗口内时立即采集（不等首个 15s tick）
-    setupNotifBanner(); // 抢时间批:通知授权引导(权限未授且未点过才显示,用户手势申请)
     setupPeriodicSync(); // C2:配了 ntfy 就注册 periodicSync 后台预警(锁屏准点;本机不支持则静默跳过)
+    // 2026-10-12 减法:通知授权横条(setupNotifBanner)已整删——主推送走 ntfy(CORS 全开、锁屏送达率高),
+    // 不依赖浏览器通知权限,SW 通知仅兜底,无需引导授权;用户反馈横条碍事。
   } catch (e) {
     console.error('[mp] 启动失败：', e);
     try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }

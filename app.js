@@ -510,6 +510,7 @@ function detectPreSeal() {
   const watchCodes = [];
   for (const t of ['S', 'A', 'B']) for (const s of (state.opportunities?.tiers?.[t] || [])) if (s.code) watchCodes.push(s.code);
   for (const l of (state.leaders || [])) if (l?.code) watchCodes.push(l.code);
+  setKV('watch', watchCodes).catch(() => {}); // C2:监控名单存 KV,供 SW 后台 periodicSync 检测用(与页面同口径)
   const now = Date.now();
   const cdMs = 30 * 60_000;
   const inCooldown = (key) => { const t = preSealCooldown.get(key); return Boolean(t && now - t < cdMs); };
@@ -530,6 +531,19 @@ async function pushNtfy(title, lines) {
     await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
   } catch { /* ntfy 发送失败静默,不打断三提醒 */ }
 }
+/* ---------------- C2 锁屏准点:注册 periodicSync 后台预警 ---------------- */
+// 配了 ntfy 且本机 Chrome 给了 periodicSync 权限(已探测「能锁屏准时」)才生效;否则静默跳过(退回 C1 切后台短窗)。
+// 周期任务在 sw.js 的 periodicsync 事件里跑:后台拉全市场→detectPreSealAlerts→发 ntfy+SW 通知。
+async function setupPeriodicSync() {
+  try {
+    const url = await getKV('pushNtfyUrl', '');
+    if (!url || !('serviceWorker' in navigator) || !('periodicSync' in ServiceWorkerRegistration.prototype)) return;
+    const reg = await navigator.serviceWorker.ready;
+    await reg.periodicSync.register('mp-preseal', { minInterval: 10 * 60_000 }); // 交易时段约每 10 分钟唤醒
+    console.log('[C2] periodicSync mp-preseal 已注册');
+  } catch (e) { /* 不支持/被拒静默,退回 C1 */ }
+}
+
 /* ---------------- C2 探测:periodicSync + SW 本地通知 ---------------- */
 // 长按星脉填主题末尾加 ?probe 触发。探测本机 Chrome 对 PWA 的 periodicSync(C2 锁屏准点的唯一可控前提)。
 // 结果分条大字慢速连播 toast(防闪太快看不清),并存 KV mpC2Probe 供诊断。
@@ -1583,6 +1597,7 @@ async function init() {
     applyRefreshTimer();
     maybeAuctionTick(); // 冷启动落在竞价窗口内时立即采集（不等首个 15s tick）
     setupNotifBanner(); // 抢时间批:通知授权引导(权限未授且未点过才显示,用户手势申请)
+    setupPeriodicSync(); // C2:配了 ntfy 就注册 periodicSync 后台预警(锁屏准点;本机不支持则静默跳过)
   } catch (e) {
     console.error('[mp] 启动失败：', e);
     try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }

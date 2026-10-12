@@ -1274,7 +1274,7 @@ const PARAM_MANIFEST = {
   },
   // 抢时间批·盘中封板前预警(2026-10-10)——只盯机会股+龙头,阈值可调
   preSealAlert: {
-    sealApproachPct: 7.5,   // 加速触板:涨幅 ≥7.5% 且未封板
+    sealApproachPct: 8.5,   // 加速触板:涨幅 ≥8.5% 且未封板(2026-10-12 上调:数据延迟+轮询间隔,7.5% 时收到推送往往已封)
     surgeWindowMs: 30_000,  // 急拉窗口:30 秒
     surgePct: 3,            // 该窗口内涨幅 >3%
     cooldownMs: 30 * 60_000 // 每票每类告警冷却 30 分钟
@@ -1286,7 +1286,7 @@ const PARAM_MANIFEST = {
 // 目标名单 = 机会股 tiers ∪ 龙头（用户拍板「只买龙头最强」，名单小而准）；已封/已炸/停牌/一字不重复报。
 function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(), now = Date.now(), params = PARAM_MANIFEST.preSealAlert, inCooldown = () => false } = {}) {
   const p = params || {};
-  const sealApproachPct = Number.isFinite(p.sealApproachPct) ? p.sealApproachPct : 7.5;
+  const sealApproachPct = Number.isFinite(p.sealApproachPct) ? p.sealApproachPct : 8.5;
   const surgeWindowMs = Number.isFinite(p.surgeWindowMs) ? p.surgeWindowMs : 30_000;
   const surgePct = Number.isFinite(p.surgePct) ? p.surgePct : 3;
   const watch = new Set((watchCodes || []).map(String));

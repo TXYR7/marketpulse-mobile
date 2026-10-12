@@ -533,7 +533,7 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
 // 抢时间批·手机移植:封板前预警 + 竞价打板名单(与桌面 analytics.js 逐字同步,C1 哨兵锁口径)
 {
   const stocks = [
-    { code: '600001', name: '龙头A', changePercent: 8.2, isLimitUp: false },
+    { code: '600001', name: '龙头A', changePercent: 8.8, isLimitUp: false },
     { code: '600002', name: '已封B', changePercent: 10.0, isLimitUp: true },
     { code: '600004', name: '急拉D', changePercent: 5.5, isLimitUp: false },
   ];

@@ -358,10 +358,9 @@ function patchDownCard(node, x) {
 }
 function showOfflineEmpty(err) {
   // 冷启动拉不到数据且无任何池（含快照水合失败）：清掉骨架屏给显式离线态，替代无限 shimmer
+  // 2026-10-22 小字清理:删「Token 失效→去设置更换」——设置页 2026-09-11 已砍,该引导指向不存在的入口(误导空态)
   const msg = err && err.message ? String(err.message) : '网络不可用或接口暂不可达';
-  const tokenIssue = err && (err.status === 401 || err.status === 403); // getJSON 抛错带 .status
   setHTML($('#ztList'), '<div class="empty">暂无行情数据<br /><span class="muted">' + esc(msg) + '</span>' +
-    (tokenIssue ? '<br /><span style="color:var(--amber)">Token 可能失效：设置 → 数据接口 Token 更换后重试</span>' : '') +
     '<br /><button class="btn" id="retryBtn" style="flex:0 0 auto;margin:14px auto 0;padding:0 22px">↻ 重试</button></div>');
   $('#ztList').__seq = '';
   $('#ztHint').textContent = '--';
@@ -417,7 +416,8 @@ async function loadGap(force = false) {
   const gapEl = $('#gapRows');
   const sum = $('#gapSummary');
   const yest = (state.history || []).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
-  if (!yest) { sum.textContent = '需历史'; setHTML(gapEl, '<div class="muted">需先「补录历史」或次日数据后才能计算昨日涨停今日开盘预期差。</div>'); return; }
+  // 2026-10-22 小字清理:原文案让用户「补录历史」,但设置页砍后手机端已无该入口(loadHistory 零调用方)——改中性空态
+  if (!yest) { sum.textContent = '需历史'; setHTML(gapEl, '<div class="muted">暂无前一交易日数据</div>'); return; }
   const candidates = (yest.stocks || []).map((c) => ({ code: c.code, name: c.name, boards: c.boards, industry: c.industry }));
   if (!candidates.length) { sum.textContent = '--'; setHTML(gapEl, '<div class="muted">昨日无涨停缓存</div>'); return; }
   // 同一交易日且已有结果：直接用缓存，不重复打行情接口
@@ -737,7 +737,7 @@ async function openSheet(code) {
   const mon = (state.monitorPool || []).find((m) => m.code === code);
   body.innerHTML = head + verdictHtml + signalHtml +
     (mon ? '<div class="s-risk">⚠ 交易所重点监控中 · 至' + esc(mon.end) + '</div>' : '') +
-    '<div class="s-concepts" id="sheetConcepts" hidden><span class="muted">概念命中 · 当下在炒</span><div class="con-tags" id="sheetConceptTags"></div></div>' +
+    '<div class="s-concepts" id="sheetConcepts" hidden><span class="muted">概念命中</span><div class="con-tags" id="sheetConceptTags"></div></div>' +
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
     promoHtml +
@@ -1225,10 +1225,10 @@ function updateBanner() {
     // 2026-09-13 休市批:周末/节假日明示——数据定格在上一交易日,数字不动是正常的
     const d = String(p.date || '');
     banner.classList.remove('hide');
-    banner.textContent = '休市中 · 显示 ' + d.slice(4, 6) + '-' + d.slice(6, 8) + ' 快照（数据定格，下拉可复检）';
+    banner.textContent = '休市中 · 显示 ' + d.slice(4, 6) + '-' + d.slice(6, 8) + ' 快照（数据定格）';
   } else if (!tradingNow()) {
     banner.classList.remove('hide');
-    banner.textContent = '非交易时段 · 显示最近交易日快照（手动点 ↻ 获取最新）';
+    banner.textContent = '非交易时段 · 显示最近交易日快照';
   } else if (state.mentalNotes && state.mentalNotes.length) {
     // 交易时段：用横幅位浮现当前阶段的第一条体系心法
     const n = state.mentalNotes[0];

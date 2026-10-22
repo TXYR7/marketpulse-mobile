@@ -526,7 +526,6 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 /* ===== 机会分层 ===== */
 .tier-block { margin: 12px 0; }
 .tier-head { display: flex; align-items: center; gap: 8px; margin: 8px 2px; }
-.tier-head .t { font-size: 15px; font-weight: 800; }
 .tier-head .c { color: var(--muted); font-size: 12px; }
 .opp-card {
   background: var(--surface-glass); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: var(--r-m);

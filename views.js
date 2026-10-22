@@ -99,9 +99,10 @@ export function renderOpportunity(ctx) {
   const sCount = (tiers.S || []).length, aCount = (tiers.A || []).length, bCount = (tiers.B || []).length, eCount = (opp.eliminated || []).length;
   document.querySelector('#oppHint').textContent = `S ${sCount} / A ${aCount} / B ${bCount} / 淘汰 ${eCount}`;
   if (!ctx.state.pools) { el.innerHTML = '<div class="empty">等待行情数据</div>'; return; }
-  const block = (label, list, cls) => {
+  // 2026-10-22 小字清理:分组头只留 S/A/B 徽标+只数——原「S 级」文字与徽标重复(用户点名删重复标签)
+  const block = (list, cls) => {
     if (!list.length) return '';
-    return '<div class="tier-block"><div class="tier-head"><span class="tier-badge ' + cls + '">' + cls + '</span><span class="tier-head"><span class="t">' + label + '</span><span class="c">' + list.length + ' 只</span></span></div>' +
+    return '<div class="tier-block"><div class="tier-head"><span class="tier-badge ' + cls + '">' + cls + '</span><span class="c">' + list.length + ' 只</span></div>' +
       list.map((x) => {
         const plus = (x.reasons?.plus || []).map((r) => '<span class="plus">+' + esc(r) + '</span>').join('');
         const minus = (x.reasons?.minus || []).map((r) => '<span class="minus">-' + esc(r) + '</span>').join('');
@@ -115,10 +116,10 @@ export function renderOpportunity(ctx) {
       }).join('') + '</div>';
   };
   const html =
-    block('S 级', tiers.S || [], 'S') +
-    block('A 级', tiers.A || [], 'A') +
-    block('B 级', tiers.B || [], 'B') +
-    (eCount ? '<div class="muted" style="padding:6px 2px">淘汰 ' + eCount + ' 只（综合得分偏低或触发淘汰规则）</div>' : '');
+    block(tiers.S || [], 'S') +
+    block(tiers.A || [], 'A') +
+    block(tiers.B || [], 'B') +
+    (eCount ? '<div class="muted" style="padding:6px 2px">淘汰 ' + eCount + ' 只</div>' : '');
   // 2026-09-11 修下拉卡顿:签名守卫——成员码序+结构字段(评分/信号/连板/理由)不变则跳过 innerHTML 全量重建
   // (5s 自动刷新下 score 常变,签名须含 score;纯价变不影响机会池,本池不显示价格)
   const sig = [sCount, aCount, bCount, eCount,
@@ -172,7 +173,7 @@ export function renderStructure(ctx) {
 
   const html =
     '<div class="sec-title"><h2>核心龙头</h2><span class="hint">Top ' + Math.min(12, (s.leaders || []).length) + '</span></div>' + (leaders || '<div class="empty">暂无</div>') +
-    '<div class="sec-title"><h2>题材强度</h2><span class="hint">按强度</span></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>';
+    '<div class="sec-title"><h2>题材强度</h2></div><div class="list">' + (themes || '<div class="empty">暂无</div>') + '</div>';
   setHTML(el, html);
 }
 

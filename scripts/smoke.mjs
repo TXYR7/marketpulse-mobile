@@ -9,7 +9,7 @@ import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
   calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays,
-  applyGate, auctionVerdict, detectPreSealAlerts, buildAuctionWatchlist
+  applyGate, auctionVerdict, detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession
 } from '../analytics.js';
 import {
   shanghaiNow, todayStr, mergePools, sealQuality, isTradingDay, lastTradingDate,
@@ -530,23 +530,46 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('mergePools date 为 string（东财 qdate 数字入参也归一）', typeof r.date === 'string' && r.date === '20260911');
 }
 
-// 抢时间批·手机移植:封板前预警 + 竞价打板名单(与桌面 analytics.js 逐字同步,C1 哨兵锁口径)
+// 抢时间批·手机移植:封板前预警 + 竞价打板名单(2026-10-24 与桌面同批重构检测源)
 {
+  // 行为:按板块涨停价判定,未封且距涨停 ≤1.5pp 才报;已封(距涨停 ≤0.15pp)绝不报
   const stocks = [
-    { code: '600001', name: '龙头A', changePercent: 8.8, isLimitUp: false },
-    { code: '600002', name: '已封B', changePercent: 10.0, isLimitUp: true },
-    { code: '600004', name: '急拉D', changePercent: 5.5, isLimitUp: false },
+    { code: '600001', name: '主板临近', changePercent: 8.8, limitPct: 10 },   // 距 1.2pp → sealApproach
+    { code: '600002', name: '主板封死', changePercent: 10.0, limitPct: 10 },  // 已封 → 不报
+    { code: '300003', name: '创业远未到', changePercent: 10, limitPct: 20 },  // 20cm 远未到 → 不报
+    { code: '300004', name: '创业临近', changePercent: 18.8, limitPct: 20 },  // 距 1.2pp → sealApproach
+    { code: '600004', name: '急拉D', changePercent: 5.5, limitPct: 10 },      // 30秒 +3.5pp → surge
   ];
-  const watch = ['600001', '600002', '600004'];
+  const watch = stocks.map((s) => s.code);
   const prev = new Map([['600004', { pct: 2.0, t: 100000 - 15000 }]]);
   const ev = detectPreSealAlerts({ stocks, watchCodes: watch, prevSnap: prev, now: 100000 });
-  ok('detectPreSealAlerts 触发 sealApproach+surge 且排除已封', ev.length === 2 && ev.some((e) => e.kind === 'sealApproach') && ev.some((e) => e.kind === 'surge') && !ev.some((e) => e.code === '600002'));
+  ok('detectPreSealAlerts 按涨停价判定:未封临近才报,已封/远未到不报', ev.length === 3
+    && ev.filter((e) => e.kind === 'sealApproach').map((e) => e.code).sort().join(',') === '300004,600001'
+    && ev.some((e) => e.kind === 'surge' && e.code === '600004')
+    && !ev.some((e) => e.code === '600002' || e.code === '300003'));
+  ok('limitThresholdOf 四档:主板10/创业20/科创20/北交30/ST5', limitThresholdOf('600001') === 10
+    && limitThresholdOf('300001') === 20 && limitThresholdOf('688001') === 20
+    && limitThresholdOf('920179') === 30 && limitThresholdOf('600001', 'ST 某某') === 5);
+  ok('isInTradingSession 上海时区:10:00 开市 / 12:00 午休', isInTradingSession(new Date('2026-10-23T02:00:00Z')) === true
+    && isInTradingSession(new Date('2026-10-23T04:00:00Z')) === false);
   const wl = buildAuctionWatchlist({
     auction: { available: true, items: [{ code: '600001', name: '龙头A', boards: 3, matchPct: 8.5, volRatio: 3.2, sealedBuyShares: 0 }] },
     opportunities: { tiers: { S: [{ code: '600001' }], A: [], B: [] } }, leaders: [{ code: '600001' }], gap: { candidates: [] },
   });
   ok('buildAuctionWatchlist 出名单且带机会级标签', wl.available && wl.items.length === 1 && wl.items[0].tier === 'S');
   ok('buildAuctionWatchlist 空竞价返回 unavailable', buildAuctionWatchlist({ auction: { available: false } }).available === false);
+}
+
+// 2026-10-24 封板前预警结构哨兵:两个「必须刷新才推」的根因不能回潮
+{
+  const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const swSrc = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  ok('detectPreSeal 不再挂在 computeDerived 派生链里(派生签名早退会饿死检测)', !/\n\s*detectPreSeal\(\);/.test(appSrc));
+  ok('封板前预警有独立 15s 定时器', /setInterval\(\(\) => \{ preSealTick\(\)\.catch/.test(appSrc));
+  ok('监控名单取上一交易日涨停池,不回退今日涨停池', /preSealPrevTradingDate/.test(appSrc) && /上一交易日涨停池/.test(appSrc));
+  ok('已推账本持久化(KV),刷新/重开不重推', /preSealSeen/.test(appSrc) && /preSealSeen/.test(swSrc));
+  ok('SW 后台读写页面库 mp-mobile(不再是孤立的 mp-preseal-bg 库)', /const PAGE_DB = 'mp-mobile'/.test(swSrc) && !/PRESEAL_DB = 'mp-preseal-bg'/.test(swSrc));
+  ok('SW 后台按实时报价+涨停价判定,不再拉全市场涨幅榜', /bgFetchQuotes/.test(swSrc) && /detectPreSealAlerts/.test(swSrc));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

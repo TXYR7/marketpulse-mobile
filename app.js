@@ -5,7 +5,7 @@ import {
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate, assessmentRules,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf,
-  detectPreSealAlerts, buildAuctionWatchlist
+  detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, revealList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
@@ -23,7 +23,7 @@ const state = {
   auction: null, auctionByCode: null, auctionPctByCode: {}, auctionMatchedSeen: 0, // 集合竞价：payload/单票索引/撮合涨幅 map/已见撮合数（首见触发重算）
   sheetCode: null, // 当前打开的详情抽屉（openSheet 设 / closeSheet 清）：后台补价与 promo 回填的守卫
   preSealOff: false, // 抢时间批:封板前预警总开关(false=开;设置里可关,关了只 toast 不弹通知/震动/声音)
-  bgUntil: 0, // C1 后台宽限:切后台后不立即停刷,在窗口内继续 tick 让 detectPreSeal 还能命中(见 refreshTick/visibilitychange)
+  bgUntil: 0, // C1 后台宽限:切后台后不立即停刷,在窗口内继续 tick 让封板前预警还能命中(见 refreshTick/visibilitychange)
   // 2026-09-11 一屏到底批:lastSignalSnapshot/notifySignals 已随通知链整删
 };
 
@@ -188,7 +188,7 @@ function computeDerived(pools) {
   const mentalNotes = contextNotes({ phase, limit: 3 });
 
   Object.assign(state, { themes, leaders, opportunities, emotion, riskRadar, structure, plan, breakRate, phase, positionAdvice, mentalNotes });
-  detectPreSeal(); // 抢时间批:封板前预警本地检测(与桌面 server 端同函数,App 开着时页内三提醒)
+  // 封板前预警已从派生链剥离(2026-10-24):由 preSealTick 独立 15s 扫描,不再受 deriveSig 早退影响
   state.lastPayload = {
     tradeDate: pools.date, limitUpCount: upCount, limitDownCount: downCount,
     status: { phase: emotion.phase, level: emotion.level, emotionIndex: emotion.emotionIndex, maxBoard },
@@ -498,26 +498,138 @@ function wilsonLower(up, n) {
   return Number((Math.max(0, (center - margin) / denom) * 100).toFixed(1));
 }
 
-/* ---------------- 抢时间批·封板前预警(2026-10-10) ----------------
-   本地检测(与桌面 server 端同函数 detectPreSealAlerts):只盯机会股∪龙头,涨7.5%未封或30秒急拉>3%。
-   页内三提醒(App 开着时):SW showNotification(系统通知) + 震动 + WebAudio 短音 + 行高亮。
-   人不在电脑旁的推送由桌面端 ntfy 承担(见桌面 server.js pushPreSeal);此处只管 App 在前台时的提醒。 */
+/* ---------------- 抢时间批·封板前预警(2026-10-10；2026-10-24 重构检测源) ----------------
+   旧版两个死结：
+   ① 检测源 = 今日涨停池(pools.up)——池里全是已封板票，mapPool 又不产 isLimitUp，
+      「已封不报」永远不成立 → 退化成「封死后每 30 分钟重推一次」。
+   ② detectPreSeal() 埋在 computeDerived() 里，而 deriveSig 不含实时涨幅——池成员一稳定就整轮早退，
+      只有整页重载才会再跑一次(用户现象：开着时间长了必须手动刷新才推)。
+   新版对齐桌面 server.js:runPreSealScan：
+   ① 监控名单 = 上一交易日涨停池(今日接力候选)，不是今日已封板池
+   ② 数据 = 东财 ulist 实时报价(price/prevClose 算涨幅)，不再依赖池接口
+   ③ 按板块/ST 涨停价判定：未封且距涨停 ≤1.5pp 才报
+   ④ 一票一日最多一条(账本落 IDB，刷新/重开/SW 唤醒都不重推)，单日上限 30 条
+   ⑤ 独立 15s 节拍，不依赖 computeDerived 的派生签名。 */
 let preSealPrevSnap = new Map();
-const preSealCooldown = new Map();
-function detectPreSeal() {
-  const pools = state.pools;
-  if (!pools || state.manualDate) return;
-  const watchCodes = [];
-  for (const t of ['S', 'A', 'B']) for (const s of (state.opportunities?.tiers?.[t] || [])) if (s.code) watchCodes.push(s.code);
-  for (const l of (state.leaders || [])) if (l?.code) watchCodes.push(l.code);
-  setKV('watch', watchCodes).catch(() => {}); // C2:监控名单存 KV,供 SW 后台 periodicSync 检测用(与页面同口径)
-  const now = Date.now();
-  const cdMs = 30 * 60_000;
-  const inCooldown = (key) => { const t = preSealCooldown.get(key); return Boolean(t && now - t < cdMs); };
-  const events = detectPreSealAlerts({ stocks: pools.up || [], watchCodes, prevSnap: preSealPrevSnap, now, inCooldown });
-  preSealPrevSnap = new Map((pools.up || []).filter((s) => Number.isFinite(Number(s.changePercent ?? parseFloat(s.gain)))).map((s) => [String(s.code), { pct: Number(s.changePercent ?? parseFloat(s.gain)), t: now }]));
-  if (!events.length) return;
-  for (const ev of events) { preSealCooldown.set(`${ev.code}:${ev.kind}`, now); firePreSealAlert(ev); }
+let preSealWatchCache = { forDate: '', stocks: [] };
+let preSealSeen = null; // { date, keys:Set }
+let preSealScanAt = 0;
+let preSealScanInflight = null;
+const PRESEAL_SCAN_MS = 15_000;
+
+// 上一交易日(YYYYMMDD)：从 today 往前找第一个交易日；找不到返回空串
+function preSealPrevTradingDate(today) {
+  const y = Number(String(today).slice(0, 4)); const m = Number(String(today).slice(4, 6)); const d = Number(String(today).slice(6, 8));
+  const base = new Date(y, m - 1, d);
+  for (let i = 1; i <= 15; i += 1) {
+    const x = new Date(base.getTime() - i * 86_400_000);
+    const k = `${x.getFullYear()}${String(x.getMonth() + 1).padStart(2, '0')}${String(x.getDate()).padStart(2, '0')}`;
+    if (isTradingDay(k)) return k;
+  }
+  return '';
+}
+// 监控名单：上一交易日收盘涨停池(今日接力候选)。优先用本机历史库；没有则拉一次并落库。
+async function preSealWatchStocks(today) {
+  if (preSealWatchCache.forDate === today) return preSealWatchCache.stocks;
+  const prevDate = preSealPrevTradingDate(today);
+  if (!prevDate) return [];
+  let pool = null;
+  const histPrev = (state.history || []).filter((h) => String(h.date) < String(today)).pop();
+  if (histPrev && String(histPrev.date) === prevDate && (histPrev.stocks || []).length) pool = histPrev.stocks;
+  if (!pool || !pool.length) {
+    try {
+      const p = await fetchPools(prevDate, { tries: 2, timeoutMs: 6000 });
+      pool = p.up || [];
+      if (pool.length) {
+        const rec = { date: prevDate, stocks: pool.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
+        putHistory(rec).catch(() => {});
+      }
+    } catch { pool = null; }
+  }
+  const stocks = (pool || []).map((s) => {
+    const code = String(s.code || '');
+    const name = String(s.name || code);
+    return { code, name, boards: Number(s.boards || 1), limitPct: limitThresholdOf(code, name) };
+  }).filter((s) => /^\d{6}$/.test(s.code));
+  if (!stocks.length) return []; // 拉取失败不缓存空名单，下一拍重试(缓存空会让警示一整天哑火)
+  preSealWatchCache = { forDate: today, stocks };
+  setKV('preSealWatch', { forDate: today, stocks }).catch(() => {}); // 供 sw.js 后台 periodicSync 共用同一名单
+  return stocks;
+}
+// 当日已推账本：跨刷新/跨前后台/SW 共用（KV 持久化，刷新不再重推同一票）
+// 每次扫描都重读：SW 后台可能刚写过同一本账，内存缓存会漏掉它推过的票导致重复推送。
+async function preSealSeenKeys(today) {
+  const saved = await getKV('preSealSeen', null).catch(() => null);
+  const keys = new Set(saved && saved.date === today && Array.isArray(saved.keys) ? saved.keys : []);
+  preSealSeen = { date: today, keys };
+  return keys;
+}
+function savePreSealSeen() {
+  if (!preSealSeen) return;
+  // 写入前与库里的账本做并集：SW 后台可能在这拍之后刚推过票，直接覆盖会把它的记录抹掉→重复推送
+  getKV('preSealSeen', null).catch(() => null).then((saved) => {
+    const keys = new Set(preSealSeen.keys);
+    if (saved && saved.date === preSealSeen.date && Array.isArray(saved.keys)) for (const k of saved.keys) keys.add(k);
+    preSealSeen.keys = keys;
+    return setKV('preSealSeen', { date: preSealSeen.date, keys: [...keys] });
+  }).catch(() => {});
+}
+
+// 独立扫描：不挂在 computeDerived 上，也不依赖页面 8s 刷新是否产生新派生
+async function preSealTick() {
+  if (state.preSealOff || state.manualDate) return [];
+  if (document.hidden && Date.now() >= state.bgUntil) return []; // C1 后台宽限窗口外不白耗流量
+  const today = todayStr();
+  if (!isTradingDay(today) || !isInTradingSession(new Date())) return [];
+  if (preSealScanInflight) return preSealScanInflight;
+  if (Date.now() - preSealScanAt < PRESEAL_SCAN_MS - 1000) return [];
+  preSealScanAt = Date.now();
+  preSealScanInflight = (async () => {
+    const watch = await preSealWatchStocks(today);
+    if (!watch.length) return [];
+    // 已封板的票不进报价请求：今日涨停池里的直接跳过，省一半以上请求
+    const sealed = new Set((state.pools?.up || []).map((s) => String(s.code)));
+    const codes = watch.filter((s) => !sealed.has(s.code)).map((s) => s.code);
+    if (!codes.length) return [];
+    let quotes;
+    try { quotes = await fetchQuotes(codes, { tries: 2, timeoutMs: 6000 }); } catch { return []; }
+    const now = Date.now();
+    const stocks = [];
+    for (const s of watch) {
+      const q = quotes[s.code];
+      if (!q || q.price == null || !q.prevClose) continue;
+      const changePercent = (q.price / q.prevClose - 1) * 100;
+      if (!Number.isFinite(changePercent)) continue;
+      stocks.push({ code: s.code, name: s.name, boards: s.boards, limitPct: s.limitPct, changePercent });
+    }
+    if (!stocks.length) return [];
+    const seen = await preSealSeenKeys(today);
+    const events = detectPreSealAlerts({
+      stocks, watchCodes: stocks.map((s) => s.code), prevSnap: preSealPrevSnap, now,
+      inCooldown: (key) => seen.has(key),
+    });
+    // 每轮都更新快照（急拉判定要连续两拍），已推的票由 seen 闸住
+    preSealPrevSnap = new Map(stocks.map((s) => [s.code, { pct: s.changePercent, t: now }]));
+    const MAX_PER_DAY = 30;
+    const accepted = [];
+    for (const ev of events) {
+      if (seen.size >= MAX_PER_DAY) break;
+      const key = `${ev.code}:${ev.kind}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      accepted.push(ev);
+    }
+    if (accepted.length) savePreSealSeen();
+    for (const ev of accepted) firePreSealAlert(ev);
+    return accepted;
+  })().finally(() => { preSealScanInflight = null; });
+  return preSealScanInflight;
+}
+let preSealTimer = null;
+function startPreSealMonitor() {
+  if (preSealTimer) return;
+  preSealTimer = setInterval(() => { preSealTick().catch(() => {}); }, PRESEAL_SCAN_MS);
+  preSealTick().catch(() => {});
 }
 // C3 本地封板前预警→ntfy:App/SW 命中后直接 POST 到用户配置的 ntfy 主题(通道与桌面 server 一致,锁屏送达率比 PWA SW 通知高)。
 // 配置存 IDB kv 的 pushNtfyUrl(形如 https://ntfy.sh/<主题>);未配置则静默跳过。
@@ -533,7 +645,8 @@ async function pushNtfy(title, lines) {
 }
 /* ---------------- C2 锁屏准点:注册 periodicSync 后台预警 ---------------- */
 // 配了 ntfy 且本机 Chrome 给了 periodicSync 权限(已探测「能锁屏准时」)才生效;否则静默跳过(退回 C1 切后台短窗)。
-// 周期任务在 sw.js 的 periodicsync 事件里跑:后台拉全市场→detectPreSealAlerts→发 ntfy+SW 通知。
+// 注意:Chrome 对 periodicSync 的调度是「尽力而为」,实际间隔由浏览器决定,不保证 10 分钟——
+//   关闭 App 后真正可靠的推送仍依赖桌面 server.js 的独立监控(见 pushPreSeal)。
 async function setupPeriodicSync() {
   try {
     const url = await getKV('pushNtfyUrl', '');
@@ -577,7 +690,7 @@ async function runC2Probe() {
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
 function firePreSealAlert(ev) {
   const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
-  const text = ev.kind === 'sealApproach' ? `${label} 逼近涨停 ${ev.pct}%（未封）` : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+  const text = ev.kind === 'sealApproach' ? `${label} 逼近涨停 ${ev.pct}%（距涨停 ${(Number(ev.limitPct) - Number(ev.pct)).toFixed(2)}pp，未封）` : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   const title = ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警';
   toast(text);
   if (state.preSealOff) return; // 设置里关了就只 toast 不打扰
@@ -615,7 +728,7 @@ function playAlertSound(kind) {
 function markPreSealRow(code) {
   document.querySelectorAll(`[data-code="${code}"]`).forEach((el) => { el.classList.add('preseal-flash'); setTimeout(() => el.classList.remove('preseal-flash'), 6000); });
 }
-if (typeof window !== 'undefined') { window.firePreSealAlert = firePreSealAlert; window.renderAuctionWatchlist = renderAuctionWatchlist; window.detectPreSeal = detectPreSeal; } // 测试注入点(PWA 验证用,无生产副作用)
+if (typeof window !== 'undefined') { window.firePreSealAlert = firePreSealAlert; window.renderAuctionWatchlist = renderAuctionWatchlist; window.preSealTick = preSealTick; } // 测试注入点(PWA 验证用,无生产副作用)
 
 // 2026-10-12 减法:通知授权引导横条(setupNotifBanner)整删——见 init 内注释。主推送走 ntfy,不需浏览器通知权限。
 
@@ -1364,6 +1477,7 @@ function bind() {
     state.bgUntil = 0; // 回前台即关窗,恢复正常前台节流
     if (!tradingNow()) return;
     maybeAuctionTick(); // 回前台落在竞价窗口内时立即补采集
+    preSealScanAt = 0; preSealTick().catch(() => {}); // 回前台立即补一次封板前扫描(不等 15s 节拍)
     const age = Date.now() - state.lastSuccessAt;
     if (!state.lastSuccessAt || age > (state.refreshMs || 15000)) refresh();
   });
@@ -1416,7 +1530,7 @@ function bind() {
           if (v === null) return;
           const s = v.trim();
           const probe = /\?probe$/.test(s);
-          setKV('pushNtfyUrl', probe ? s.replace(/\?probe$/, '') : s).then(() => toast(s ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'));
+          setKV('pushNtfyUrl', probe ? s.replace(/\?probe$/, '') : s).then(() => { toast(s ? 'ntfy 推送已配置' : 'ntfy 推送已关闭'); if (s) setupPeriodicSync().catch(() => {}); });
           if (probe) runC2Probe();
         }).catch(() => {});
       }, 550);
@@ -1574,6 +1688,7 @@ async function init() {
     }
     await refresh();
     applyRefreshTimer();
+    startPreSealMonitor(); // 封板前预警独立 15s 扫描(不依赖派生签名;刷新页面不再需要)
     maybeAuctionTick(); // 冷启动落在竞价窗口内时立即采集（不等首个 15s tick）
     setupPeriodicSync(); // C2:配了 ntfy 就注册 periodicSync 后台预警(锁屏准点;本机不支持则静默跳过)
     // 2026-10-12 减法:通知授权横条(setupNotifBanner)已整删——主推送走 ntfy(CORS 全开、锁屏送达率高),

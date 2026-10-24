@@ -1,6 +1,6 @@
 // sw.js — 缓存 app 外壳（离线可启动）；行情接口直连不缓存
 // 版本号由 scripts/bump-sw.mjs 自动递增（发布到手机.cmd 会调用），无需手动改。
-const CACHE = 'mp-mobile-20261022';
+const CACHE = 'mp-mobile-20261024';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data.js', './store.js',
   './analytics.js', './views.js', './views-extra.js', './version.js',
@@ -27,7 +27,7 @@ self.addEventListener('activate', (e) => {
 });
 
 // 抢时间批·封板前预警(2026-10-10):点通知聚焦/打开 App。通知由页面 reg.showNotification 发出
-// (App 前台场景);后台推送由桌面 ntfy 承担,SW 不做周期轮询(范围界定,避免 SW 复杂化)。
+// (App 前台场景);后台推送由桌面 ntfy 承担,SW 只在 periodicSync 被唤醒时兜底。
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   e.waitUntil((async () => {
@@ -39,81 +39,164 @@ self.addEventListener('notificationclick', (e) => {
 });
 
 /* ---------------- C2 锁屏准点:periodicSync 后台封板前预警 ---------------- */
-// 锁屏/关屏时 periodicSync 唤醒 SW → 后台自拉全市场快照 → 跑 detectPreSealAlerts(analytics.js 纯函数)→ 命中发 ntfy + SW 通知。
-// 状态(preSnap/冷却)存 IndexedDB 跨 tick 保持;配置 pushNtfyUrl(与页面 C3 同一 KV)。
-// 前提:本机 Chrome 已给 periodicSync 权限(已探测「能锁屏准时」),否则 periodicSync.register 无效、不会触发。
-const PRESEAL_DB = 'mp-preseal-bg';
-function presealIDB() {
+// 锁屏/关屏时 periodicSync 唤醒 SW → 读页面写好的「上一交易日涨停池」名单 → 拉实时报价 →
+// 跑 detectPreSealAlerts(analytics.js 纯函数) → 命中发 ntfy + SW 通知。
+//
+// ⚠ 2026-10-24 修:旧版把名单/配置读自 mp-preseal-bg,而页面 getKV/setKV 写的是 mp-mobile
+//   (store.js)——两个库永不互通,后台任务第一行 pushNtfyUrl 就取到 null 直接 return,
+//   periodicSync 从上线起就没真正发过一条推送。现在名单/账本/配置统一读写 mp-mobile。
+// ⚠ Chrome 对 periodicSync 的调度是「尽力而为」:频率由浏览器按站点参与度决定,不保证 10 分钟,
+//   且 App 被系统杀掉/省电限制时不触发。关闭 App 后的可靠推送仍以桌面 server.js 的独立监控为准。
+const PAGE_DB = 'mp-mobile';
+
+function openPageDB() {
+  // 不指定版本:跟随页面当前版本,避免 SW 把页面库升/降级。库不存在时创建空 v1,页面下次 open(v3) 会正常升级建表。
   return new Promise((res, rej) => {
-    const rq = indexedDB.open(PRESEAL_DB, 1);
-    rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+    const rq = indexedDB.open(PAGE_DB);
     rq.onsuccess = () => res(rq.result);
     rq.onerror = () => rej(rq.error);
   });
 }
-async function kvGet(store, k) {
-  const db = await presealIDB();
-  return new Promise((res, rej) => {
-    const rq = db.transaction(store, 'readonly').objectStore(store).get(k);
-    rq.onsuccess = () => res(rq.result ?? null);
-    rq.onerror = () => rej(rq.error);
-  });
+async function pageKvGet(k) {
+  let db = null;
+  try {
+    db = await openPageDB();
+    if (!db.objectStoreNames.contains('kv')) return null;
+    return await new Promise((res, rej) => {
+      const rq = db.transaction('kv', 'readonly').objectStore('kv').get(k);
+      rq.onsuccess = () => res(rq.result ?? null);
+      rq.onerror = () => rej(rq.error);
+    });
+  } finally { try { db?.close(); } catch { /* ignore */ } }
 }
-async function kvSet(store, k, v) {
-  const db = await presealIDB();
-  return new Promise((res, rej) => {
-    const tx = db.transaction(store, 'readwrite');
-    tx.objectStore(store).put(v, k);
-    tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
-  });
+async function pageKvSet(k, v) {
+  let db = null;
+  try {
+    db = await openPageDB();
+    if (!db.objectStoreNames.contains('kv')) return;
+    await new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(v, k);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } finally { try { db?.close(); } catch { /* ignore */ } }
 }
-// 交易时段(周末/节假日后台不跑,省电):周一~五 + 9:15-11:35 / 12:55-15:00(本地时区近似)
-function bgTradingNow(d = new Date()) {
-  const wd = d.getDay();
-  if (wd === 0 || wd === 6) return false;
-  const m = d.getHours() * 60 + d.getMinutes();
-  return (m >= 555 && m <= 695) || (m >= 775 && m <= 900);
+
+// 上海时区交易时段(9:30-11:30 / 13:00-15:00)：不依赖设备时区
+function bgSessionNow(d = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+    const wd = parts.find((p) => p.type === 'weekday')?.value || '';
+    if (wd === 'Sat' || wd === 'Sun') return false;
+    const m = Number(parts.find((p) => p.type === 'hour')?.value) * 60 + Number(parts.find((p) => p.type === 'minute')?.value);
+    return (m >= 570 && m <= 690) || (m >= 780 && m <= 900);
+  } catch { return false; }
 }
-// 后台主流程:CORS 全开的东财接口 → 全市场快照 → 检测
+
+function prevTradingDateKey(today, isTradingDay) {
+  const y = Number(String(today).slice(0, 4)); const mo = Number(String(today).slice(4, 6)); const d = Number(String(today).slice(6, 8));
+  const base = new Date(y, mo - 1, d);
+  for (let i = 1; i <= 15; i += 1) {
+    const x = new Date(base.getTime() - i * 86_400_000);
+    const k = `${x.getFullYear()}${String(x.getMonth() + 1).padStart(2, '0')}${String(x.getDate()).padStart(2, '0')}`;
+    if (isTradingDay(k)) return k;
+  }
+  return '';
+}
+// 监控名单:优先页面今天写好的 preSealWatch;页面整天没开过则 SW 自拉上一交易日涨停池
+async function bgWatchStocks(today) {
+  const cached = await pageKvGet('preSealWatch').catch(() => null);
+  if (cached && cached.forDate === today && Array.isArray(cached.stocks) && cached.stocks.length) return cached.stocks;
+  const { isTradingDay } = await import('./data.js');
+  const { limitThresholdOf } = await import('./analytics.js');
+  const prev = prevTradingDateKey(today, isTradingDay);
+  if (!prev) return [];
+  const url = `https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=300&sort=fbt:asc&date=${prev}`;
+  const j = await fetch(url).then((r) => r.json()).catch(() => null);
+  const stocks = (j?.data?.pool || []).map((row) => {
+    const code = String(row.c || ''); const name = String(row.n || code);
+    return { code, name, boards: Number(row.lbc || 1), limitPct: limitThresholdOf(code, name) };
+  }).filter((s) => /^\d{6}$/.test(s.code));
+  if (stocks.length) pageKvSet('preSealWatch', { forDate: today, stocks }).catch(() => {});
+  return stocks;
+}
+
+const ULIST_CHUNK = 60;
+function secidOf(code) { const c = String(code); return ((c[0] === '6' || c[0] === '5') ? '1.' : '0.') + c; }
+async function bgFetchQuotes(codes) {
+  const out = {};
+  for (let i = 0; i < codes.length; i += ULIST_CHUNK) {
+    const secids = codes.slice(i, i + ULIST_CHUNK).map(secidOf).join(',');
+    const url = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f18&_=${Date.now()}`;
+    let j = await fetch(url).then((r) => r.json()).catch(() => null);
+    if (!j?.data?.diff) j = await fetch(url.replace('push2.eastmoney.com', 'push2delay.eastmoney.com')).then((r) => r.json()).catch(() => null);
+    for (const row of j?.data?.diff || []) {
+      const price = Number(row.f2); const prevClose = Number(row.f18);
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) out[String(row.f12)] = { price, prevClose };
+    }
+  }
+  return out;
+}
+
 async function bgPresealTick() {
-  if (!bgTradingNow()) return;
-  const url = await kvGet('kv', 'pushNtfyUrl').catch(() => null);
-  if (!url) return; // 未配置 ntfy 不后台跑
-  const { detectPreSealAlerts } = await import('./analytics.js'); // 纯函数,SW 内可跑
-  // 全市场快照(东财 clist,分页拉前两页≈涨停池足够)
-  const all = [];
-  for (let page = 1; page <= 2; page += 1) {
-    const u = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f3,f12,f14`;
-    const j = await fetch(u).then((r) => r.json()).catch(() => null);
-    const rows = j?.data?.diff || [];
-    for (const r of rows) all.push({ code: String(r.f12 ?? ''), name: r.f14 ?? '', changePercent: Number.isFinite(Number(r.f3)) ? Number(r.f3) : NaN });
-  }
-  if (!all.length) return;
+  if (!bgSessionNow()) return;
+  const { todayStr, isTradingDay } = await import('./data.js');
+  const today = todayStr();
+  if (!isTradingDay(today)) return;
+  const ntfyUrl = await pageKvGet('pushNtfyUrl').catch(() => null);
+  if (!ntfyUrl || !/^https?:\/\//i.test(ntfyUrl)) return; // 未配置 ntfy 不后台跑(SW 通知也一并不发,避免两套口径)
+  const watch = await bgWatchStocks(today).catch(() => []);
+  if (!watch.length) return;
+  const quotes = await bgFetchQuotes(watch.map((s) => s.code)).catch(() => ({}));
   const now = Date.now();
-  let prevSnap = (await kvGet('kv', 'prevSnap').catch(() => null)) || {};
-  prevSnap = new Map(Object.entries(prevSnap).map(([k, v]) => [k, v]));
-  const cooldown = (await kvGet('kv', 'cool').catch(() => null)) || {};
-  const inCooldown = (key) => { const t = cooldown[key]; return Boolean(t && now - t < 30 * 60_000); };
-  // 监控名单:优先机会股∪龙头(页面算好的);没有则全市场高涨幅(涨幅≥7%未封)
-  let watchCodes = (await kvGet('kv', 'watch').catch(() => null)) || [];
-  if (!watchCodes.length) watchCodes = all.filter((s) => s.changePercent >= 7).map((s) => s.code);
-  const events = detectPreSealAlerts({ stocks: all, watchCodes, prevSnap, now, inCooldown });
-  // 存状态(prevSnap=本轮快照,冷却标记命中项)
-  await kvSet('kv', 'prevSnap', Object.fromEntries(all.filter((s) => Number.isFinite(s.changePercent)).map((s) => [s.code, { pct: s.changePercent, t: now }])));
-  for (const ev of events) cooldown[`${ev.code}:${ev.kind}`] = now;
-  await kvSet('kv', 'cool', cooldown);
-  // 命中:发 ntfy(通道与 C3 一致)+ SW 通知
+  const stocks = [];
+  for (const s of watch) {
+    const q = quotes[s.code];
+    if (!q) continue;
+    const changePercent = (q.price / q.prevClose - 1) * 100;
+    if (!Number.isFinite(changePercent)) continue;
+    stocks.push({ code: s.code, name: s.name, boards: s.boards, limitPct: s.limitPct, changePercent });
+  }
+  if (!stocks.length) return;
+  const { detectPreSealAlerts } = await import('./analytics.js');
+  // 上轮涨幅快照:落页面同一个库,跨 tick 保持;隔日作废(防止隔夜旧涨幅被当急拉基准)
+  const prevRec = await pageKvGet('preSealPrevSnap').catch(() => null);
+  const prevSnap = new Map(prevRec && prevRec.date === today && prevRec.snap ? Object.entries(prevRec.snap) : []);
+  // 当日已推账本:与页面共用,先查账再更新,保证刷新/前后台/页面与 SW 之间不重复
+  const seenRec = await pageKvGet('preSealSeen').catch(() => null);
+  const seen = new Set(seenRec && seenRec.date === today && Array.isArray(seenRec.keys) ? seenRec.keys : []);
+  const events = detectPreSealAlerts({ stocks, watchCodes: stocks.map((s) => s.code), prevSnap, now, inCooldown: (key) => seen.has(key) });
+  const accepted = [];
   for (const ev of events) {
+    if (seen.size >= 30) break; // 单日上限,防异常数据刷屏
+    const key = `${ev.code}:${ev.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    accepted.push(ev);
+  }
+  await pageKvSet('preSealPrevSnap', { date: today, snap: Object.fromEntries(stocks.map((s) => [s.code, { pct: s.changePercent, t: now }])) }).catch(() => {});
+  if (accepted.length) {
+    // 写入前与页面账本做并集:页面 15s 扫描可能刚写过,直接覆盖会抹掉它的记录→重复推送
+    const latest = await pageKvGet('preSealSeen').catch(() => null);
+    const merged = new Set(seen);
+    if (latest && latest.date === today && Array.isArray(latest.keys)) for (const k of latest.keys) merged.add(k);
+    await pageKvSet('preSealSeen', { date: today, keys: [...merged] }).catch(() => {});
+  }
+  const root = new URL(ntfyUrl).origin + '/';
+  const topic = ntfyUrl.split('/').filter(Boolean).pop();
+  for (const ev of accepted) {
     const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
-    const text = ev.kind === 'sealApproach' ? `${label} 逼近涨停 ${ev.pct}%（未封）` : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+    const text = ev.kind === 'sealApproach'
+      ? `${label} 逼近涨停 ${ev.pct}%（距涨停 ${(Number(ev.limitPct) - Number(ev.pct)).toFixed(2)}pp，未封）`
+      : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
     const title = ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警';
-    const root = new URL(url).origin + '/';
-    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title: `MarketPulse · ${label} ${title}`, message: text, priority: 4, tags: ['warning', 'bell'] }) }).catch(() => {});
-    try { await self.registration.showNotification(title, { body: text, tag: `bg-preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch {}
+    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topic, title: `MarketPulse · ${label} ${title}`, message: text, priority: 4, tags: ['warning', 'bell'] }) }).catch(() => {});
+    try { await self.registration.showNotification(title, { body: text, tag: `bg-preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch { /* 无通知权限时静默 */ }
   }
 }
-// periodicSync 周期任务:交易时段约每 10 分钟唤醒一次
+
+// periodicSync 周期任务:交易时段约每 10 分钟唤醒一次(实际由 Chrome 调度)
 self.addEventListener('periodicsync', (e) => {
   if (e.tag === 'mp-preseal') e.waitUntil(bgPresealTick().catch(() => {}));
 });

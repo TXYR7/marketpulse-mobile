@@ -1,6 +1,6 @@
 // sw.js — 缓存 app 外壳（离线可启动）；行情接口直连不缓存
 // 版本号由 scripts/bump-sw.mjs 自动递增（发布到手机.cmd 会调用），无需手动改。
-const CACHE = 'mp-mobile-20261026';
+const CACHE = 'mp-mobile-20261026-2';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data.js', './store.js',
   './analytics.js', './views.js', './views-extra.js', './version.js',
@@ -287,7 +287,15 @@ async function bgPresealTick() {
     const title = accepted.length === 1 ? `MarketPulse · ${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `MarketPulse · 封板前预警 ${accepted.length} 只`;
     const notifyTitle = accepted.length === 1 ? (accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警') : '封板前预警';
     const message = lines.join('\n');
-    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topic, title, message, priority: 4, tags: ['warning', 'bell'] }) }).catch(() => {});
+    // 2026-10-26 与页面/网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),后台推送更怕一次抖动就丢。
+    const body = JSON.stringify({ topic, title, message, priority: 4, tags: ['warning', 'bell'] });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
+      try {
+        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        if (res && res.ok) break;
+      } catch { /* 下一轮重试 */ }
+    }
     try { await self.registration.showNotification(notifyTitle, { body: message, tag: 'bg-preseal', icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch { /* 无通知权限时静默 */ }
   }
 }

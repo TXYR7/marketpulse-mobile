@@ -524,7 +524,7 @@ let preSealScanInflight = null;
 let preSealWatchSig = '';
 let preSealState = { date: '', byCode: new Map() }; // 回封状态:sealed/broken/init
 let preSealRankingCache = { at: 0, rows: [] };
-let preSealDigest = { date: '', sent: new Set(), lastAt: 0, auctionSent: false };
+let preSealDigest = { date: '', byCode: new Map(), lastAt: 0, auctionSent: false }; // 摘要重复账本(与核心层同口径)
 const PRESEAL_SCAN_MS = 15_000;
 const PRESEAL_RANKING_MS = 30_000;
 const round2 = (x) => Math.round(Number(x) * 100) / 100;
@@ -710,40 +710,73 @@ function preSealMarketCandidates(rows = [], { auction = false } = {}) {
 }
 // 全市场摘要：最快 2 分钟一条(竞价段只发一条)，每条最多 8 只，未列出的下一轮继续，不丢票。
 // 2026-10-24 用户拍板:不设单日条数硬上限，只靠时间节流。
+// 摘要重复账本(2026-10-26 与网页同口径):code -> {lastAt,lastPct,resetReady}。
+// 同一只票须先从上次摘要时的涨幅回落 ≥3pp,且距上次 ≥20 分钟,才允许再次进摘要——
+// 不再「一票一天只出现一次」。全局仍保持最多 2 分钟一条、每条最多 8 只。
 async function loadPreSealDigest(today) {
   if (preSealDigest.date === today) return preSealDigest;
   const saved = await getKV('preSealDigest', null).catch(() => null);
+  const byCode = new Map();
+  if (saved && saved.date === today) {
+    if (saved.byCode && typeof saved.byCode === 'object') {
+      for (const [code, v] of Object.entries(saved.byCode)) byCode.set(code, {
+        lastAt: Number(v?.lastAt) || 0,
+        lastPct: Number.isFinite(Number(v?.lastPct)) ? Number(v.lastPct) : null,
+        resetReady: v?.resetReady === true,
+      });
+    } else if (Array.isArray(saved.keys)) {
+      // 旧账本(keys:Set)迁移:没有当时的涨幅记录,按「已发过」处理,20 分钟内不重复;
+      // 之后与网页同口径(缺涨幅记录时保守放行)。
+      for (const code of saved.keys) byCode.set(String(code), { lastAt: Number(saved.lastAt) || Date.now(), lastPct: null, resetReady: false });
+    }
+  }
   preSealDigest = {
     date: today,
-    sent: new Set(saved && saved.date === today && Array.isArray(saved.keys) ? saved.keys : []),
+    byCode,
     lastAt: Number(saved?.lastAt) || 0,
     auctionSent: saved && saved.date === today ? saved.auctionSent === true : false,
   };
   return preSealDigest;
 }
 function savePreSealDigest() {
-  setKV('preSealDigest', { date: preSealDigest.date, keys: [...preSealDigest.sent], lastAt: preSealDigest.lastAt, auctionSent: preSealDigest.auctionSent }).catch(() => {});
+  const byCode = {};
+  for (const [code, v] of preSealDigest.byCode) byCode[code] = v;
+  setKV('preSealDigest', { date: preSealDigest.date, byCode, lastAt: preSealDigest.lastAt, auctionSent: preSealDigest.auctionSent }).catch(() => {});
 }
 async function pushPreSealDigest(candidates, { auction = false } = {}) {
   if (!candidates.length || state.preSealOff) return;
   const p = PARAM_MANIFEST.preSealAlert;
   const today = todayStr();
   const st = await loadPreSealDigest(today);
-  const fresh = candidates.filter((c) => !st.sent.has(c.code));
-  if (!fresh.length) return;
   const now = Date.now();
+  const minInterval = Number(p.repeatMinIntervalMs) || 20 * 60_000;
+  const resetOffset = Number(p.repeatResetOffsetPct) || 3;
+  // 先按本轮涨幅解锁「可再次提醒」:回落 ≥3pp;账本里没有涨幅记录时保守放行。
+  for (const c of candidates) {
+    const s = st.byCode.get(c.code);
+    if (!s) continue;
+    if (s.lastPct == null) s.resetReady = true;
+    else if (c.pct <= s.lastPct - resetOffset) s.resetReady = true;
+  }
+  const eligible = [];
+  for (const c of candidates) {
+    const s = st.byCode.get(c.code);
+    if (!s) { eligible.push(c); continue; }
+    if (s.resetReady && now - s.lastAt >= minInterval) eligible.push(c);
+  }
+  if (!eligible.length) return;
   if (auction) {
     if (st.auctionSent) return; // 竞价段只发一条(9:26 撮合价定稿后)
     st.auctionSent = true;
   } else if (now - st.lastAt < (Number(p.digestIntervalMs) || 120_000)) return;
   const maxItems = Number(p.digestMaxItems) || 8;
-  const items = fresh.slice(0, maxItems);
-  for (const c of items) st.sent.add(c.code);
+  const items = eligible.slice(0, maxItems);
+  for (const c of items) st.byCode.set(c.code, { lastAt: now, lastPct: c.pct, resetReady: false });
   st.lastAt = now;
   savePreSealDigest();
   const lines = items.map((c) => `${c.name} +${c.pct}%（距涨停 ${c.gapPct}pp · 成交 ${fmtDigestMoney(c.amount)}）`);
-  if (fresh.length > items.length) lines.push(`另有 ${fresh.length - items.length} 只，下一条摘要继续`);
-  pushNtfy(`MarketPulse · ${auction ? '竞价' : '主板'}临近涨停 ${fresh.length} 只`, lines);
+  if (eligible.length > items.length) lines.push(`另有 ${eligible.length - items.length} 只，下一条摘要继续`);
+  pushNtfy(`MarketPulse · ${auction ? '竞价' : '主板'}临近涨停 ${eligible.length} 只`, lines);
 }
 // 摘要金额口径与桌面 formatMoney 一致：≥1亿两位小数，否则取整到万
 function fmtDigestMoney(v) {
@@ -898,7 +931,15 @@ async function pushNtfy(title, lines) {
     if (!url || !/^https?:\/\//i.test(url)) return; // 未配置即跳过(用户没填就不发)
     const root = new URL(url).origin + '/';
     const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 4, tags: ['warning', 'bell'] });
-    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    // 2026-10-26 与网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),不再一次失败就丢掉提醒。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
+      try {
+        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        if (res && res.ok) return;
+      } catch { /* 下一轮重试 */ }
+    }
+    console.warn('[C3] ntfy 推送重试 2 次后仍失败', title);
   } catch { /* ntfy 发送失败静默,不打断三提醒 */ }
 }
 /* ---------------- C2 锁屏准点:注册 periodicSync 后台预警 ---------------- */

@@ -1,11 +1,11 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中
+import { fetchPools, fetchQuotes, fetchAllMarket, fetchSinaTopGainers, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate, assessmentRules,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf,
-  detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession
+  detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, revealList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
@@ -498,24 +498,36 @@ function wilsonLower(up, n) {
   return Number((Math.max(0, (center - margin) / denom) * 100).toFixed(1));
 }
 
-/* ---------------- 抢时间批·封板前预警(2026-10-10；2026-10-24 重构检测源) ----------------
+/* ---------------- 抢时间批·封板前预警(2026-10-10；2026-10-24 双层重构,与桌面同批) ----------------
    旧版两个死结：
    ① 检测源 = 今日涨停池(pools.up)——池里全是已封板票，mapPool 又不产 isLimitUp，
       「已封不报」永远不成立 → 退化成「封死后每 30 分钟重推一次」。
    ② detectPreSeal() 埋在 computeDerived() 里，而 deriveSig 不含实时涨幅——池成员一稳定就整轮早退，
       只有整页重载才会再跑一次(用户现象：开着时间长了必须手动刷新才推)。
    新版对齐桌面 server.js:runPreSealScan：
-   ① 监控名单 = 上一交易日涨停池(今日接力候选)，不是今日已封板池
-   ② 数据 = 东财 ulist 实时报价(price/prevClose 算涨幅)，不再依赖池接口
-   ③ 按板块/ST 涨停价判定：未封且距涨停 ≤1.5pp 才报
-   ④ 一票一日最多一条(账本落 IDB，刷新/重开/SW 唤醒都不重推)，单日上限 30 条
-   ⑤ 独立 15s 节拍，不依赖 computeDerived 的派生签名。 */
+   ① 核心层 = 上一交易日涨停池 ∪ 今日炸板池 ∪ 竞价候选，逐票推；只做主板A股，排除 ST/新股
+   ② 数据 = 实时报价(price/prevClose)，按「精确涨停价」(昨收算到分)判定未封且距涨停 ≤1.5pp
+   ③ 炸板回封：封→跌破 1pp 记炸板，重新逼近到距涨停 0.5pp 内再推(受重复提醒规则约束)
+   ④ 全市场层 = 涨幅榜前 300 里临近涨停、成交额≥1亿的票，合并摘要推，最快 2 分钟一条
+   ⑤ 9:26-9:29 用涨幅榜竞价撮合价预扫，覆盖开盘秒板
+   ⑥ 重复提醒(2026-10-24 用户拍板):不设次数上限；同一票同一类必须先从上次提醒涨幅
+      回落 ≥3pp，且距上次 ≥20 分钟，才允许再次提醒；不满足绝不重复。
+   ⑦ 核心推送全局节流:最多每 15s 一条，一轮多事件合并成一条，节流窗口内进 backlog 不丢票。 */
 let preSealPrevSnap = new Map();
-let preSealWatchCache = { forDate: '', stocks: [] };
-let preSealSeen = null; // { date, keys:Set }
+let preSealPrevPoolCache = { forDate: '', stocks: [] };
+let preSealPrevPoolRetryAt = 0;
+let preSealRepeat = { date: '', byKey: new Map() }; // code:kind -> {count,lastAt,lastPct,resetReady}
+let preSealCorePushAt = 0;
+let preSealCoreBacklog = [];
 let preSealScanAt = 0;
 let preSealScanInflight = null;
+let preSealWatchSig = '';
+let preSealState = { date: '', byCode: new Map() }; // 回封状态:sealed/broken/init
+let preSealRankingCache = { at: 0, rows: [] };
+let preSealDigest = { date: '', sent: new Set(), lastAt: 0, auctionSent: false };
 const PRESEAL_SCAN_MS = 15_000;
+const PRESEAL_RANKING_MS = 30_000;
+const round2 = (x) => Math.round(Number(x) * 100) / 100;
 
 // 上一交易日(YYYYMMDD)：从 today 往前找第一个交易日；找不到返回空串
 function preSealPrevTradingDate(today) {
@@ -528,9 +540,10 @@ function preSealPrevTradingDate(today) {
   }
   return '';
 }
-// 监控名单：上一交易日收盘涨停池(今日接力候选)。优先用本机历史库；没有则拉一次并落库。
-async function preSealWatchStocks(today) {
-  if (preSealWatchCache.forDate === today) return preSealWatchCache.stocks;
+// 上一交易日收盘涨停池(今日接力候选)。优先本机历史库；没有则拉一次并落库。
+async function preSealPrevPool(today) {
+  if (preSealPrevPoolCache.forDate === today) return preSealPrevPoolCache.stocks;
+  if (Date.now() < preSealPrevPoolRetryAt) return [];
   const prevDate = preSealPrevTradingDate(today);
   if (!prevDate) return [];
   let pool = null;
@@ -549,30 +562,227 @@ async function preSealWatchStocks(today) {
   const stocks = (pool || []).map((s) => {
     const code = String(s.code || '');
     const name = String(s.name || code);
-    return { code, name, boards: Number(s.boards || 1), limitPct: limitThresholdOf(code, name) };
-  }).filter((s) => /^\d{6}$/.test(s.code));
-  if (!stocks.length) return []; // 拉取失败不缓存空名单，下一拍重试(缓存空会让警示一整天哑火)
-  preSealWatchCache = { forDate: today, stocks };
-  setKV('preSealWatch', { forDate: today, stocks }).catch(() => {}); // 供 sw.js 后台 periodicSync 共用同一名单
+    return { code, name, boards: Number(s.boards || 1) };
+  }).filter((s) => isMainBoardShare(s.code) && !isExcludedPreSealName(s.name));
+  if (!stocks.length) { preSealPrevPoolRetryAt = Date.now() + 5 * 60_000; return []; } // 空名单不缓存,5 分钟后重试
+  preSealPrevPoolCache = { forDate: today, stocks };
   return stocks;
 }
-// 当日已推账本：跨刷新/跨前后台/SW 共用（KV 持久化，刷新不再重推同一票）
-// 每次扫描都重读：SW 后台可能刚写过同一本账，内存缓存会漏掉它推过的票导致重复推送。
-async function preSealSeenKeys(today) {
-  const saved = await getKV('preSealSeen', null).catch(() => null);
-  const keys = new Set(saved && saved.date === today && Array.isArray(saved.keys) ? saved.keys : []);
-  preSealSeen = { date: today, keys };
-  return keys;
+// 核心名单 = 昨日涨停 ∪ 今日炸板 ∪ 竞价候选。炸板/竞价来自实时 state，每轮重建。
+async function preSealCoreWatch(today) {
+  const prev = await preSealPrevPool(today);
+  const map = new Map();
+  const add = (s, source) => {
+    const code = String(s?.code || '');
+    const name = String(s?.name || code);
+    if (!isMainBoardShare(code) || isExcludedPreSealName(name)) return;
+    const exist = map.get(code);
+    if (exist) { if (source && !exist.sources.includes(source)) exist.sources.push(source); return; }
+    map.set(code, { code, name, boards: Number(s.boards || 1), boardLimitPct: limitThresholdOf(code, name), sources: source ? [source] : [] });
+  };
+  for (const s of prev) add(s, '昨日涨停');
+  const payloadToday = String(state.pools?.date || '') === today;
+  if (payloadToday) {
+    for (const s of state.pools?.broken || []) add(s, '今日炸板');
+    // 竞价候选只在竞价数据是今日时才算数,避免第二天开盘前读到昨日竞价缓存
+    if (String(state.auction?.date || '') === today) {
+      const aw = buildAuctionWatchlist({ auction: state.auction || {}, opportunities: state.opportunities || {}, leaders: state.leaders || [], gap: state.gap || {}, stocks: state.pools?.up || [], limit: 8 });
+      if (aw.available) for (const it of aw.items) add(it, '竞价候选');
+    }
+  }
+  const list = [...map.values()];
+  // 供 sw.js 后台 periodicSync 共用同一份核心名单；只在变化时写，避免每 15s 一次 IDB 写
+  const sig = list.map((s) => s.code + ':' + s.boardLimitPct + ':' + (s.sources || []).join('+')).join(',');
+  if (sig !== preSealWatchSig) { preSealWatchSig = sig; setKV('preSealWatch', { forDate: today, stocks: list }).catch(() => {}); }
+  return list;
 }
-function savePreSealSeen() {
-  if (!preSealSeen) return;
-  // 写入前与库里的账本做并集：SW 后台可能在这拍之后刚推过票，直接覆盖会把它的记录抹掉→重复推送
-  getKV('preSealSeen', null).catch(() => null).then((saved) => {
-    const keys = new Set(preSealSeen.keys);
-    if (saved && saved.date === preSealSeen.date && Array.isArray(saved.keys)) for (const k of saved.keys) keys.add(k);
-    preSealSeen.keys = keys;
-    return setKV('preSealSeen', { date: preSealSeen.date, keys: [...keys] });
+// 当日重复提醒账本:code:kind -> {count,lastAt,lastPct,resetReady}。跨刷新/前后台/SW 共用。
+// 每次扫描重读:SW 后台可能刚写过,内存缓存会漏掉它推过的票导致重复。
+async function loadPreSealRepeat(today) {
+  const saved = await getKV('preSealRepeat', null).catch(() => null);
+  const byKey = new Map();
+  if (saved && saved.date === today && saved.byKey) for (const [k, v] of Object.entries(saved.byKey)) byKey.set(k, v);
+  preSealRepeat = { date: today, byKey };
+  return byKey;
+}
+function savePreSealRepeat() {
+  if (!preSealRepeat) return;
+  // 写入前与库里的账本并集(同一 key 取 lastAt 更新的):SW 后台可能刚写过,直接覆盖会丢它的记录
+  getKV('preSealRepeat', null).catch(() => null).then((saved) => {
+    if (saved && saved.date === preSealRepeat.date && saved.byKey) {
+      for (const [k, v] of Object.entries(saved.byKey)) {
+        const cur = preSealRepeat.byKey.get(k);
+        if (!cur || (Number(v?.lastAt) || 0) > (Number(cur?.lastAt) || 0)) preSealRepeat.byKey.set(k, v);
+      }
+    }
+    const byKey = {};
+    for (const [k, v] of preSealRepeat.byKey) byKey[k] = v;
+    return setKV('preSealRepeat', { date: preSealRepeat.date, byKey });
   }).catch(() => {});
+}
+// 允许再次提醒:从未提醒过 → 允许；提醒过 → 必须已回落重置(resetReady)且距上次 ≥20 分钟。
+function preSealCanAlert(repeat, key, now) {
+  const st = repeat.get(key);
+  if (!st) return true;
+  const minInterval = Number(PARAM_MANIFEST.preSealAlert.repeatMinIntervalMs) || 20 * 60_000;
+  return Boolean(st.resetReady) && now - st.lastAt >= minInterval;
+}
+function preSealMarkAlerted(repeat, key, ev, now) {
+  const st = repeat.get(key) || { count: 0, lastAt: 0, lastPct: null, resetReady: false };
+  st.count += 1;
+  st.lastAt = now;
+  st.lastPct = Number.isFinite(Number(ev.pct)) ? Number(ev.pct) : null;
+  st.resetReady = false;
+  repeat.set(key, st);
+}
+// 回落重置:同一票同一类上次提醒后,涨幅必须回落 ≥3pp 才解锁下一次
+function preSealResetRepeat(repeat, stocks, p) {
+  for (const [key, st] of repeat) {
+    const code = key.slice(0, key.indexOf(':'));
+    const s = (stocks || []).find((x) => x.code === code);
+    if (!s) continue;
+    const base = st.lastPct != null ? st.lastPct : s.limitPct;
+    if (s.changePercent <= base - (Number(p.repeatResetOffsetPct) || 3)) st.resetReady = true;
+  }
+}
+// 单条消息的短文案(与桌面 preSealLine 同口径；批量摘要用)
+function preSealLine(ev) {
+  const gap = Number.isFinite(Number(ev.gapPct)) ? Number(ev.gapPct).toFixed(1) : '--';
+  if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}距涨停 ${gap}pp（现 ${ev.pct}%）`;
+  if (ev.kind === 'reseal') return `回封 · 距涨停 ${gap}pp（现 ${ev.pct}%）`;
+  return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+}
+// 涨幅榜(前 300,按涨幅倒序)。30s 缓存，东财失败/不足时用新浪兜底(与桌面 fetchTopGainers 同源)。
+async function preSealRanking() {
+  if (Date.now() - preSealRankingCache.at < PRESEAL_RANKING_MS) return preSealRankingCache.rows;
+  const merged = new Map();
+  let emRows = [];
+  try {
+    const { rows } = await fetchAllMarket({ pageSize: 300, sort: 'f3', order: 'desc' });
+    emRows = rows || [];
+  } catch { emRows = []; }
+  for (const row of emRows) merged.set(row.code, row);
+  // 东财不足 90% 时补新浪(桌面同口径)；新浪失败静默，保留东财已有行
+  if (merged.size < 270) {
+    try {
+      const sinaRows = await fetchSinaTopGainers(300);
+      for (const row of sinaRows) if (!merged.has(row.code)) merged.set(row.code, row);
+    } catch { /* 新浪也挂：保留东财已有行 */ }
+  }
+  if (merged.size) preSealRankingCache = { at: Date.now(), rows: [...merged.values()].slice(0, 300) };
+  return preSealRankingCache.rows;
+}
+// 涨幅榜时间戳新鲜度：竞价段必须来自 09:15-09:30 的竞价快照，否则宁可一条都不推——
+// 否则 9:25 拿到昨日收盘涨幅榜，会把昨日「差一点涨停」的票误报成今日竞价临近涨停。
+// 东财 f124 是 epoch 秒；新浪没有 f124，用 ticktime(HH:MM:SS) 与当前上海墙钟比对。
+function preSealRankFresh(row, now, { auction = false } = {}) {
+  const ts = Number(row?.update);
+  if (Number.isFinite(ts) && ts > 0) {
+    const age = now - ts * 1000;
+    if (age < -60_000 || age > 5 * 60_000) return false;
+    if (auction) {
+      const c = shanghaiOf(ts * 1000);
+      const m = c.getHours() * 60 + c.getMinutes();
+      return m >= 555 && m <= 590;
+    }
+    return true;
+  }
+  const m = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(String(row?.ticktime || ''));
+  if (m) {
+    const rowMin = Number(m[1]) * 60 + Number(m[2]);
+    if (auction) return rowMin >= 555 && rowMin <= 590;
+    const c = shanghaiNow();
+    const nowMin = c.getHours() * 60 + c.getMinutes();
+    return Math.abs(rowMin - nowMin) <= 5;
+  }
+  return !auction; // 无时间戳：竞价段宁可不信
+}
+// 全市场候选：涨幅榜里「距涨停 ≤1.5pp、未封、成交额达标、主板A股、非ST/新股」的票。
+function preSealMarketCandidates(rows = [], { auction = false } = {}) {
+  const p = PARAM_MANIFEST.preSealAlert;
+  const minAmount = Number(auction ? p.auctionMinAmount : p.marketMinAmount) || 0;
+  const out = [];
+  for (const row of rows) {
+    if (!isMainBoardShare(row.code) || isExcludedPreSealName(row.name)) continue;
+    if (!(Number(row.amount) >= minAmount)) continue;
+    const limit = limitPriceOf(row.prevClose, row.code, row.name);
+    if (!limit) continue;
+    const pct = Number(row.changePct);
+    if (!Number.isFinite(pct) || pct <= 0) continue;
+    if (pct >= limit.effectiveLimitPct - p.sealedTolerancePct) continue; // 已封
+    if (pct < limit.effectiveLimitPct - p.approachOffsetPct) continue;  // 还没到线
+    out.push({
+      code: row.code, name: row.name,
+      pct: round2(pct), limitPct: limit.effectiveLimitPct, boardLimitPct: limit.boardLimitPct,
+      gapPct: round2(Math.max(0, limit.effectiveLimitPct - pct)), amount: Number(row.amount) || 0,
+    });
+  }
+  return out.sort((a, b) => b.amount - a.amount);
+}
+// 全市场摘要：最快 2 分钟一条(竞价段只发一条)，每条最多 8 只，未列出的下一轮继续，不丢票。
+// 2026-10-24 用户拍板:不设单日条数硬上限，只靠时间节流。
+async function loadPreSealDigest(today) {
+  if (preSealDigest.date === today) return preSealDigest;
+  const saved = await getKV('preSealDigest', null).catch(() => null);
+  preSealDigest = {
+    date: today,
+    sent: new Set(saved && saved.date === today && Array.isArray(saved.keys) ? saved.keys : []),
+    lastAt: Number(saved?.lastAt) || 0,
+    auctionSent: saved && saved.date === today ? saved.auctionSent === true : false,
+  };
+  return preSealDigest;
+}
+function savePreSealDigest() {
+  setKV('preSealDigest', { date: preSealDigest.date, keys: [...preSealDigest.sent], lastAt: preSealDigest.lastAt, auctionSent: preSealDigest.auctionSent }).catch(() => {});
+}
+async function pushPreSealDigest(candidates, { auction = false } = {}) {
+  if (!candidates.length || state.preSealOff) return;
+  const p = PARAM_MANIFEST.preSealAlert;
+  const today = todayStr();
+  const st = await loadPreSealDigest(today);
+  const fresh = candidates.filter((c) => !st.sent.has(c.code));
+  if (!fresh.length) return;
+  const now = Date.now();
+  if (auction) {
+    if (st.auctionSent) return; // 竞价段只发一条(9:26 撮合价定稿后)
+    st.auctionSent = true;
+  } else if (now - st.lastAt < (Number(p.digestIntervalMs) || 120_000)) return;
+  const maxItems = Number(p.digestMaxItems) || 8;
+  const items = fresh.slice(0, maxItems);
+  for (const c of items) st.sent.add(c.code);
+  st.lastAt = now;
+  savePreSealDigest();
+  const lines = items.map((c) => `${c.name} +${c.pct}%（距涨停 ${c.gapPct}pp · 成交 ${fmtDigestMoney(c.amount)}）`);
+  if (fresh.length > items.length) lines.push(`另有 ${fresh.length - items.length} 只，下一条摘要继续`);
+  pushNtfy(`MarketPulse · ${auction ? '竞价' : '主板'}临近涨停 ${fresh.length} 只`, lines);
+}
+// 摘要金额口径与桌面 formatMoney 一致：≥1亿两位小数，否则取整到万
+function fmtDigestMoney(v) {
+  const a = Number(v || 0);
+  return Math.abs(a) >= 100_000_000 ? `${(a / 100_000_000).toFixed(2)}亿` : `${Math.round(a / 10_000)}万`;
+}
+// 回封状态：今日涨停池=封，炸板池=炸，再用实时涨幅校准；回封是否可推由重复提醒账本判定。
+function updatePreSealResealState(today, stocks) {
+  if (preSealState.date !== today) preSealState = { date: today, byCode: new Map() };
+  const map = preSealState.byCode;
+  const p = PARAM_MANIFEST.preSealAlert;
+  const brokenToday = new Set((state.pools?.broken || []).map((s) => String(s.code)));
+  const sourcesByCode = new Map((stocks || []).map((s) => [s.code, s.sources || []]));
+  for (const s of state.pools?.broken || []) { const code = String(s.code); const st = map.get(code) || {}; st.sealed = false; st.broken = true; map.set(code, st); }
+  for (const s of state.pools?.up || []) { const code = String(s.code); const st = map.get(code) || {}; st.sealed = true; st.broken = false; map.set(code, st); }
+  for (const s of stocks) {
+    const st = map.get(s.code) || {};
+    // 今日炸板池里的票,首次进入监控时就知道「已经炸过板」,直接进入 broken 状态,
+    // 否则要等它先封一次再炸才认,会漏掉当天炸板后的回封。
+    if (!st.init) {
+      st.init = true;
+      if (brokenToday.has(s.code) || (sourcesByCode.get(s.code) || []).includes('今日炸板')) st.broken = true;
+    }
+    if (s.changePercent >= s.limitPct - p.sealedTolerancePct) { st.sealed = true; st.broken = false; }
+    else if (st.sealed && s.changePercent <= s.limitPct - p.resealOffsetPct) { st.sealed = false; st.broken = true; }
+    map.set(s.code, st);
+  }
+  return map;
 }
 
 // 独立扫描：不挂在 computeDerived 上，也不依赖页面 8s 刷新是否产生新派生
@@ -580,47 +790,106 @@ async function preSealTick() {
   if (state.preSealOff || state.manualDate) return [];
   if (document.hidden && Date.now() >= state.bgUntil) return []; // C1 后台宽限窗口外不白耗流量
   const today = todayStr();
-  if (!isTradingDay(today) || !isInTradingSession(new Date())) return [];
+  if (!isTradingDay(today)) return [];
+  const clock = shanghaiNow();
+  const minutes = clock.getHours() * 60 + clock.getMinutes();
+  const inAuction = minutes >= 566 && minutes < 570; // 9:26-9:29 竞价撮合价已定稿,避免 9:25 整拿到未定稿数据
+  if (!inAuction && !isInTradingSession(new Date())) return [];
   if (preSealScanInflight) return preSealScanInflight;
   if (Date.now() - preSealScanAt < PRESEAL_SCAN_MS - 1000) return [];
   preSealScanAt = Date.now();
   preSealScanInflight = (async () => {
-    const watch = await preSealWatchStocks(today);
-    if (!watch.length) return [];
-    // 已封板的票不进报价请求：今日涨停池里的直接跳过，省一半以上请求
-    const sealed = new Set((state.pools?.up || []).map((s) => String(s.code)));
-    const codes = watch.filter((s) => !sealed.has(s.code)).map((s) => s.code);
-    if (!codes.length) return [];
-    let quotes;
-    try { quotes = await fetchQuotes(codes, { tries: 2, timeoutMs: 6000 }); } catch { return []; }
+    const p = PARAM_MANIFEST.preSealAlert;
     const now = Date.now();
-    const stocks = [];
-    for (const s of watch) {
-      const q = quotes[s.code];
-      if (!q || q.price == null || !q.prevClose) continue;
-      const changePercent = (q.price / q.prevClose - 1) * 100;
-      if (!Number.isFinite(changePercent)) continue;
-      stocks.push({ code: s.code, name: s.name, boards: s.boards, limitPct: s.limitPct, changePercent });
+    const coreWatch = await preSealCoreWatch(today);
+    // 竞价段必须先拿涨幅榜(核心行情也取竞价撮合价);盘中先取核心行情,再取榜单做摘要,
+    // 避免涨幅榜接口慢时拖慢核心逐票预警。
+    let rankingRows = [];
+    let rankingByCode = new Map();
+    if (inAuction) {
+      rankingRows = (await preSealRanking().catch(() => [])).filter((row) => preSealRankFresh(row, now, { auction: true }));
+      rankingByCode = new Map(rankingRows.map((row) => [row.code, row]));
     }
-    if (!stocks.length) return [];
-    const seen = await preSealSeenKeys(today);
-    const events = detectPreSealAlerts({
+
+    // —— 核心层行情：竞价段用涨幅榜的竞价撮合价(ulist 此时可能还是昨收)；盘中用实时报价 ——
+    let stocks = [];
+    if (inAuction) {
+      stocks = coreWatch.map((s) => {
+        const row = rankingByCode.get(s.code);
+        if (!row) return null;
+        const limit = limitPriceOf(row.prevClose, s.code, s.name);
+        if (!limit) return null;
+        return { ...s, limitPct: limit.effectiveLimitPct, boardLimitPct: limit.boardLimitPct, changePercent: Number(row.changePct), price: row.price, preClose: row.prevClose };
+      }).filter((s) => s && Number.isFinite(s.changePercent));
+    } else {
+      // 已封板的票不进报价请求：今日涨停池里的直接跳过，省一半以上请求
+      const sealed = new Set((state.pools?.up || []).map((s) => String(s.code)));
+      const codes = coreWatch.filter((s) => !sealed.has(s.code)).map((s) => s.code);
+      if (codes.length) {
+        let quotes = null;
+        try { quotes = await fetchQuotes(codes, { tries: 2, timeoutMs: 6000 }); } catch { quotes = null; }
+        if (quotes) {
+          stocks = coreWatch.map((s) => {
+            const q = quotes[s.code];
+            if (!q || q.price == null || !q.prevClose) return null;
+            // 半日市/停牌/数据源卡死时旧价会一直停在涨停附近,不拦会在午后重复触发
+            if (q.update && Math.abs(now - q.update * 1000) > 5 * 60_000) return null;
+            const changePercent = (q.price / q.prevClose - 1) * 100;
+            if (!Number.isFinite(changePercent)) return null;
+            const limit = limitPriceOf(q.prevClose, s.code, s.name);
+            return {
+              ...s,
+              limitPct: limit ? limit.effectiveLimitPct : s.boardLimitPct,
+              boardLimitPct: limit ? limit.boardLimitPct : s.boardLimitPct,
+              changePercent, price: q.price, preClose: q.prevClose,
+            };
+          }).filter(Boolean);
+        }
+      }
+    }
+
+    // —— 回封：先记已封/炸板，再从炸板低位重新逼近涨停时推(受重复提醒规则约束) ——
+    const stateMap = updatePreSealResealState(today, stocks);
+    const repeat = await loadPreSealRepeat(today);
+    preSealResetRepeat(repeat, stocks, p);
+    const resealEvents = [];
+    for (const s of stocks) {
+      const st = stateMap.get(s.code) || {};
+      if (st.broken && preSealCanAlert(repeat, `${s.code}:reseal`, now)
+        && s.changePercent >= s.limitPct - p.resealTriggerOffsetPct
+        && s.changePercent < s.limitPct - p.sealedTolerancePct) {
+        st.broken = false;
+        resealEvents.push({
+          code: s.code, name: s.name, kind: 'reseal',
+          pct: round2(s.changePercent), limitPct: s.limitPct, boardLimitPct: s.boardLimitPct,
+          gapPct: round2(Math.max(0, s.limitPct - s.changePercent)), auction: inAuction, t: now,
+        });
+      }
+    }
+
+    const events = stocks.length ? detectPreSealAlerts({
       stocks, watchCodes: stocks.map((s) => s.code), prevSnap: preSealPrevSnap, now,
-      inCooldown: (key) => seen.has(key),
-    });
-    // 每轮都更新快照（急拉判定要连续两拍），已推的票由 seen 闸住
+      inCooldown: (key) => !preSealCanAlert(repeat, key, now),
+    }) : [];
+    for (const ev of events) ev.auction = inAuction;
+    // 每轮都更新快照（急拉判定要连续两拍），重复提醒由 repeat 账本闸住
     preSealPrevSnap = new Map(stocks.map((s) => [s.code, { pct: s.changePercent, t: now }]));
-    const MAX_PER_DAY = 30;
+    const resealCodes = new Set(resealEvents.map((ev) => ev.code));
     const accepted = [];
-    for (const ev of events) {
-      if (seen.size >= MAX_PER_DAY) break;
+    for (const ev of [...events.filter((e) => !resealCodes.has(e.code)), ...resealEvents]) {
       const key = `${ev.code}:${ev.kind}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (!preSealCanAlert(repeat, key, now)) continue; // 未回落重置/不满20分钟不重复
+      preSealMarkAlerted(repeat, key, ev, now);
       accepted.push(ev);
     }
-    if (accepted.length) savePreSealSeen();
-    for (const ev of accepted) firePreSealAlert(ev);
+    if (accepted.length) savePreSealRepeat();
+    pushCoreEvents(accepted, now);
+
+    // —— 全市场层：排除核心名单后，按摘要推送(盘中到这一步才拉榜单,不拖慢核心预警) ——
+    if (!inAuction) rankingRows = (await preSealRanking().catch(() => [])).filter((row) => preSealRankFresh(row, now, { auction: false }));
+    const coreCodes = new Set(coreWatch.map((w) => w.code));
+    const marketCandidates = preSealMarketCandidates(rankingRows, { auction: inAuction }).filter((c) => !coreCodes.has(c.code));
+    pushPreSealDigest(marketCandidates, { auction: inAuction }).catch(() => {});
     return accepted;
   })().finally(() => { preSealScanInflight = null; });
   return preSealScanInflight;
@@ -690,22 +959,59 @@ async function runC2Probe() {
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
 function firePreSealAlert(ev) {
   const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
-  const text = ev.kind === 'sealApproach' ? `${label} 逼近涨停 ${ev.pct}%（距涨停 ${(Number(ev.limitPct) - Number(ev.pct)).toFixed(2)}pp，未封）` : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
-  const title = ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警';
-  toast(text);
+  const auctionPrefix = ev.auction ? '集合竞价 · ' : '';
+  const boardText = Number.isFinite(Number(ev.boardLimitPct)) ? `涨停 ${ev.boardLimitPct}%` : '';
+  const boardsText = Number(ev.boards) > 1 ? ` · 昨日${ev.boards}板` : '';
+  const text = ev.kind === 'sealApproach'
+    ? `${auctionPrefix}距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%${boardText ? '，' + boardText : ''}）${boardsText}`
+    : ev.kind === 'reseal'
+      ? `${auctionPrefix}炸板回封 · 距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%）${boardsText}`
+      : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+  const title = ev.kind === 'sealApproach' ? '封板前预警' : ev.kind === 'reseal' ? '回封预警' : '急拉预警';
+  toast(`${label} ${text}`);
   if (state.preSealOff) return; // 设置里关了就只 toast 不打扰
   // 系统通知:走已注册的 SW(showNotification),App 前台也能弹统一系统通知
   try {
     if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-      navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, { body: text, tag: `preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
+      navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, { body: `${label} ${text}`, tag: `preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
     } else if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body: text, tag: `preseal-${ev.code}` });
+      new Notification(title, { body: `${label} ${text}`, tag: `preseal-${ev.code}` });
     }
   } catch { /* 通知失败静默 */ }
-  pushNtfy(`MarketPulse · ${label} ${ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警'}`, [text, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]); // C3:再发一路 ntfy(锁屏送达率比 PWA SW 通知高,通道与桌面推送一致)
-  try { if (navigator.vibrate) navigator.vibrate(ev.kind === 'sealApproach' ? [200, 100, 200] : 150); } catch { /* 震动失败静默 */ }
+  pushNtfy(`MarketPulse · ${label} ${title}`, [`${label} ${text}`, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]); // C3:再发一路 ntfy(锁屏送达率比 PWA SW 通知高,通道与桌面推送一致)
+  try { if (navigator.vibrate) navigator.vibrate(ev.kind === 'surge' ? 150 : [200, 100, 200]); } catch { /* 震动失败静默 */ }
   playAlertSound(ev.kind);
   markPreSealRow(ev.code);
+}
+// 核心推送全局节流:最多每 15s 一条;一轮多个事件合并成一条,节流窗口内进 backlog 不丢票。
+function pushCoreEvents(events, now) {
+  // 积压事件超过 2 分钟直接丢弃:收盘/隔夜后才 flush 的旧预警没有交易价值。
+  const batch = preSealCoreBacklog.concat(events || []).filter((ev) => now - ev.t <= 2 * 60_000);
+  preSealCoreBacklog = [];
+  if (!batch.length) return;
+  if (now - preSealCorePushAt < PRESEAL_SCAN_MS) { preSealCoreBacklog = batch; return; }
+  preSealCorePushAt = now;
+  if (batch.length === 1) firePreSealAlert(batch[0]);
+  else firePreSealBatch(batch);
+}
+// 批量提醒:一条系统通知 + 一条 ntfy,最多列 8 只(与桌面 pushPreSealBatch 同口径)
+function firePreSealBatch(events) {
+  const lines = events.slice(0, 8).map((ev) => `${ev.name} ${preSealLine(ev)}`);
+  if (events.length > 8) lines.push(`另有 ${events.length - 8} 只`);
+  toast(`封板前预警 ${events.length} 只`);
+  if (state.preSealOff) return;
+  const body = lines.join('\n');
+  try {
+    if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+      navigator.serviceWorker.ready.then((reg) => reg.showNotification('封板前预警', { body, tag: 'preseal-batch', icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('封板前预警', { body, tag: 'preseal-batch' });
+    }
+  } catch { /* 通知失败静默 */ }
+  pushNtfy(`MarketPulse · 封板前预警 ${events.length} 只`, [...lines, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]);
+  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch { /* 震动失败静默 */ }
+  playAlertSound(events.some((ev) => ev.kind !== 'surge') ? 'sealApproach' : 'surge');
+  for (const ev of events) markPreSealRow(ev.code);
 }
 let _alertCtx = null;
 function playAlertSound(kind) {
@@ -713,7 +1019,7 @@ function playAlertSound(kind) {
     _alertCtx = _alertCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (_alertCtx.state === 'suspended') _alertCtx.resume().catch(() => {});
     const now = _alertCtx.currentTime;
-    const seq = kind === 'sealApproach' ? [[880, 0], [1174, 0.14]] : [[660, 0], [880, 0.12]];
+    const seq = (kind === 'sealApproach' || kind === 'reseal') ? [[880, 0], [1174, 0.14]] : [[660, 0], [880, 0.12]];
     for (const [freq, off] of seq) {
       const osc = _alertCtx.createOscillator(); const gain = _alertCtx.createGain();
       osc.type = 'sine'; osc.frequency.value = freq;

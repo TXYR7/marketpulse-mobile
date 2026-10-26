@@ -21,13 +21,13 @@ const EMA = {
   ulist(codes) {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
     // `_` 缓存穿透：与桌面 server.js 口径一致——不加则 CDN/浏览器 HTTP 缓存可返回陈旧响应（主力/超大单冻结的根因之一）
-    return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66&_=${Date.now()}`;
+    return `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66,f124&_=${Date.now()}`;
   },
   // 2026-09-10:push2 主 host 在部分网络(代理/fake-ip)下被单点掐断(本次预期差大面积「暂无数据」的根因)——
   // push2delay 是同 API 的延迟行情域名,实测与主 host 同数据(仅延迟 0-15min),作为兜底(同桌面 fetchBatchQuotes 口径)
   ulistDelay(codes) {
     const secids = codes.map((c) => marketPrefix(c) + c).join(',');
-    return `https://push2delay.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66&_=${Date.now()}`;
+    return `https://push2delay.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f17,f18,f62,f66,f124&_=${Date.now()}`;
   }
 };
 
@@ -268,6 +268,7 @@ export async function fetchQuotes(codes, opts = {}) {
             prevClose: toNum(row.f18),
             main: toNum(row.f62), // 主力净流入
             super: toNum(row.f66), // 超大单净流入
+            update: toNum(row.f124), // 行情时间戳(秒):封板前预警用它拦半日市/停牌/源卡死的旧价
           };
         }
       } catch (e) {
@@ -352,13 +353,45 @@ export function exportKlineCache() {
   return out;
 }
 
+// 全市场涨幅榜兜底(新浪)：东财 clist 挂掉时用，3 页 × 100 只。桌面 server.js:fetchTopGainers 同源。
+// 浏览器直接请求：CORS 全开；响应是 GBK，必须按 gbk 解码，否则中文名乱码。
+export async function fetchSinaTopGainers(limit = 300) {
+  const out = new Map();
+  for (let page = 1; page <= Math.ceil(limit / 100); page += 1) {
+    if (page > 1) await new Promise((r) => setTimeout(r, 100));
+    const url = `https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=${page}&num=100&sort=changepercent&asc=0&node=hs_a&symbol=&_s_r_a=page`;
+    const res = await fetch(url, { headers: { accept: 'application/json,text/plain,*/*' }, signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) throw new Error('sina 涨幅榜 HTTP ' + res.status);
+    let text;
+    try { text = new TextDecoder('gbk').decode(await res.arrayBuffer()); }
+    catch { text = await res.text(); }
+    const batch = JSON.parse(text);
+    if (!Array.isArray(batch) || !batch.length) break;
+    for (const row of batch) {
+      const code = String(row.code || row.symbol || '').replace(/^(sh|sz|bj)/i, '');
+      if (!/^\d{6}$/.test(code)) continue;
+      out.set(code, {
+        code,
+        name: String(row.name || code),
+        price: Number(row.trade),
+        prevClose: Number(row.settlement),
+        changePct: Number(row.changepercent),
+        amount: Number(row.amount) || 0,
+        ticktime: String(row.ticktime || ''),
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return [...out.values()].slice(0, limit);
+}
+
 // 全市场：clist 分页。market: '' | 'sh' | 'sz' | 'bj'
 const FS_ALL = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
 const FS_MAP = { '': FS_ALL, sh: 'm:1+t:2,m:1+t:23', sz: 'm:0+t:80,m:0+t:6', bj: 'm:0+t:81+s:2048' };
 export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sort = 'f6', order = 'desc' } = {}) {
   const fs = FS_MAP[market] || FS_ALL;
   const po = order === 'desc' ? 0 : 1; // 0=降序 1=升序
-  const url = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=${pageSize}&po=${po}&np=1&fltt=2&invt=2&fid=${sort}&fs=${encodeURIComponent(fs)}&fields=f12,f13,f14,f2,f3,f5,f6,f100,f124&ut=${EMA.token}`;
+  const url = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=${pageSize}&po=${po}&np=1&fltt=2&invt=2&fid=${sort}&fs=${encodeURIComponent(fs)}&fields=f12,f13,f14,f2,f3,f5,f6,f18,f100,f124&ut=${EMA.token}`;
   const data = await getJSON(url);
   const total = data?.data?.total ?? 0;
   const rows = (data?.data?.diff || []).map((row) => ({
@@ -367,6 +400,7 @@ export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sor
     name: row.f14,
     // 停牌/缺字段时东财返回 '-'：清洗成 null，否则 r.price.toFixed 直接抛错、pctText 渲染 NaN%
     price: toNum(row.f2),
+    prevClose: toNum(row.f18), // 封板前预警按昨收算精确涨停价(2026-10-24)
     changePct: toNum(row.f3),
     volume: toNum(row.f5), // 手
     amount: toNum(row.f6), // 元

@@ -1272,16 +1272,25 @@ const PARAM_MANIFEST = {
       highBoardPremium: { green: 2, yellow: 0 }
     }
   },
-  // 抢时间批·封板前预警(2026-10-10;2026-10-24 修数据源,与桌面同批)
+  // 抢时间批·盘中封板前预警(2026-10-10;2026-10-24 修数据源+双层,与桌面同批)
   // 旧版把「涨停池」当检测源,池内全是已封板股票,且 mapPool 不产 isLimitUp 字段 →
-  //   「已封不报」永远不成立,每票每 30 分钟重推一次。现在改为按板块涨停价判断:
-  //   approachOffsetPct = 距涨停价 1.5pp 内开始预警(10%板→8.5%,20%板→18.5%,30%板→28.5%,ST 5%板→3.5%)
+  //   「已封不报」永远不成立,每票每 30 分钟重推一次:8 个交易日推了 2001 条,
+  //   且 100% 的事件涨幅 ≥9.5%(全部是封死后才推)。
+  // 现改为双层:核心名单(昨日涨停/今日炸板/竞价候选)逐票推;全市场涨幅榜临近涨停按摘要推。
+  // 2026-10-24 用户拍板:只做主板A股(沪 60/深 00),创业板/科创板/北交所/ST/新股都不推。
   preSealAlert: {
-    approachOffsetPct: 1.5,
-    sealedTolerancePct: 0.15, // 距涨停 ≤0.15pp 视为已封(与自算池 TOLERANCE 同口径)
-    surgeWindowMs: 30_000,    // 急拉窗口:30 秒
-    surgePct: 3,              // 该窗口内涨幅 >3%
-    maxAlertsPerDay: 30       // 兜底安全阀:单日推送上限,防异常数据再次刷屏
+    approachOffsetPct: 1.5,      // 距涨停价 1.5pp 内开始预警(10%板→8.5%)
+    sealedTolerancePct: 0.15,    // 距涨停 ≤0.15pp 视为已封(精确涨停价另算)
+    surgeWindowMs: 30_000,       // 急拉窗口:30 秒
+    surgePct: 3,                 // 该窗口内涨幅 >3%
+    resealOffsetPct: 1.0,        // 回封:从涨停回落超过 1pp 视为炸板
+    resealTriggerOffsetPct: 0.5, // 回封:炸板后重新逼近到距涨停 0.5pp 内才推(避免刚破板就误报回封)
+    repeatResetOffsetPct: 3.0,   // 重复提醒:上次提醒后涨幅回落 ≥3pp 才允许再次提醒(不回落绝不重复)
+    repeatMinIntervalMs: 20 * 60_000, // 重复提醒最小间隔 20 分钟
+    marketMinAmount: 100_000_000, // 全市场摘要候选:当日成交额 ≥1亿
+    auctionMinAmount: 5_000_000, // 9:26 竞价阶段:竞价成交额 ≥500万(竞价额远小于全天额)
+    digestIntervalMs: 120_000,   // 全市场摘要最快每 2 分钟一条(全局节流,不设单日条数硬上限)
+    digestMaxItems: 8            // 每条摘要最多列 8 只,其余只报数量
   }
 };
 
@@ -1293,6 +1302,26 @@ function limitThresholdOf(code, name = '') {
   if (/^(30|68)/.test(c)) return 20;
   if (/ST/i.test(String(name).replace(/\s+/g, ''))) return 5;
   return 10;
+}
+
+// 主板A股:沪 60xxxx、深 00xxxx。创业板(30)、科创板(68)、北交所(4/8/9)、B股不做——
+// 2026-10-24 用户明确没有创业/科创权限,推了也买不了。
+function isMainBoardShare(code) {
+  return /^(60|00)\d{4}$/.test(String(code));
+}
+// ST/*ST 与 N/C 新股不推(涨跌规则不同,容易被涨停价算法误判)。
+function isExcludedPreSealName(name) {
+  const n = String(name || '').replace(/\s+/g, '');
+  return /ST/i.test(n) || /^[NC]/.test(n);
+}
+// 精确涨停价:按昨收和板块涨停幅度算到分(交易所四舍五入),再折回实际涨停百分比。
+// 低价股用固定百分比容差会把「差一档」误判成已封/未封,所以 core 与摘要都走这里。
+function limitPriceOf(preClose, code, name) {
+  const base = Number(preClose);
+  if (!Number.isFinite(base) || base <= 0) return null;
+  const boardLimitPct = limitThresholdOf(code, name);
+  const price = Math.round(base * (1 + boardLimitPct / 100) * 100) / 100;
+  return { price, boardLimitPct, effectiveLimitPct: (price / base - 1) * 100 };
 }
 
 // 交易时段判定(9:30-11:30 / 13:00-15:00,含边界,上海时区)。纯函数:页面与 SW 共用同一口径。
@@ -1323,19 +1352,21 @@ function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(
     const code = String(stock?.code ?? '');
     if (!code || !watch.has(code)) continue;
     const limitPct = Number(stock.limitPct);
+    const boardLimitPct = Number(stock.boardLimitPct) || limitPct;
     const pct = Number(stock.changePercent ?? parseFloat(stock.gain));
     if (!Number.isFinite(limitPct) || !Number.isFinite(pct)) continue;
     // 已封板（距涨停不足容差）/停牌/非上涨不报——预警只关心「还没封、正在冲」的
     if (pct <= 0 || stock.suspended || pct >= limitPct - sealedTolerancePct) continue;
+    const gapPct = Math.max(0, limitPct - pct);
     // 加速触板：进入「涨停价 - approachOffsetPct」区间且尚未封板
     if (pct >= limitPct - approachOffsetPct && !inCooldown(`${code}:sealApproach`)) {
-      events.push({ code, name: stock.name || code, kind: 'sealApproach', pct: Math.round(pct * 100) / 100, limitPct, t: now });
+      events.push({ code, name: stock.name || code, kind: 'sealApproach', pct: Math.round(pct * 100) / 100, limitPct, boardLimitPct, gapPct: Math.round(gapPct * 100) / 100, t: now });
       continue; // 同一只同轮只出一类，避免双报
     }
     // 急拉：窗口内涨幅 > surgePct（需上轮快照且时间差在窗口内）
     const prev = prevSnap.get(code);
     if (prev && typeof prev.pct === 'number' && now - prev.t <= surgeWindowMs && pct - prev.pct > surgePct && !inCooldown(`${code}:surge`)) {
-      events.push({ code, name: stock.name || code, kind: 'surge', pct: Math.round(pct * 100) / 100, rise: Math.round((pct - prev.pct) * 100) / 100, limitPct, t: now });
+      events.push({ code, name: stock.name || code, kind: 'surge', pct: Math.round(pct * 100) / 100, rise: Math.round((pct - prev.pct) * 100) / 100, limitPct, boardLimitPct, gapPct: Math.round(gapPct * 100) / 100, t: now });
     }
   }
   return events;
@@ -1647,5 +1678,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession
+  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 };

@@ -9,7 +9,8 @@ import vm from 'node:vm';
 import {
   stockSimilarCases, buildCopilotAnswer, COPILOT_QUESTIONS,
   calculateEmotionState, yesterdayPremium, buildThemeRanking, assessPromotion, routeCopilotQuery, diffSignalSnapshot, buildSimilarDays,
-  applyGate, auctionVerdict, detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession
+  applyGate, auctionVerdict, detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession,
+  limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 } from '../analytics.js';
 import {
   shanghaiNow, todayStr, mergePools, sealQuality, isTradingDay, lastTradingDate,
@@ -552,6 +553,18 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
     && limitThresholdOf('920179') === 30 && limitThresholdOf('600001', 'ST 某某') === 5);
   ok('isInTradingSession 上海时区:10:00 开市 / 12:00 午休', isInTradingSession(new Date('2026-10-23T02:00:00Z')) === true
     && isInTradingSession(new Date('2026-10-23T04:00:00Z')) === false);
+  // 2026-10-24 双层/精确涨停价/沪深过滤(与桌面同批)
+  const lp = limitPriceOf(3.01, '600001', '');
+  ok('limitPriceOf 按昨收算到分:3.01 的 10% 涨停价=3.31', lp && lp.price === 3.31 && Math.abs(lp.effectiveLimitPct - 9.9668) < 0.01);
+  ok('主板A股/ST/新股过滤', isMainBoardShare('600001') && isMainBoardShare('000001') && !isMainBoardShare('300750') && !isMainBoardShare('688981') && !isMainBoardShare('920096')
+    && isExcludedPreSealName('ST测试') && isExcludedPreSealName('N新股') && !isExcludedPreSealName('正常股'));
+  ok('回封参数齐全', PARAM_MANIFEST.preSealAlert.resealOffsetPct === 1 && PARAM_MANIFEST.preSealAlert.resealTriggerOffsetPct === 0.5);
+  ok('重复提醒参数:回落3pp + 20分钟', PARAM_MANIFEST.preSealAlert.repeatResetOffsetPct === 3 && PARAM_MANIFEST.preSealAlert.repeatMinIntervalMs === 20 * 60_000);
+  ok('全市场摘要门槛与节流参数(无单日硬上限)', PARAM_MANIFEST.preSealAlert.marketMinAmount === 100_000_000
+    && PARAM_MANIFEST.preSealAlert.auctionMinAmount === 5_000_000
+    && PARAM_MANIFEST.preSealAlert.digestIntervalMs === 120_000
+    && PARAM_MANIFEST.preSealAlert.maxDigestPerDay === undefined
+    && PARAM_MANIFEST.preSealAlert.maxAlertsPerDay === undefined);
   const wl = buildAuctionWatchlist({
     auction: { available: true, items: [{ code: '600001', name: '龙头A', boards: 3, matchPct: 8.5, volRatio: 3.2, sealedBuyShares: 0 }] },
     opportunities: { tiers: { S: [{ code: '600001' }], A: [], B: [] } }, leaders: [{ code: '600001' }], gap: { candidates: [] },
@@ -564,12 +577,23 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
 {
   const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const swSrc = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  const dataSrc = readFileSync(new URL('../data.js', import.meta.url), 'utf8');
   ok('detectPreSeal 不再挂在 computeDerived 派生链里(派生签名早退会饿死检测)', !/\n\s*detectPreSeal\(\);/.test(appSrc));
   ok('封板前预警有独立 15s 定时器', /setInterval\(\(\) => \{ preSealTick\(\)\.catch/.test(appSrc));
   ok('监控名单取上一交易日涨停池,不回退今日涨停池', /preSealPrevTradingDate/.test(appSrc) && /上一交易日涨停池/.test(appSrc));
-  ok('已推账本持久化(KV),刷新/重开不重推', /preSealSeen/.test(appSrc) && /preSealSeen/.test(swSrc));
+  ok('核心名单含今日炸板 + 竞价候选', /state\.pools\?\.broken/.test(appSrc) && /buildAuctionWatchlist/.test(appSrc));
+  ok('全市场层:涨幅榜前300 + 摘要推送(不逐票刷屏)', /fetchAllMarket\(\{ pageSize: 300/.test(appSrc) && /preSealMarketCandidates/.test(appSrc) && /pushPreSealDigest/.test(appSrc));
+  ok('竞价预扫 9:26-9:29(避开 9:25 未定稿数据)', /minutes >= 566 && minutes < 570/.test(appSrc));
+  ok('全市场摘要竞价段只发一条', /auctionSent/.test(appSrc));
+  ok('涨幅榜东财失败时走新浪兜底(GBK 解码)', /fetchSinaTopGainers/.test(appSrc) && /fetchSinaTopGainers/.test(swSrc) && /TextDecoder\('gbk'\)/.test(dataSrc));
+  ok('精确涨停价判定(按昨收算到分)', /limitPriceOf\(/.test(appSrc) && /limitPriceOf\(/.test(swSrc));
+  ok('炸板回封(受重复提醒约束,页面与 SW 同口径)', /kind: 'reseal'/.test(appSrc) && /kind: 'reseal'/.test(swSrc) && /resealTriggerOffsetPct/.test(appSrc));
+  ok('重复提醒账本持久化(KV),回落重置+20分钟才重复', /preSealRepeat/.test(appSrc) && /preSealRepeat/.test(swSrc)
+    && /preSealCanAlert/.test(appSrc) && /resetReady/.test(appSrc) && /resetReady/.test(swSrc));
+  ok('核心推送全局节流(15s 一条,多事件合并)', /function pushCoreEvents/.test(appSrc) && /preSealCoreBacklog/.test(appSrc) && /function firePreSealBatch/.test(appSrc));
+  ok('不再有单日次数/条数硬上限', !/maxAlertsPerDay/.test(appSrc) && !/maxDigestPerDay/.test(appSrc));
   ok('SW 后台读写页面库 mp-mobile(不再是孤立的 mp-preseal-bg 库)', /const PAGE_DB = 'mp-mobile'/.test(swSrc) && !/PRESEAL_DB = 'mp-preseal-bg'/.test(swSrc));
-  ok('SW 后台按实时报价+涨停价判定,不再拉全市场涨幅榜', /bgFetchQuotes/.test(swSrc) && /detectPreSealAlerts/.test(swSrc));
+  ok('SW 后台按实时报价+精确涨停价判定', /bgFetchQuotes/.test(swSrc) && /detectPreSealAlerts/.test(swSrc));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

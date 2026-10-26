@@ -1,6 +1,6 @@
 // sw.js — 缓存 app 外壳（离线可启动）；行情接口直连不缓存
 // 版本号由 scripts/bump-sw.mjs 自动递增（发布到手机.cmd 会调用），无需手动改。
-const CACHE = 'mp-mobile-20261024';
+const CACHE = 'mp-mobile-20261026';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data.js', './store.js',
   './analytics.js', './views.js', './views-extra.js', './version.js',
@@ -39,8 +39,9 @@ self.addEventListener('notificationclick', (e) => {
 });
 
 /* ---------------- C2 锁屏准点:periodicSync 后台封板前预警 ---------------- */
-// 锁屏/关屏时 periodicSync 唤醒 SW → 读页面写好的「上一交易日涨停池」名单 → 拉实时报价 →
-// 跑 detectPreSealAlerts(analytics.js 纯函数) → 命中发 ntfy + SW 通知。
+// 锁屏/关屏时 periodicSync 唤醒 SW → 读页面写好的核心名单(昨日涨停∪今日炸板∪竞价候选) →
+// 竞价段取涨幅榜撮合价、盘中拉实时报价 → 跑 detectPreSealAlerts/回封判定 → 命中发 ntfy + SW 通知。
+// 全市场摘要层只在页面前台跑(SW 唤醒频率不可控,拉全市场榜单不划算)。
 //
 // ⚠ 2026-10-24 修:旧版把名单/配置读自 mp-preseal-bg,而页面 getKV/setKV 写的是 mp-mobile
 //   (store.js)——两个库永不互通,后台任务第一行 pushNtfyUrl 就取到 null 直接 return,
@@ -83,15 +84,17 @@ async function pageKvSet(k, v) {
   } finally { try { db?.close(); } catch { /* ignore */ } }
 }
 
-// 上海时区交易时段(9:30-11:30 / 13:00-15:00)：不依赖设备时区
-function bgSessionNow(d = new Date()) {
+// 上海时区交易时段：9:26-9:29 竞价预扫(撮合价已定稿) + 9:30-11:30 / 13:00-15:00 盘中；不依赖设备时区
+function bgSessionInfo(d = new Date()) {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
     const wd = parts.find((p) => p.type === 'weekday')?.value || '';
-    if (wd === 'Sat' || wd === 'Sun') return false;
+    if (wd === 'Sat' || wd === 'Sun') return { tradable: false, auction: false };
     const m = Number(parts.find((p) => p.type === 'hour')?.value) * 60 + Number(parts.find((p) => p.type === 'minute')?.value);
-    return (m >= 570 && m <= 690) || (m >= 780 && m <= 900);
-  } catch { return false; }
+    const auction = m >= 566 && m < 570;
+    const tradable = auction || (m >= 570 && m <= 690) || (m >= 780 && m <= 900);
+    return { tradable, auction };
+  } catch { return { tradable: false, auction: false }; }
 }
 
 function prevTradingDateKey(today, isTradingDay) {
@@ -104,20 +107,21 @@ function prevTradingDateKey(today, isTradingDay) {
   }
   return '';
 }
-// 监控名单:优先页面今天写好的 preSealWatch;页面整天没开过则 SW 自拉上一交易日涨停池
+// 监控名单:优先页面今天写好的 preSealWatch(核心名单:昨日涨停/今日炸板/竞价候选);
+// 页面整天没开过则 SW 自拉上一交易日涨停池,并按同样规则过滤主板A股/ST/新股。
 async function bgWatchStocks(today) {
   const cached = await pageKvGet('preSealWatch').catch(() => null);
   if (cached && cached.forDate === today && Array.isArray(cached.stocks) && cached.stocks.length) return cached.stocks;
   const { isTradingDay } = await import('./data.js');
-  const { limitThresholdOf } = await import('./analytics.js');
+  const { limitThresholdOf, isMainBoardShare, isExcludedPreSealName } = await import('./analytics.js');
   const prev = prevTradingDateKey(today, isTradingDay);
   if (!prev) return [];
   const url = `https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=300&sort=fbt:asc&date=${prev}`;
   const j = await fetch(url).then((r) => r.json()).catch(() => null);
   const stocks = (j?.data?.pool || []).map((row) => {
     const code = String(row.c || ''); const name = String(row.n || code);
-    return { code, name, boards: Number(row.lbc || 1), limitPct: limitThresholdOf(code, name) };
-  }).filter((s) => /^\d{6}$/.test(s.code));
+    return { code, name, boards: Number(row.lbc || 1), boardLimitPct: limitThresholdOf(code, name) };
+  }).filter((s) => isMainBoardShare(s.code) && !isExcludedPreSealName(s.name));
   if (stocks.length) pageKvSet('preSealWatch', { forDate: today, stocks }).catch(() => {});
   return stocks;
 }
@@ -128,19 +132,20 @@ async function bgFetchQuotes(codes) {
   const out = {};
   for (let i = 0; i < codes.length; i += ULIST_CHUNK) {
     const secids = codes.slice(i, i + ULIST_CHUNK).map(secidOf).join(',');
-    const url = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f18&_=${Date.now()}`;
+    const url = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f18,f124&_=${Date.now()}`;
     let j = await fetch(url).then((r) => r.json()).catch(() => null);
     if (!j?.data?.diff) j = await fetch(url.replace('push2.eastmoney.com', 'push2delay.eastmoney.com')).then((r) => r.json()).catch(() => null);
     for (const row of j?.data?.diff || []) {
       const price = Number(row.f2); const prevClose = Number(row.f18);
-      if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) out[String(row.f12)] = { price, prevClose };
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(prevClose) && prevClose > 0) out[String(row.f12)] = { price, prevClose, update: Number(row.f124) || 0 };
     }
   }
   return out;
 }
 
 async function bgPresealTick() {
-  if (!bgSessionNow()) return;
+  const session = bgSessionInfo();
+  if (!session.tradable) return;
   const { todayStr, isTradingDay } = await import('./data.js');
   const today = todayStr();
   if (!isTradingDay(today)) return;
@@ -148,51 +153,148 @@ async function bgPresealTick() {
   if (!ntfyUrl || !/^https?:\/\//i.test(ntfyUrl)) return; // 未配置 ntfy 不后台跑(SW 通知也一并不发,避免两套口径)
   const watch = await bgWatchStocks(today).catch(() => []);
   if (!watch.length) return;
-  const quotes = await bgFetchQuotes(watch.map((s) => s.code)).catch(() => ({}));
   const now = Date.now();
+  const { detectPreSealAlerts, limitPriceOf, PARAM_MANIFEST } = await import('./analytics.js');
+  const p = PARAM_MANIFEST.preSealAlert;
+  // 竞价段用涨幅榜的竞价撮合价(ulist 此时可能还是昨收)；盘中用 ulist 实时报价
+  let quoteRows = [];
+  if (session.auction) {
+    const { fetchAllMarket, fetchSinaTopGainers } = await import('./data.js');
+    const merged = new Map();
+    try {
+      const { rows } = await fetchAllMarket({ pageSize: 300, sort: 'f3', order: 'desc' });
+      for (const row of rows || []) merged.set(row.code, row);
+    } catch { /* 走新浪兜底 */ }
+    if (merged.size < 270) {
+      try {
+        for (const row of await fetchSinaTopGainers(300)) if (!merged.has(row.code)) merged.set(row.code, row);
+      } catch { /* 新浪也挂：保留东财已有行 */ }
+    }
+    quoteRows = [...merged.values()].filter((row) => {
+      const ts = Number(row.update);
+      if (Number.isFinite(ts) && ts > 0) {
+        if (now - ts * 1000 > 5 * 60_000) return false;
+        const c = new Date(ts * 1000 + 8 * 3600_000);
+        const m = c.getUTCHours() * 60 + c.getUTCMinutes();
+        return m >= 555 && m <= 590;
+      }
+      const t = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(String(row.ticktime || ''));
+      if (!t) return false;
+      const rowMin = Number(t[1]) * 60 + Number(t[2]);
+      return rowMin >= 555 && rowMin <= 590;
+    }).map((row) => ({ code: row.code, price: row.price, prevClose: row.prevClose, changePercent: row.changePct, update: Number(row.update) || 0 }));
+  } else {
+    const quotes = await bgFetchQuotes(watch.map((s) => s.code)).catch(() => ({}));
+    quoteRows = Object.entries(quotes).map(([code, q]) => ({ code, price: q.price, prevClose: q.prevClose, changePercent: (q.price / q.prevClose - 1) * 100, update: q.update || 0 }));
+  }
+  const byCode = new Map(quoteRows.map((row) => [row.code, row]));
   const stocks = [];
   for (const s of watch) {
-    const q = quotes[s.code];
-    if (!q) continue;
-    const changePercent = (q.price / q.prevClose - 1) * 100;
-    if (!Number.isFinite(changePercent)) continue;
-    stocks.push({ code: s.code, name: s.name, boards: s.boards, limitPct: s.limitPct, changePercent });
+    const q = byCode.get(s.code);
+    if (!q || !Number.isFinite(q.changePercent)) continue;
+    // 半日市/停牌/数据源卡死时旧价会一直停在涨停附近,不拦会在午后重复触发
+    if (q.update && Math.abs(now - q.update * 1000) > 5 * 60_000) continue;
+    const limit = limitPriceOf(q.prevClose, s.code, s.name);
+    stocks.push({
+      code: s.code, name: s.name, boards: s.boards,
+      limitPct: limit ? limit.effectiveLimitPct : s.boardLimitPct,
+      boardLimitPct: limit ? limit.boardLimitPct : s.boardLimitPct,
+      changePercent: q.changePercent, price: q.price, preClose: q.prevClose,
+      sources: Array.isArray(s.sources) ? s.sources : [], // 页面写的核心名单来源:首次进监控就知道「今日炸板」
+    });
   }
   if (!stocks.length) return;
-  const { detectPreSealAlerts } = await import('./analytics.js');
+  // 重复提醒账本(与页面同一份):code:kind -> {count,lastAt,lastPct,resetReady}
+  // 规则:不设次数上限;必须先从上次提醒涨幅回落 ≥3pp,且距上次 ≥20 分钟,才允许再次提醒。
+  const repeatRec = await pageKvGet('preSealRepeat').catch(() => null);
+  const repeat = new Map(repeatRec && repeatRec.date === today && repeatRec.byKey ? Object.entries(repeatRec.byKey) : []);
+  for (const [key, st] of repeat) {
+    const code = key.slice(0, key.indexOf(':'));
+    const s = stocks.find((x) => x.code === code);
+    if (!s) continue;
+    const base = st.lastPct != null ? st.lastPct : s.limitPct;
+    if (s.changePercent <= base - (Number(p.repeatResetOffsetPct) || 3)) st.resetReady = true;
+  }
+  const canAlert = (key) => {
+    const st = repeat.get(key);
+    if (!st) return true;
+    const minInterval = Number(p.repeatMinIntervalMs) || 20 * 60_000;
+    return Boolean(st.resetReady) && now - st.lastAt >= minInterval;
+  };
+  const markAlerted = (key, ev) => {
+    const st = repeat.get(key) || { count: 0, lastAt: 0, lastPct: null, resetReady: false };
+    st.count += 1; st.lastAt = now;
+    st.lastPct = Number.isFinite(Number(ev.pct)) ? Number(ev.pct) : null;
+    st.resetReady = false;
+    repeat.set(key, st);
+  };
+  // 回封状态(与页面同口径):封→跌破 1pp 记炸板,重新逼近到距涨停 0.5pp 内推(受重复提醒约束)
+  const resealRec = await pageKvGet('preSealReseal').catch(() => null);
+  const resealMap = new Map(resealRec && resealRec.date === today && resealRec.byCode ? Object.entries(resealRec.byCode) : []);
+  const resealEvents = [];
+  for (const s of stocks) {
+    const st = resealMap.get(s.code) || {};
+    // 今日炸板池里的票,首次进入监控时就知道「已经炸过板」,直接进入 broken 状态
+    if (!st.init) {
+      st.init = true;
+      if ((s.sources || []).includes('今日炸板')) st.broken = true;
+    }
+    if (s.changePercent >= s.limitPct - p.sealedTolerancePct) { st.sealed = true; st.broken = false; }
+    else if (st.sealed && s.changePercent <= s.limitPct - p.resealOffsetPct) { st.sealed = false; st.broken = true; }
+    if (st.broken && canAlert(`${s.code}:reseal`) && s.changePercent >= s.limitPct - p.resealTriggerOffsetPct && s.changePercent < s.limitPct - p.sealedTolerancePct) {
+      st.broken = false;
+      resealEvents.push({
+        code: s.code, name: s.name, kind: 'reseal',
+        pct: Math.round(s.changePercent * 100) / 100, limitPct: s.limitPct, boardLimitPct: s.boardLimitPct,
+        gapPct: Math.round(Math.max(0, s.limitPct - s.changePercent) * 100) / 100, auction: session.auction, t: now,
+      });
+    }
+    resealMap.set(s.code, st);
+  }
+  await pageKvSet('preSealReseal', { date: today, byCode: Object.fromEntries(resealMap) }).catch(() => {});
   // 上轮涨幅快照:落页面同一个库,跨 tick 保持;隔日作废(防止隔夜旧涨幅被当急拉基准)
   const prevRec = await pageKvGet('preSealPrevSnap').catch(() => null);
   const prevSnap = new Map(prevRec && prevRec.date === today && prevRec.snap ? Object.entries(prevRec.snap) : []);
-  // 当日已推账本:与页面共用,先查账再更新,保证刷新/前后台/页面与 SW 之间不重复
-  const seenRec = await pageKvGet('preSealSeen').catch(() => null);
-  const seen = new Set(seenRec && seenRec.date === today && Array.isArray(seenRec.keys) ? seenRec.keys : []);
-  const events = detectPreSealAlerts({ stocks, watchCodes: stocks.map((s) => s.code), prevSnap, now, inCooldown: (key) => seen.has(key) });
+  const events = detectPreSealAlerts({ stocks, watchCodes: stocks.map((s) => s.code), prevSnap, now, inCooldown: (key) => !canAlert(key) });
+  for (const ev of events) ev.auction = session.auction;
+  const resealCodes = new Set(resealEvents.map((ev) => ev.code));
   const accepted = [];
-  for (const ev of events) {
-    if (seen.size >= 30) break; // 单日上限,防异常数据刷屏
+  for (const ev of [...events.filter((e) => !resealCodes.has(e.code)), ...resealEvents]) {
     const key = `${ev.code}:${ev.kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (!canAlert(key)) continue;
+    markAlerted(key, ev);
     accepted.push(ev);
   }
   await pageKvSet('preSealPrevSnap', { date: today, snap: Object.fromEntries(stocks.map((s) => [s.code, { pct: s.changePercent, t: now }])) }).catch(() => {});
   if (accepted.length) {
-    // 写入前与页面账本做并集:页面 15s 扫描可能刚写过,直接覆盖会抹掉它的记录→重复推送
-    const latest = await pageKvGet('preSealSeen').catch(() => null);
-    const merged = new Set(seen);
-    if (latest && latest.date === today && Array.isArray(latest.keys)) for (const k of latest.keys) merged.add(k);
-    await pageKvSet('preSealSeen', { date: today, keys: [...merged] }).catch(() => {});
+    // 写入前与页面账本并集(同一 key 取 lastAt 更新的):页面 15s 扫描可能刚写过
+    const latest = await pageKvGet('preSealRepeat').catch(() => null);
+    if (latest && latest.date === today && latest.byKey) {
+      for (const [k, v] of Object.entries(latest.byKey)) {
+        const cur = repeat.get(k);
+        if (!cur || (Number(v?.lastAt) || 0) > (Number(cur?.lastAt) || 0)) repeat.set(k, v);
+      }
+    }
+    const byKey = {};
+    for (const [k, v] of repeat) byKey[k] = v;
+    await pageKvSet('preSealRepeat', { date: today, byKey }).catch(() => {});
   }
   const root = new URL(ntfyUrl).origin + '/';
   const topic = ntfyUrl.split('/').filter(Boolean).pop();
-  for (const ev of accepted) {
-    const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
-    const text = ev.kind === 'sealApproach'
-      ? `${label} 逼近涨停 ${ev.pct}%（距涨停 ${(Number(ev.limitPct) - Number(ev.pct)).toFixed(2)}pp，未封）`
-      : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
-    const title = ev.kind === 'sealApproach' ? '封板前预警' : '急拉预警';
-    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topic, title: `MarketPulse · ${label} ${title}`, message: text, priority: 4, tags: ['warning', 'bell'] }) }).catch(() => {});
-    try { await self.registration.showNotification(title, { body: text, tag: `bg-preseal-${ev.code}`, icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch { /* 无通知权限时静默 */ }
+  const lineOf = (ev) => {
+    const gap = Number.isFinite(Number(ev.gapPct)) ? Number(ev.gapPct).toFixed(1) : '--';
+    if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}距涨停 ${gap}pp（现 ${ev.pct}%）`;
+    if (ev.kind === 'reseal') return `回封 · 距涨停 ${gap}pp（现 ${ev.pct}%）`;
+    return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+  };
+  const lines = accepted.slice(0, 8).map((ev) => `${ev.name} ${lineOf(ev)}`);
+  if (accepted.length > 8) lines.push(`另有 ${accepted.length - 8} 只`);
+  if (lines.length) {
+    const title = accepted.length === 1 ? `MarketPulse · ${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `MarketPulse · 封板前预警 ${accepted.length} 只`;
+    const notifyTitle = accepted.length === 1 ? (accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警') : '封板前预警';
+    const message = lines.join('\n');
+    await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topic, title, message, priority: 4, tags: ['warning', 'bell'] }) }).catch(() => {});
+    try { await self.registration.showNotification(notifyTitle, { body: message, tag: 'bg-preseal', icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch { /* 无通知权限时静默 */ }
   }
 }
 

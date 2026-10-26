@@ -20,6 +20,24 @@ function hasNumericField(stock, field, availabilityField) {
 // 2026-10-26 概念主线：把同花顺涨停揭秘的 reason 标签聚合成概念强度榜（行业口径的补充）。
 // 打板的主线是「机器人/算力/固态电池」这类跨行业概念，hybk 行业只能当辅助。
 // 一只股可挂多个概念（"算力+液冷"），所以各概念家数之和会大于涨停总数；无标注的单独计数。
+// 2026-10-26 概念归并：同花顺 reason 常把同一条主线拆成细分标签——今日实测「人形机器人 8 / 机器人 4 /
+// 服务机器人 1 / 机器人腱绳 1 / 机器人轴承 1」五张卡互挤前 6 名，并集 14 只才是真主线。
+// 只登记明确的父子关系（细分词→主线词），不发明同义；原始标签保留在 concepts[].tags 供详情展示。
+// 新增映射须有当日数据佐证：同 parent 的标签股票不重叠、语义上确属同一条炒作主线。
+const CONCEPT_TAG_ALIASES = Object.freeze({
+  人形机器人: '机器人',
+  服务机器人: '机器人',
+  机器人腱绳: '机器人',
+  机器人轴承: '机器人',
+  机器人关节: '机器人',
+  机器人关节模组: '机器人',
+  机器人灵巧手: '机器人',
+  灵巧手: '机器人',
+  机器人减速器: '机器人',
+  谐波减速器: '机器人',
+  行星滚柱丝杠: '机器人'
+});
+
 function aggregateConceptRanking(items = [], stocks = [], limit = 12) {
   const stockByCode = new Map((stocks || []).map((stock) => [String(stock.code), stock]));
   const groups = new Map();
@@ -39,12 +57,20 @@ function aggregateConceptRanking(items = [], stocks = [], limit = 12) {
       isAgain: Boolean(item.isAgain),
       highDays: item.highDays || ''
     };
-    for (const name of new Set(tags)) {
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(entry);
+    const seen = new Set();
+    for (const rawTag of new Set(tags)) {
+      const name = CONCEPT_TAG_ALIASES[rawTag] || rawTag;
+      if (!groups.has(name)) groups.set(name, { list: [], tagCounts: new Map() });
+      const group = groups.get(name);
+      // 原始标签计数照记(详情要展示构成),但同一只票在同一主线里只入列一次
+      group.tagCounts.set(rawTag, (group.tagCounts.get(rawTag) || 0) + 1);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      group.list.push(entry);
     }
   }
-  const concepts = [...groups.entries()].map(([name, list]) => {
+  const concepts = [...groups.entries()].map(([name, group]) => {
+    const list = group.list;
     const limitUpCount = list.length;
     const maxBoard = list.reduce((max, stock) => Math.max(max, stock.boards || 1), 0);
     const multiBoardCount = list.filter((stock) => (stock.boards || 1) > 1).length;
@@ -58,6 +84,9 @@ function aggregateConceptRanking(items = [], stocks = [], limit = 12) {
     const heightScore = Math.min(20, maxBoard * 4);
     const sealScore = totalSealAmount === null ? 0 : Math.min(15, Math.sqrt(Math.max(0, totalSealAmount) / 100_000_000) * 4);
     const ordered = [...list].sort((a, b) => (b.boards || 1) - (a.boards || 1) || (b.sealAmount || 0) - (a.sealAmount || 0) || String(a.code).localeCompare(String(b.code)));
+    const tagsOf = [...group.tagCounts.entries()]
+      .map(([tag, count]) => ({ name: tag, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'));
     return {
       name,
       limitUpCount,
@@ -65,6 +94,8 @@ function aggregateConceptRanking(items = [], stocks = [], limit = 12) {
       maxBoard,
       totalSealAmount,
       avgSealRate,
+      merged: tagsOf.length > 1,
+      tags: tagsOf,
       score: round(Math.min(100, breadthScore + multiBoardScore + heightScore + sealScore)),
       leaders: ordered.slice(0, 3).map((stock) => stock.code),
       stocks: ordered

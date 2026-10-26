@@ -17,6 +17,63 @@ function hasNumericField(stock, field, availabilityField) {
   return finiteNumber(stock?.[field]) !== null;
 }
 
+// 2026-10-26 概念主线：把同花顺涨停揭秘的 reason 标签聚合成概念强度榜（行业口径的补充）。
+// 打板的主线是「机器人/算力/固态电池」这类跨行业概念，hybk 行业只能当辅助。
+// 一只股可挂多个概念（"算力+液冷"），所以各概念家数之和会大于涨停总数；无标注的单独计数。
+function aggregateConceptRanking(items = [], stocks = [], limit = 12) {
+  const stockByCode = new Map((stocks || []).map((stock) => [String(stock.code), stock]));
+  const groups = new Map();
+  let unlabeled = 0;
+  for (const item of items || []) {
+    const tags = String(item?.reason || '').split(/[+＋、,，;；/]/).map((tag) => tag.trim()).filter(Boolean);
+    if (!tags.length) { unlabeled += 1; continue; }
+    const code = String(item.code || '');
+    const stock = stockByCode.get(code) || {};
+    const entry = {
+      code,
+      name: item.name || stock.name || code,
+      boards: finiteNumber(stock.boards) || 1,
+      sealAmount: finiteNumber(item.sealAmount) ?? finiteNumber(stock.sealAmount),
+      sealRate: finiteNumber(item.sealRate),
+      breakTimes: Number(item.breakTimes) || 0,
+      isAgain: Boolean(item.isAgain),
+      highDays: item.highDays || ''
+    };
+    for (const name of new Set(tags)) {
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(entry);
+    }
+  }
+  const concepts = [...groups.entries()].map(([name, list]) => {
+    const limitUpCount = list.length;
+    const maxBoard = list.reduce((max, stock) => Math.max(max, stock.boards || 1), 0);
+    const multiBoardCount = list.filter((stock) => (stock.boards || 1) > 1).length;
+    const sealValues = list.map((stock) => stock.sealAmount).filter((value) => value !== null && value !== undefined);
+    const totalSealAmount = sealValues.length ? sealValues.reduce((sum, value) => sum + value, 0) : null;
+    const rates = list.map((stock) => stock.sealRate).filter((value) => value !== null && value !== undefined);
+    const avgSealRate = rates.length ? round(rates.reduce((sum, value) => sum + value, 0) / rates.length, 3) : null;
+    // 与 summarizeTheme 同口径打分，便于和行业榜横向比
+    const breadthScore = Math.min(40, limitUpCount * 4);
+    const multiBoardScore = Math.min(25, multiBoardCount * 5);
+    const heightScore = Math.min(20, maxBoard * 4);
+    const sealScore = totalSealAmount === null ? 0 : Math.min(15, Math.sqrt(Math.max(0, totalSealAmount) / 100_000_000) * 4);
+    const ordered = [...list].sort((a, b) => (b.boards || 1) - (a.boards || 1) || (b.sealAmount || 0) - (a.sealAmount || 0) || String(a.code).localeCompare(String(b.code)));
+    return {
+      name,
+      limitUpCount,
+      multiBoardCount,
+      maxBoard,
+      totalSealAmount,
+      avgSealRate,
+      score: round(Math.min(100, breadthScore + multiBoardScore + heightScore + sealScore)),
+      leaders: ordered.slice(0, 3).map((stock) => stock.code),
+      stocks: ordered
+    };
+  });
+  concepts.sort((a, b) => b.score - a.score || b.limitUpCount - a.limitUpCount || a.name.localeCompare(b.name, 'zh-CN'));
+  return { available: concepts.length > 0, source: '同花顺涨停揭秘', total: (items || []).length, unlabeled, items: concepts.slice(0, limit) };
+}
+
 function parseSealTime(value) {
   const digits = String(value || '').replace(/\D/g, '').padStart(6, '0').slice(-6);
   if (!digits || digits === '000000') return null;
@@ -1714,7 +1771,7 @@ function diffSignalSnapshot(prev, next) {
 }
 
 export {
-  finiteNumber, round, calculateBreakRate, summarizeTheme, groupThemes, buildThemeRanking,
+  finiteNumber, round, calculateBreakRate, summarizeTheme, groupThemes, aggregateConceptRanking, buildThemeRanking,
   rankCoreLeaders, leaderScore, calculatePromotionStats, calculateRollingPromotion, buildModeMonitor, aggregateModeRates,
   calculateEmotionState, indicator, yesterdayPremium, computeOpportunityScore, rankOpportunities, phaseStrategy, RULES, PHASE_STRATEGY,
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,

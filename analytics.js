@@ -467,10 +467,15 @@ function computeOpportunityScore(stock, ctx = {}) {
   if (strategy.allowed.includes(buyType)) plus.push(`买点「${buyType}」契合当前阶段`);
   else if (strategy.forbidden.includes(buyType)) minus.push(`买点「${buyType}」当前阶段不适用`);
 
-  const score = Math.max(0, Math.min(100, Math.round(rolePoints + themePoints + heightPoints + sealPoints + turnoverPoints + breakPoints + modePoints)));
+  const rawScore = rolePoints + themePoints + heightPoints + sealPoints + turnoverPoints + breakPoints + modePoints;
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
   // 注意：role 的实际得分上限随角色而变（后排3分），但「可得性」按满配 20 计——
   // 角色低不是数据缺失而是事实判定，不应放宽刻度。
   const scoreNorm = possibleMax > 0 ? Math.max(0, Math.min(100, Math.round(score / possibleMax * 100))) : score;
+  // 2026-10-26 并列治理：展示/排序用未取整的归一化分。原始分取整后，同一批
+  // 「同角色+同封单+同换手+同模式」的股票会挤在同一个整数上（实测单日 16 只并列 60 分），
+  // 而题材分本身带小数——不取整就能把它们分开。定级仍用 scoreNorm，分数线不变。
+  const scoreNormExact = Number((possibleMax > 0 ? Math.max(0, Math.min(100, rawScore / possibleMax * 100)) : Math.max(0, Math.min(100, rawScore))).toFixed(2));
 
   const elim = [];
   if (breakCount >= RULES.elim.breakCountTooMany) elim.push(`炸板次数过多（${breakCount} 次）`);
@@ -487,7 +492,7 @@ function computeOpportunityScore(stock, ctx = {}) {
   else if (scoreNorm >= RULES.tier.bScore) tier = 'B';
   else { tier = '淘汰'; elim.push('综合得分偏低'); }
   const weights = { role: rolePoints, theme: RULES.themeCap, height: RULES.heightCap, seal: RULES.sealCap, turnover: RULES.turnoverGood, breaks: RULES.breakMaxPoints, mode: RULES.modeAllowed };
-  return { score, scoreNorm, possibleMax, tier, reasons: { plus, minus, elim }, breakdown, weights };
+  return { score, scoreNorm, scoreNormExact, possibleMax, tier, reasons: { plus, minus, elim }, breakdown, weights };
 }
 
 function rankOpportunities(stocks = [], ctx = {}) {
@@ -500,7 +505,9 @@ function rankOpportunities(stocks = [], ctx = {}) {
     const role = roleByCode.get(stock.code) || (groups.get(themeName)?.length === 1 ? '板块龙头' : '跟风');
     const result = computeOpportunityScore(stock, { role, themeScore: theme?.score ?? null, themeName, buyType: stock.buyType, phase: ctx.phase });
     const themeSize = groups.get(themeName)?.length || 0;
-    return { ...stock, role, themeName, themeScore: theme?.score ?? null, themeSize, ...result };
+    // 同分并列的次序键：封单额/流通市值（同星级里谁封得更实），前端排序复用同一口径
+    const sealRatio = Number(stock.circulatingValue) > 0 ? (Number(stock.sealAmount) || 0) / Number(stock.circulatingValue) : null;
+    return { ...stock, role, themeName, themeScore: theme?.score ?? null, themeSize, sealRatio, ...result };
   });
   const tiers = { S: [], A: [], B: [] };
   const eliminated = [];

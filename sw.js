@@ -159,21 +159,15 @@ async function bgPresealTick() {
   // 竞价段用涨幅榜的竞价撮合价(ulist 此时可能还是昨收)；盘中用 ulist 实时报价
   let quoteRows = [];
   if (session.auction) {
-    const { fetchAllMarket, fetchSinaTopGainers } = await import('./data.js');
-    const merged = new Map();
-    try {
-      const { rows } = await fetchAllMarket({ pageSize: 300, sort: 'f3', order: 'desc' });
-      for (const row of rows || []) merged.set(row.code, row);
-    } catch { /* 走新浪兜底 */ }
-    if (merged.size < 270) {
-      try {
-        for (const row of await fetchSinaTopGainers(300)) if (!merged.has(row.code)) merged.set(row.code, row);
-      } catch { /* 新浪也挂：保留东财已有行 */ }
-    }
-    quoteRows = [...merged.values()].filter((row) => {
+    const { fetchTopGainers } = await import('./data.js');
+    // 东财 clist 每页最多 100 只,由 data.js:fetchTopGainers 翻 3 页凑前 300,
+    // 不足一页才走新浪兜底(与页面/桌面同源),不再每轮白打一遍兜底。
+    const rows = await fetchTopGainers(300).catch(() => []);
+    quoteRows = rows.filter((row) => {
       const ts = Number(row.update);
       if (Number.isFinite(ts) && ts > 0) {
-        if (now - ts * 1000 > 5 * 60_000) return false;
+        const age = now - ts * 1000;
+        if (age < -60_000 || age > 5 * 60_000) return false;
         const c = new Date(ts * 1000 + 8 * 3600_000);
         const m = c.getUTCHours() * 60 + c.getUTCMinutes();
         return m >= 555 && m <= 590;

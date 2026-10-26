@@ -1,5 +1,5 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchAllMarket, fetchSinaTopGainers, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中
+import { fetchPools, fetchQuotes, fetchTopGainers, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
@@ -652,24 +652,13 @@ function preSealLine(ev) {
   if (ev.kind === 'reseal') return `回封 · 距涨停 ${gap}pp（现 ${ev.pct}%）`;
   return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
 }
-// 涨幅榜(前 300,按涨幅倒序)。30s 缓存，东财失败/不足时用新浪兜底(与桌面 fetchTopGainers 同源)。
+// 涨幅榜(前 300,按涨幅倒序)。30s 缓存;分页/新浪兜底都在 data.js:fetchTopGainers(与桌面同源)。
 async function preSealRanking() {
   if (Date.now() - preSealRankingCache.at < PRESEAL_RANKING_MS) return preSealRankingCache.rows;
-  const merged = new Map();
-  let emRows = [];
   try {
-    const { rows } = await fetchAllMarket({ pageSize: 300, sort: 'f3', order: 'desc' });
-    emRows = rows || [];
-  } catch { emRows = []; }
-  for (const row of emRows) merged.set(row.code, row);
-  // 东财不足 90% 时补新浪(桌面同口径)；新浪失败静默，保留东财已有行
-  if (merged.size < 270) {
-    try {
-      const sinaRows = await fetchSinaTopGainers(300);
-      for (const row of sinaRows) if (!merged.has(row.code)) merged.set(row.code, row);
-    } catch { /* 新浪也挂：保留东财已有行 */ }
-  }
-  if (merged.size) preSealRankingCache = { at: Date.now(), rows: [...merged.values()].slice(0, 300) };
+    const rows = await fetchTopGainers(300);
+    if (rows.length) preSealRankingCache = { at: Date.now(), rows: rows.slice(0, 300) };
+  } catch { /* 保留上一轮缓存 */ }
   return preSealRankingCache.rows;
 }
 // 涨幅榜时间戳新鲜度：竞价段必须来自 09:15-09:30 的竞价快照，否则宁可一条都不推——
@@ -966,7 +955,7 @@ function firePreSealAlert(ev) {
     ? `${auctionPrefix}距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%${boardText ? '，' + boardText : ''}）${boardsText}`
     : ev.kind === 'reseal'
       ? `${auctionPrefix}炸板回封 · 距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%）${boardsText}`
-      : `${label} 30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
+      : `30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   const title = ev.kind === 'sealApproach' ? '封板前预警' : ev.kind === 'reseal' ? '回封预警' : '急拉预警';
   toast(`${label} ${text}`);
   if (state.preSealOff) return; // 设置里关了就只 toast 不打扰

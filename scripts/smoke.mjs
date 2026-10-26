@@ -582,11 +582,18 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('封板前预警有独立 15s 定时器', /setInterval\(\(\) => \{ preSealTick\(\)\.catch/.test(appSrc));
   ok('监控名单取上一交易日涨停池,不回退今日涨停池', /preSealPrevTradingDate/.test(appSrc) && /上一交易日涨停池/.test(appSrc));
   ok('核心名单含今日炸板 + 竞价候选', /state\.pools\?\.broken/.test(appSrc) && /buildAuctionWatchlist/.test(appSrc));
-  ok('全市场层:涨幅榜前300 + 摘要推送(不逐票刷屏)', /fetchAllMarket\(\{ pageSize: 300/.test(appSrc) && /preSealMarketCandidates/.test(appSrc) && /pushPreSealDigest/.test(appSrc));
+  ok('全市场层:涨幅榜前300 + 摘要推送(不逐票刷屏)', /fetchTopGainers\(300\)/.test(appSrc) && /preSealMarketCandidates/.test(appSrc) && /pushPreSealDigest/.test(appSrc));
   ok('竞价预扫 9:26-9:29(避开 9:25 未定稿数据)', /minutes >= 566 && minutes < 570/.test(appSrc));
   ok('全市场摘要竞价段只发一条', /auctionSent/.test(appSrc));
-  ok('涨幅榜东财失败时走新浪兜底(GBK 解码)', /fetchSinaTopGainers/.test(appSrc) && /fetchSinaTopGainers/.test(swSrc) && /TextDecoder\('gbk'\)/.test(dataSrc));
+  ok('涨幅榜东财失败时走新浪兜底(GBK 解码)', /fetchTopGainers/.test(appSrc) && /fetchTopGainers/.test(swSrc) && /fetchSinaTopGainers/.test(dataSrc) && /TextDecoder\('gbk'\)/.test(dataSrc));
+  // 东财 clist 会把 pz 截到 100(2026-10-26 实测请求 300 仍只回 100):必须分页,否则每轮都判「不足」白打新浪。
+  ok('涨幅榜分页:每页固定 100(接口上限),页面与 SW 同源', /const RANK_PAGE_SIZE = 100/.test(dataSrc)
+    && /pageSize: RANK_PAGE_SIZE/.test(dataSrc) && /for \(let page = 1; page <= Math\.ceil\(limit \/ RANK_PAGE_SIZE\)/.test(dataSrc)
+    && !/pageSize: 300/.test(appSrc) && !/pageSize: 300/.test(swSrc));
+  ok('涨幅榜主源中断/兜底失败都保留已抓到的行', /catch \{ break; \} \/\/ 主源中断/.test(dataSrc)
+    && /catch \{ break; \} \/\/ 单页失败保留已抓到的行/.test(dataSrc));
   ok('精确涨停价判定(按昨收算到分)', /limitPriceOf\(/.test(appSrc) && /limitPriceOf\(/.test(swSrc));
+  ok('急拉单条文案不重复股票名(标题/正文已各带一次)', !/\$\{label\} 30秒急拉/.test(appSrc));
   ok('炸板回封(受重复提醒约束,页面与 SW 同口径)', /kind: 'reseal'/.test(appSrc) && /kind: 'reseal'/.test(swSrc) && /resealTriggerOffsetPct/.test(appSrc));
   ok('重复提醒账本持久化(KV),回落重置+20分钟才重复', /preSealRepeat/.test(appSrc) && /preSealRepeat/.test(swSrc)
     && /preSealCanAlert/.test(appSrc) && /resetReady/.test(appSrc) && /resetReady/.test(swSrc));

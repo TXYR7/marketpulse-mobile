@@ -353,34 +353,40 @@ export function exportKlineCache() {
   return out;
 }
 
-// 全市场涨幅榜兜底(新浪)：东财 clist 挂掉时用，3 页 × 100 只。桌面 server.js:fetchTopGainers 同源。
+// 涨幅榜每页固定 100 只：东财 clist 会把 pz 截到 100（2026-10-26 实测请求 300 仍只回 100），
+// 桌面 server.js:fetchTopGainers 同口径。写死常量，避免两端各自改出分页漂移。
+const RANK_PAGE_SIZE = 100;
+// 全市场涨幅榜兜底(新浪)：东财 clist 挂掉时用，最多 3 页 × 100 只。
 // 浏览器直接请求：CORS 全开；响应是 GBK，必须按 gbk 解码，否则中文名乱码。
+// 单页失败只停在这一页，保留已抓到的行——兜底自己崩掉不能把东财已拿到的一起丢光。
 export async function fetchSinaTopGainers(limit = 300) {
   const out = new Map();
-  for (let page = 1; page <= Math.ceil(limit / 100); page += 1) {
+  for (let page = 1; page <= Math.ceil(limit / RANK_PAGE_SIZE); page += 1) {
     if (page > 1) await new Promise((r) => setTimeout(r, 100));
-    const url = `https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=${page}&num=100&sort=changepercent&asc=0&node=hs_a&symbol=&_s_r_a=page`;
-    const res = await fetch(url, { headers: { accept: 'application/json,text/plain,*/*' }, signal: AbortSignal.timeout(8_000) });
-    if (!res.ok) throw new Error('sina 涨幅榜 HTTP ' + res.status);
-    let text;
-    try { text = new TextDecoder('gbk').decode(await res.arrayBuffer()); }
-    catch { text = await res.text(); }
-    const batch = JSON.parse(text);
-    if (!Array.isArray(batch) || !batch.length) break;
-    for (const row of batch) {
-      const code = String(row.code || row.symbol || '').replace(/^(sh|sz|bj)/i, '');
-      if (!/^\d{6}$/.test(code)) continue;
-      out.set(code, {
-        code,
-        name: String(row.name || code),
-        price: Number(row.trade),
-        prevClose: Number(row.settlement),
-        changePct: Number(row.changepercent),
-        amount: Number(row.amount) || 0,
-        ticktime: String(row.ticktime || ''),
-      });
-    }
-    if (batch.length < 100) break;
+    try {
+      const url = `https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=${page}&num=${RANK_PAGE_SIZE}&sort=changepercent&asc=0&node=hs_a&symbol=&_s_r_a=page`;
+      const res = await fetch(url, { headers: { accept: 'application/json,text/plain,*/*' }, signal: AbortSignal.timeout(8_000) });
+      if (!res.ok) throw new Error('sina 涨幅榜 HTTP ' + res.status);
+      let text;
+      try { text = new TextDecoder('gbk').decode(await res.arrayBuffer()); }
+      catch { text = await res.text(); }
+      const batch = JSON.parse(text);
+      if (!Array.isArray(batch) || !batch.length) break;
+      for (const row of batch) {
+        const code = String(row.code || row.symbol || '').replace(/^(sh|sz|bj)/i, '');
+        if (!/^\d{6}$/.test(code)) continue;
+        out.set(code, {
+          code,
+          name: String(row.name || code),
+          price: Number(row.trade),
+          prevClose: Number(row.settlement),
+          changePct: Number(row.changepercent),
+          amount: Number(row.amount) || 0,
+          ticktime: String(row.ticktime || ''),
+        });
+      }
+      if (batch.length < RANK_PAGE_SIZE) break;
+    } catch { break; } // 单页失败保留已抓到的行（兜底也失败时上层仍可用东财数据）
   }
   return [...out.values()].slice(0, limit);
 }
@@ -408,6 +414,27 @@ export async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sor
     update: row.f124,
   }));
   return { total, page, pageSize, rows, market };
+}
+
+// 全市场涨幅榜(前 limit 只,按涨幅倒序):核心层/摘要层共用,页面与 SW 同源。
+// 东财 clist 每页最多 100 只(pz=300 实测仍只回 100),所以固定每页 RANK_PAGE_SIZE、最多翻
+// ceil(limit/100) 页;拿满一页就够判涨停(临近涨停的票必然排在涨幅榜前列),不再白打新浪。
+// 东财任一中途失败:保留已抓到的页,不足一页再逐页走新浪兜底;兜底失败同样保留已有行。
+export async function fetchTopGainers(limit = 300) {
+  const merged = new Map();
+  for (let page = 1; page <= Math.ceil(limit / RANK_PAGE_SIZE); page += 1) {
+    try {
+      const { rows } = await fetchAllMarket({ page, pageSize: RANK_PAGE_SIZE, sort: 'f3', order: 'desc' });
+      if (!rows?.length) break;
+      for (const row of rows) merged.set(row.code, row);
+      if (rows.length < RANK_PAGE_SIZE) break;
+    } catch { break; } // 主源中断:已拿到的页仍可用,不够再走新浪
+  }
+  if (merged.size >= RANK_PAGE_SIZE) return [...merged.values()].slice(0, limit);
+  try {
+    for (const row of await fetchSinaTopGainers(limit)) if (!merged.has(row.code)) merged.set(row.code, row);
+  } catch { /* 新浪也挂:保留东财已拿到的行 */ }
+  return [...merged.values()].slice(0, limit);
 }
 
 // 按名称/代码搜索（轻量；用于全市场搜索框）。B5:f2/f3 现价与涨跌幅——停牌 '-' 转 null 优雅降级

@@ -1258,6 +1258,11 @@ const PROMO_RULES = {
   volDownStage23: [-40, -20],
   // 高位门槛：七板以上才算高位/市场龙头，<7 板不存在高切低/补涨龙玩法
   highBoardThreshold: 7,
+  // 封单占比（封单额/流通市值 %）分档与降级线（2026-10-26）：5%极强 / 3%强 / 1.5%一般 / 0.8%弱 / 更低极弱。
+  // 阈值与 server.sealQuality 星档同源；< sealRatioFloor 不允许判「可接力」。
+  sealRatioBands: [5, 3, 1.5, 0.8],
+  sealRatioPoints: [10, 8, 6, 3, 0],
+  sealRatioFloor: 1.5,
 };
 
 const PARAM_MANIFEST = {
@@ -1567,11 +1572,40 @@ function assessPromotion(stock, ctx = {}) {
     scoreDim(10, undefined, volChg >= 0 ? 0.8 : 0.4);
   }
 
-  // ⑦ 信息项：缺口保护 / 回踩首板确认 / 高位门槛提示（不计分，供抽屉展示）
+  // ⑦ 封单占比（10，2026-10-26 加）：封得住比封得早更硬。同是 5 星，1% 和 5% 不是一回事；
+  // 阈值复用 sealQuality 星档口径（5/3/1.5/0.8%），低于降级线不能判「可接力」。
+  const sealAmt = finiteNumber(stock.sealAmount);
+  const circVal = finiteNumber(stock.circulatingValue);
+  const sealRatio = sealAmt !== null && circVal !== null && circVal > 0 ? sealAmt / circVal * 100 : null;
+  if (sealRatio === null) push('sealRatio', '封单占比', 'na', '封单额/流通市值缺失');
+  else {
+    const bands = PROMO_RULES.sealRatioBands;
+    const points = PROMO_RULES.sealRatioPoints;
+    const hit = bands.findIndex((b) => sealRatio >= b);
+    const pts = hit === -1 ? points[points.length - 1] : points[hit];
+    scoreDim(points[0], undefined, pts / points[0]);
+    const money = (v) => (v >= 1e8 ? `${(v / 1e8).toFixed(1)}亿` : v >= 1e4 ? `${Math.round(v / 1e4)}万` : `${Math.round(v)}`);
+    push('sealRatio', '封单占比', pts >= 8 ? 'pass' : pts >= 3 ? 'warn' : 'fail', `封单 ${money(sealAmt)} / 流通 ${money(circVal)} = ${sealRatio.toFixed(2)}%${sealRatio < PROMO_RULES.sealRatioFloor ? '（低于降级线）' : ''}`);
+  }
+
+  // ⑧ 信息项：缺口保护 / 回踩首板确认 / 高位门槛提示（不计分，供抽屉展示）
   if (ctx.gapUnfilled === true) push('info', '缺口保护', 'pass', '跳空缺口未回补——主力成本保护价成立，上攻状态强烈');
   else if (ctx.gapUnfilled === false) push('info', '缺口保护', 'fail', '缺口已回补——做庄失败信号');
   if (ctx.pullbackFirstBoard === true) push('info', '二次回踩', 'pass', '回踩后的首个首板——板上确认买点（N 字启动）');
   if (boards >= 3 && boards < PROMO_RULES.highBoardThreshold) push('info', '身位提示', 'warn', `${boards} 板尚不足以判定市场龙头（≥${PROMO_RULES.highBoardThreshold} 板才有高切低/补涨龙玩法）`);
+
+  // 数据完整性降级（2026-10-26）：决策系统里「缺数据」不能等于「通过」——缺关键维度时最多观望。
+  // 之前缺维只从分母剔除，极端情况三项全对就能 100 分拿「可接力」，且硬否决全部静默跳过。
+  const downgrades = [];
+  const missingCritical = [];
+  if (fault === null) missingCritical.push('周期');
+  if (sealSec === null) missingCritical.push('首封时间');
+  if (openPct === null) missingCritical.push('竞价');
+  if (themeSize === null) missingCritical.push('题材梯队');
+  if (brk === null) missingCritical.push('炸板次数');
+  if (sealRatio === null) missingCritical.push('封单占比');
+  if (missingCritical.length) downgrades.push(`关键数据缺失（${missingCritical.join('、')}）`);
+  if (sealRatio !== null && sealRatio < PROMO_RULES.sealRatioFloor) downgrades.push(`封单占比偏低 ${sealRatio.toFixed(1)}%`);
 
   // 硬否决 → 规避
   const hardFails = [];
@@ -1584,15 +1618,16 @@ function assessPromotion(stock, ctx = {}) {
   const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
   let verdict;
   if (hardFails.length) verdict = '规避';
-  else if (score >= 70) verdict = '可接力';
-  else if (score >= 45) verdict = '观望';
-  else verdict = '规避';
+  else if (score < 45) verdict = '规避';
+  else if (score >= 70 && !downgrades.length) verdict = '可接力';
+  else verdict = '观望';
   return {
     available: true,
     score,
     verdict,
     faultTolerance: fault,
     hardFails,
+    downgrades,
     checklist,
     asOf: Date.now(),
     disclaimer: '体系规则辅助参考，非投资建议',

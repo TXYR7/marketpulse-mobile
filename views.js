@@ -92,6 +92,31 @@ export function tierBadge(t) { return '<span class="tier-badge ' + (t || '淘汰
 export function signalTag(s) { return s ? '<span class="signal-tag ' + s + '">' + s + '</span>' : ''; }
 
 /* ---------------- 机会 ---------------- */
+// 评分列口径(2026-10-26 与网页统一):显示/排序都用未取整的归一化分 scoreNormExact——
+// 与 tier 的定级口径(scoreNorm)同源,不再出现「卡片里 60 分却是 A 级」;原始分放 title,
+// 免得「归一后 71 但原始只有 60」看不出来。同分次序按封单额/流通市值(sealRatio)再排。
+function oppScoreValue(item) {
+  const value = Number(item?.scoreNormExact ?? item?.scoreNorm ?? item?.score);
+  return Number.isFinite(value) ? value : null;
+}
+function oppScoreText(item) {
+  const value = oppScoreValue(item);
+  return value === null ? '--' : value.toFixed(1);
+}
+function oppScoreTitle(item) {
+  const max = Number(item?.possibleMax);
+  if (!Number.isFinite(max) || max <= 0) return '';
+  const raw = Number(item?.score);
+  const rawText = Number.isFinite(raw) ? (Number.isInteger(raw) ? String(raw) : raw.toFixed(1)) : '--';
+  return `原始 ${rawText} 分 · 可得满分 ${Math.round(max)}（缺数据维度不计入，列内按可得满分归一）`;
+}
+function oppSortList(list) {
+  return [...list].sort((a, b) =>
+    (oppScoreValue(b) ?? 0) - (oppScoreValue(a) ?? 0)
+    || (Number(b.sealRatio) || 0) - (Number(a.sealRatio) || 0)
+    || (Number(b.boards) || 1) - (Number(a.boards) || 1)
+    || String(a.code).localeCompare(String(b.code)));
+}
 export function renderOpportunity(ctx) {
   const el = document.querySelector('#opp');
   const opp = ctx.state.opportunities || { tiers: { S: [], A: [], B: [] }, eliminated: [] };
@@ -99,6 +124,9 @@ export function renderOpportunity(ctx) {
   const sCount = (tiers.S || []).length, aCount = (tiers.A || []).length, bCount = (tiers.B || []).length, eCount = (opp.eliminated || []).length;
   document.querySelector('#oppHint').textContent = `S ${sCount} / A ${aCount} / B ${bCount} / 淘汰 ${eCount}`;
   if (!ctx.state.pools) { el.innerHTML = '<div class="empty">等待行情数据</div>'; return; }
+  // 2026-10-26 与网页同口径:组内按未取整归一化分 → 封单比 → 板数 → 代码排序,
+  // 不再沿用 rankOpportunities 的取整分次序(同分只能按代码,等于随机)。
+  const sList = oppSortList(tiers.S || []), aList = oppSortList(tiers.A || []), bList = oppSortList(tiers.B || []);
   // 2026-10-22 小字清理:分组头只留 S/A/B 徽标+只数——原「S 级」文字与徽标重复(用户点名删重复标签)
   const block = (list, cls) => {
     if (!list.length) return '';
@@ -109,24 +137,21 @@ export function renderOpportunity(ctx) {
         const elim = (x.reasons?.elim || []).map((r) => '<span class="minus">' + esc(r) + '</span>').join('');
         return '<div class="opp-card" data-code="' + x.code + '">' +
           '<div class="row1"><div class="nm">' + esc(x.name) + boardTag(x.code) + ' <span class="pill">' + (x.boards || 1) + '板</span></div>' +
-          '<div class="right">' + tierBadge(x.tier) + '<div class="score">' + x.score + '</div>' + (x.signal ? signalTag(x.signal.state) : '') + '</div></div>' +
+          '<div class="right">' + tierBadge(x.tier) + '<div class="score" title="' + esc(oppScoreTitle(x)) + '">' + esc(oppScoreText(x)) + '</div>' + (x.signal ? signalTag(x.signal.state) : '') + '</div></div>' +
           '<div class="sub">' + esc(x.industry || '—') + (x.role ? ' · ' + x.role : '') + '</div>' +
           (plus || minus || elim ? '<div class="reasons">' + plus + minus + elim + '</div>' : '') +
           '</div>';
       }).join('') + '</div>';
   };
   const html =
-    block(tiers.S || [], 'S') +
-    block(tiers.A || [], 'A') +
-    block(tiers.B || [], 'B') +
+    block(sList, 'S') +
+    block(aList, 'A') +
+    block(bList, 'B') +
     (eCount ? '<div class="muted" style="padding:6px 2px">淘汰 ' + eCount + ' 只</div>' : '');
   // 2026-09-11 修下拉卡顿:签名守卫——成员码序+结构字段(评分/信号/连板/理由)不变则跳过 innerHTML 全量重建
-  // (5s 自动刷新下 score 常变,签名须含 score;纯价变不影响机会池,本池不显示价格)
-  const sig = [sCount, aCount, bCount, eCount,
-    ...(tiers.S || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
-    ...(tiers.A || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
-    ...(tiers.B || []).map((x) => x.code + ':' + x.tier + ':' + x.score + ':' + (x.signal?.state || '') + ':' + (x.boards || 1)),
-  ].join('|');
+  // (5s 自动刷新下评分常变,签名须含展示分 scoreNormExact 与排序结果;纯价变不影响机会池)
+  const sigOf = (x) => x.code + ':' + x.tier + ':' + oppScoreText(x) + ':' + (x.signal?.state || '') + ':' + (x.boards || 1);
+  const sig = [sCount, aCount, bCount, eCount, ...sList.map(sigOf), ...aList.map(sigOf), ...bList.map(sigOf)].join('|');
   if (el.__oppSig === sig) return;
   if (setHTML(el, html)) el.__oppSig = sig;
 }

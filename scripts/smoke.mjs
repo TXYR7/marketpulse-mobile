@@ -578,6 +578,12 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const swSrc = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
   const dataSrc = readFileSync(new URL('../data.js', import.meta.url), 'utf8');
+  const viewsSrc = readFileSync(new URL('../views.js', import.meta.url), 'utf8');
+  const analyticsSrc = readFileSync(new URL('../analytics.js', import.meta.url), 'utf8');
+  // 2026-10-26 与网页同批:机会分展示/排序用未取整归一化分,同分按封单比,不再按代码随机。
+  ok('机会分与网页同口径:未取整归一化分展示 + 封单比排序', /scoreNormExact/.test(analyticsSrc) && /sealRatio/.test(analyticsSrc)
+    && /scoreNormExact/.test(viewsSrc) && /sealRatio/.test(viewsSrc) && /oppScoreText\(x\)/.test(viewsSrc)
+    && /oppSortList\(/.test(viewsSrc) && /oppScoreText\(x\) \+ ':'/.test(viewsSrc));
   ok('detectPreSeal 不再挂在 computeDerived 派生链里(派生签名早退会饿死检测)', !/\n\s*detectPreSeal\(\);/.test(appSrc));
   ok('封板前预警有独立 15s 定时器', /setInterval\(\(\) => \{ preSealTick\(\)\.catch/.test(appSrc));
   ok('监控名单取上一交易日涨停池,不回退今日涨停池', /preSealPrevTradingDate/.test(appSrc) && /上一交易日涨停池/.test(appSrc));

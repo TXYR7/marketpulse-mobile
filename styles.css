@@ -665,6 +665,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .s-verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 8px 10px; background: var(--surface-raise); border-radius: var(--r-m); }
 .s-verdict .sv-line b { font-size: 14px; }
 .s-verdict .sv-fail { flex-basis: 100%; color: var(--red); font-size: 12px; font-weight: 700; }
+.s-verdict .sv-warn { flex-basis: 100%; color: var(--amber); font-size: 12px; font-weight: 700; }
 .s-verdict .sp-verdict { margin-bottom: 0; }
 #sheetKvEss .kv-grid { margin-top: 10px; }
 .s-promo { margin: 0; }

@@ -1165,6 +1165,7 @@ async function openSheet(code) {
     verdictHtml += '<span class="sp-verdict verdict-' + vcls + '"><b>' + esc(stock.promo.verdict) + '</b><span>' + stock.promo.score +
       ' · 容错 ' + (stock.promo.faultTolerance != null ? Math.round(stock.promo.faultTolerance * 100) + '%' : '--') + '</span></span>';
     if ((stock.promo.hardFails || []).length) verdictHtml += '<span class="sv-fail">硬否决：' + esc(stock.promo.hardFails.join('、')) + '</span>';
+    if ((stock.promo.downgrades || []).length) verdictHtml += '<span class="sv-warn">降级：' + esc(stock.promo.downgrades.join('、')) + '</span>';
   } else if (!stock.tier) verdictHtml += '<span class="muted">暂无评级</span>';
   verdictHtml += '</div>';
 

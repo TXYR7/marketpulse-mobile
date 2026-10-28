@@ -322,7 +322,7 @@ export async function fetchKlineLite(code, lmt = 8) {
 // 桌面 server.js 的腾讯兜底解析格式(date 数组/索引列)在此按同口径实现。
 export async function fetchKlineTencent(code, lmt = 60) {
   const sym = (/^(6|5)/.test(String(code)) ? 'sh' : 'sz') + String(code);
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${sym},day,,,${Math.max(lmt, 60)},qfq&_=${Date.now()}`;
+  const url = `https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=${sym},day,,,${Math.max(lmt, 60)},qfq&_=${Date.now()}`; // 2026-10-28 去 web. 前缀:子域被腾讯 WAF 拦(501),裸域正常
   const data = await getJSON(url, 2, 8000);
   const node = data?.data?.[sym] || {};
   const rows = node.qfqday || node.day || [];

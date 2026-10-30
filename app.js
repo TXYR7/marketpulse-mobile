@@ -1529,6 +1529,8 @@ async function runAuctionCollect(mode) {
   const result = await collectAuctionSnapshot(mode, rec.stocks, pickAuctionCoreCodes(rec.stocks), today);
   if (!(result.items || []).some((i) => i.matched) && !(result.core || []).length) return result; // 无可用数据：不落位（final 会重试）
   applyAuctionPayload({ available: true, phase: mode === 'live' ? 'live' : 'final', date: today, ...result });
+  // 2026-10-30 对齐桌面 1f67d18·竞价早段异动推送:live 采集完顺手判(逐分钟虚拟撮合价→一字/抢筹)
+  if (mode === 'live') maybePushAuctionSurge(result);
   // 撮合数据首落位/扩量：预期差按撮合口径重算（作废同日缓存）、晋级评估立即定稿、终态入预热缓存
   const matchedCount = Object.keys(state.auctionPctByCode).length;
   if (matchedCount > state.auctionMatchedSeen) {
@@ -1542,6 +1544,50 @@ async function runAuctionCollect(mode) {
   }
   return result;
 } // 2026-09-13 精简批:refreshAuctionDetail 调用已随抽屉竞价区砍
+// 竞价早段异动推送(2026-10-30 对齐桌面 server.js maybePushAuctionSurge / 1f67d18):
+// 昨日涨停核心票 9:15-9:25 逐分钟虚拟撮合价,撮合涨幅 ≥auctionSurgePct 视为「高开抢筹」,
+// 竞价即逼近/封涨停视为「一字排队」——都是打板最早、最贵的决策窗口。数据来自 live 采集本就
+// 拿到的 core[].minutes(逐分钟虚拟价+申报量),零额外网络。同一票竞价时段只报一次(按天重置)。
+let auctionSurgeState = { date: null, alerted: new Set() };
+function maybePushAuctionSurge(result) {
+  if (!result || result.mode !== 'live') return;
+  const today = todayStr();
+  if (auctionSurgeState.date !== today) auctionSurgeState = { date: today, alerted: new Set() };
+  if (state.preSealOff) return; // 用户关了预警就不推
+  const p = PARAM_MANIFEST.preSealAlert;
+  const surgePct = Number.isFinite(Number(p.auctionSurgePct)) ? Number(p.auctionSurgePct) : 3;
+  const sealedTolerancePct = Number(p.sealedTolerancePct) || 0.15;
+  for (const c of result.core || []) {
+    const code = String(c.code || '');
+    if (!code || auctionSurgeState.alerted.has(code)) continue;
+    const min = (c.minutes || [])[c.minutes.length - 1];
+    if (!min || !Number.isFinite(Number(min.price))) continue;
+    const price = Number(min.price);
+    const preClose = Number(min.refPrice);
+    if (!Number.isFinite(preClose) || preClose <= 0) continue;
+    const pct = (price / preClose - 1) * 100;
+    const limit = limitPriceOf(preClose, code, c.name);
+    const livePct = Number(pct.toFixed(2));
+    const isWordLimit = limit && pct >= limit.effectiveLimitPct - sealedTolerancePct; // 竞价即逼近/封涨停
+    if (!isWordLimit && pct < surgePct) continue; // 竞价温和,不报
+    auctionSurgeState.alerted.add(code);
+    const label = (c.name && c.name !== code) ? c.name : code;
+    const bidHands = Number.isFinite(Number(min.bidShares)) && Number(min.bidShares) > 0
+      ? (Number(min.bidShares) / 100 / 10000).toFixed(1) : null;
+    // 文案与桌面 1f67d18 逐字一致(标题不带 MarketPulse 前缀,对齐 93b6eaa)
+    if (isWordLimit) {
+      pushNtfy(`竞价一字 · ${label}`, [
+        `+${livePct}%(一字封死)${bidHands ? ` · 涨停排单约 ${bidHands} 万手` : ''}`
+      ]);
+      toast(`竞价一字 · ${label} +${livePct}%`);
+    } else {
+      pushNtfy(`竞价抢筹 · ${label} +${livePct}%`, [
+        `${Number(c.boards) > 1 ? `昨日${c.boards}板` : '昨日涨停'} 高开抢筹${bidHands ? ` · 申报约 ${bidHands} 万手` : ''}`
+      ]);
+      toast(`竞价抢筹 · ${label} +${livePct}%`);
+    }
+  }
+}
 function triggerAuction(mode) {
   if (auctionInflight) return auctionInflight;
   auctionInflight = runAuctionCollect(mode)

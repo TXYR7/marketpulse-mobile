@@ -1383,6 +1383,7 @@ const PARAM_MANIFEST = {
     sealedTolerancePct: 0.15,    // 距涨停 ≤0.15pp 视为已封(精确涨停价另算)
     surgeWindowMs: 30_000,       // 急拉窗口:30 秒
     surgePct: 3,                 // 该窗口内涨幅 >3%
+    auctionSurgePct: 3,          // 竞价早段异动推送:昨日涨停核心票虚拟撮合高开 ≥+3% 才报(与桌面同值)
     resealOffsetPct: 1.0,        // 回封:从涨停回落超过 1pp 视为炸板
     resealTriggerOffsetPct: 0.5, // 回封:炸板后重新逼近到距涨停 0.5pp 内才推(避免刚破板就误报回封)
     repeatResetOffsetPct: 3.0,   // 重复提醒:上次提醒后涨幅回落 ≥3pp 才允许再次提醒(不回落绝不重复)

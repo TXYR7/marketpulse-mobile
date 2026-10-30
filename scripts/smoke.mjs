@@ -612,6 +612,21 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('不再有单日次数/条数硬上限', !/maxAlertsPerDay/.test(appSrc) && !/maxDigestPerDay/.test(appSrc));
   ok('SW 后台读写页面库 mp-mobile(不再是孤立的 mp-preseal-bg 库)', /const PAGE_DB = 'mp-mobile'/.test(swSrc) && !/PRESEAL_DB = 'mp-preseal-bg'/.test(swSrc));
   ok('SW 后台按实时报价+精确涨停价判定', /bgFetchQuotes/.test(swSrc) && /detectPreSealAlerts/.test(swSrc));
+  // 2026-10-30 推送文案两端对齐(桌面 93b6eaa/1f67d18,手机此前未跟):
+  ok('推送口径对齐桌面:离板还差X%(不再是距涨停Xpp),页面+SW 两处平行实现同改',
+    /离板还差 \$\{gap\}%/.test(appSrc) && /离板还差 \$\{gap\}%/.test(swSrc)
+    && !/距涨停 \$\{gap\}pp/.test(appSrc) && !/距涨停 \$\{gap\}pp/.test(swSrc));
+  ok('ntfy 标题去 MarketPulse 前缀(对齐桌面 93b6eaa)', !/MarketPulse · \$\{/.test(appSrc) && !/MarketPulse · \$\{/.test(swSrc));
+  ok('摘要正文对齐桌面:名字 +X% 离板还差 Y%(成交 Z)', /离板还差 \$\{c\.gapPct\}%/.test(appSrc));
+  // 2026-10-30 补桌面 1f67d18 竞价早段异动推送(手机此前完全没有):
+  ok('竞价异动推送常量化 auctionSurgePct 入 PARAM_MANIFEST(与桌面同值 3)', PARAM_MANIFEST.preSealAlert.auctionSurgePct === 3);
+  ok('maybePushAuctionSurge 存在于 app.js 且仅 live 采集后触发', /function maybePushAuctionSurge/.test(appSrc)
+    && /if \(mode === 'live'\) maybePushAuctionSurge\(result\)/.test(appSrc));
+  ok('竞价一字/抢筹标题与桌面 1f67d18 逐字一致(不带前缀)', /竞价一字 · \$\{label\}/.test(appSrc)
+    && /竞价抢筹 · \$\{label\} \+\$\{livePct\}%/.test(appSrc) && /一字封死/.test(appSrc) && /万手/.test(appSrc));
+  ok('竞价异动同票只报一次(按天重置 auctionSurgeState)', /auctionSurgeState\.alerted\.has\(code\)/.test(appSrc)
+    && /auctionSurgeState = \{ date: today, alerted: new Set\(\) \}/.test(appSrc));
+  ok('竞价异动只推昨日涨停核心票(result.core,不是全市场)', /for \(const c of result\.core \|\| \[\]\)/.test(appSrc));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

@@ -594,8 +594,9 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('摘要重复与核心层同口径:按票记涨幅/时间,回落≥3pp+20分钟', /preSealDigest\.byCode/.test(appSrc) && /saved\.byCode/.test(appSrc)
     && /resetOffset = Number\(p\.repeatResetOffsetPct\)/.test(appSrc) && /now - s\.lastAt >= minInterval/.test(appSrc)
     && /eligible\.length/.test(appSrc));
-  ok('ntfy 推送失败重试 2 次(2s/5s),页面与 SW 同口径', /attempt < 3/.test(appSrc) && /attempt < 3/.test(swSrc)
-    && /attempt === 1 \? 2000 : 5000/.test(appSrc) && /attempt === 1 \? 2000 : 5000/.test(swSrc));
+  ok('ntfy 推送失败重试 2 次(1s/2s+8s超时+429不重试),页面与 SW 同口径', /attempt < 3/.test(appSrc) && /attempt < 3/.test(swSrc)
+    && /attempt === 1 \? 1000 : 2000/.test(appSrc) && /attempt === 1 \? 1000 : 2000/.test(swSrc)
+    && /AbortSignal\.timeout\(8_000\)/.test(appSrc) && /AbortSignal\.timeout\(8_000\)/.test(swSrc));
   ok('涨幅榜东财失败时走新浪兜底(GBK 解码)', /fetchTopGainers/.test(appSrc) && /fetchTopGainers/.test(swSrc) && /fetchSinaTopGainers/.test(dataSrc) && /TextDecoder\('gbk'\)/.test(dataSrc));
   // 东财 clist 会把 pz 截到 100(2026-10-26 实测请求 300 仍只回 100):必须分页,否则每轮都判「不足」白打新浪。
   ok('涨幅榜分页:每页固定 100(接口上限),页面与 SW 同源', /const RANK_PAGE_SIZE = 100/.test(dataSrc)

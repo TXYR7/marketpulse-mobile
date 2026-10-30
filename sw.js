@@ -289,13 +289,15 @@ async function bgPresealTick() {
     const title = accepted.length === 1 ? `${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `封板前预警 ${accepted.length} 只`;
     const notifyTitle = accepted.length === 1 ? (accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警') : '封板前预警';
     const message = lines.join('\n');
-    // 2026-10-26 与页面/网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),后台推送更怕一次抖动就丢。
+    // 2026-10-26 与页面/网页同口径:偶发 5xx/网络抖动立即重试 2 次,后台推送更怕一次抖动就丢。
+    // 2026-10-30 晚:重试间隔 2s/5s→1s/2s、单次 8s 超时、429 不重试(与页面/桌面同口径)。
     const body = JSON.stringify({ topic, title, message, priority: 5, tags: ['warning', 'bell'] });
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
+      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 1000 : 2000));
       try {
-        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(8_000) });
         if (res && res.ok) break;
+        if (res && res.status === 429) break; // 限流不重试,避免加重
       } catch { /* 下一轮重试 */ }
     }
     try { await self.registration.showNotification(notifyTitle, { body: message, tag: 'bg-preseal', icon: './icons/icon-192.png', badge: './icons/icon-512.png' }); } catch { /* 无通知权限时静默 */ }

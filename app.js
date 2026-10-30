@@ -833,9 +833,13 @@ function updatePreSealResealState(today, stocks) {
     // ② 涨停封单骤减(锚点递增,与桌面同判定):基线=峰值,较基线再减≥阈值报一次,报后基线=当前量;拆封清基线。
     if (st.sealed && Number.isFinite(Number(s.sealHands)) && Number(s.sealHands) > 0) {
       const hands = Number(s.sealHands);
+      // 锚点带时间戳(与桌面同口径):超过 sealShrinkAnchorMaxAgeMs 作废重立,防跨断网/重启把下降误判骤减。
+      const anchorAt = Number(st.sealShrinkAnchorAt) || 0;
+      const anchorStale = anchorAt > 0 && now - anchorAt > (Number(p.sealShrinkAnchorMaxAgeMs) || 90_000);
       let anchor = st.sealShrinkAnchor;
-      if (anchor === undefined || hands > anchor) anchor = hands; // 首观测/封单堆起:基线抬高
+      if (anchor === undefined || anchorStale || hands > anchor) anchor = hands; // 首观测/过期/封单堆起:基线抬高
       st.sealShrinkAnchor = anchor;
+      st.sealShrinkAnchorAt = now;
       if (anchor >= minHands) {
         const shrinkPctNow = (1 - hands / anchor) * 100;
         if (shrinkPctNow >= shrinkPct) {
@@ -845,6 +849,7 @@ function updatePreSealResealState(today, stocks) {
       }
     } else if (!st.sealed) {
       st.sealShrinkAnchor = undefined; // 拆封清基线
+      st.sealShrinkAnchorAt = 0;
     }
     map.set(s.code, st);
   }
@@ -914,9 +919,12 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
     if (isDown) st.downOpenPushed = false;
     // ③ 跌停封单骤减(锚点递增,与桌面同判定):基线=峰值,较基线再减≥阈值报一次,报后基线=当前量;开板清基线。
     if (isDown && askHands != null && askHands > 0) {
+      const anchorAt = Number(st.downShrinkAnchorAt) || 0;
+      const anchorStale = anchorAt > 0 && now - anchorAt > (Number(p.sealShrinkAnchorMaxAgeMs) || 90_000);
       let anchor = st.downShrinkAnchor;
-      if (anchor === undefined || askHands > anchor) anchor = askHands;
+      if (anchor === undefined || anchorStale || askHands > anchor) anchor = askHands;
       st.downShrinkAnchor = anchor;
+      st.downShrinkAnchorAt = now;
       if (anchor >= minHands) {
         const shrink = (1 - askHands / anchor) * 100;
         if (shrink >= shrinkPct) {
@@ -926,6 +934,7 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
       }
     } else if (!isDown) {
       st.downShrinkAnchor = undefined; // 开板清基线
+      st.downShrinkAnchorAt = 0;
     }
     st.downSealed = isDown;
     stateMap.set(code, st);
@@ -1091,12 +1100,14 @@ async function pushNtfy(title, lines) {
     if (!url || !/^https?:\/\//i.test(url)) return; // 未配置即跳过(用户没填就不发)
     const root = new URL(url).origin + '/';
     const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 5, tags: ['warning', 'bell'] });
-    // 2026-10-26 与网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),不再一次失败就丢掉提醒。
+    // 2026-10-26 与网页同口径:偶发 5xx/网络抖动立即重试 2 次,不再一次失败就丢掉提醒。
     // 2026-10-30 晚:429(限流)不重试——立即重试只会加重限流,与桌面 sendPushWithRetry 同口径。
+    // 2026-10-30 晚:重试间隔 2s/5s→1s/2s,并给单次 fetch 加 8s 超时(与桌面 notify.js 同口径)——
+    //   手机在弱信号下 fetch 可能长时间挂起,原来没有超时会把整轮扫描拖住。
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
+      if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 1000 : 2000));
       try {
-        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(8_000) });
         if (res && res.ok) return;
         if (res && res.status === 429) { console.warn('[C3] ntfy 限流(429),不重试', title); return; }
       } catch { /* 下一轮重试 */ }

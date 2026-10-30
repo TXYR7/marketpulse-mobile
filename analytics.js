@@ -1390,7 +1390,7 @@ const PARAM_MANIFEST = {
     repeatMinIntervalMs: 20 * 60_000, // 重复提醒最小间隔 20 分钟
     marketMinAmount: 100_000_000, // 全市场摘要候选:当日成交额 ≥1亿
     auctionMinAmount: 5_000_000, // 9:26 竞价阶段:竞价成交额 ≥500万(竞价额远小于全天额)
-    digestIntervalMs: 120_000,   // 全市场摘要最快每 2 分钟一条(全局节流,不设单日条数硬上限)
+    digestIntervalMs: 15_000,    // 全市场摘要最快每 15 秒一条(2026-10-30 提速批,与桌面同步;不设单日条数硬上限)
     digestMaxItems: 8,           // 每条摘要最多列 8 只,其余只报数量
     // 2026-10-30 封单预警批(与桌面 PARAM_MANIFEST.preSealAlert 同值):开板/封单骤减/跌停系列
     // 2026-10-30 晚改锚点递增语义,原先的 2 分钟采样窗口参数随语义退役(与桌面同步)。

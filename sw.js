@@ -290,7 +290,7 @@ async function bgPresealTick() {
     const notifyTitle = accepted.length === 1 ? (accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警') : '封板前预警';
     const message = lines.join('\n');
     // 2026-10-26 与页面/网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),后台推送更怕一次抖动就丢。
-    const body = JSON.stringify({ topic, title, message, priority: 4, tags: ['warning', 'bell'] });
+    const body = JSON.stringify({ topic, title, message, priority: 5, tags: ['warning', 'bell'] });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
       try {

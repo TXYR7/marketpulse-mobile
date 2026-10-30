@@ -525,7 +525,10 @@ let preSealWatchSig = '';
 let preSealState = { date: '', byCode: new Map() }; // 回封状态:sealed/broken/init
 let preSealRankingCache = { at: 0, rows: [] };
 let preSealDigest = { date: '', byCode: new Map(), lastAt: 0, auctionSent: false }; // 摘要重复账本(与核心层同口径)
-const PRESEAL_SCAN_MS = 15_000;
+// 2026-10-30 用户要求「推送快到极限」:扫描 15s→5s(与桌面 PRESEAL_POLL_MS 同值);
+// 核心推送节流另设 2s 护栏(原复用扫描间隔=15s,会把事件压到下一轮)。
+const PRESEAL_SCAN_MS = 5_000;
+const PRESEAL_CORE_PUSH_GAP_MS = 2_000;
 const PRESEAL_RANKING_MS = 30_000;
 const round2 = (x) => Math.round(Number(x) * 100) / 100;
 
@@ -1080,7 +1083,7 @@ async function pushNtfy(title, lines) {
     const url = await getKV('pushNtfyUrl', '');
     if (!url || !/^https?:\/\//i.test(url)) return; // 未配置即跳过(用户没填就不发)
     const root = new URL(url).origin + '/';
-    const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 4, tags: ['warning', 'bell'] });
+    const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 5, tags: ['warning', 'bell'] });
     // 2026-10-26 与网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),不再一次失败就丢掉提醒。
     // 2026-10-30 晚:429(限流)不重试——立即重试只会加重限流,与桌面 sendPushWithRetry 同口径。
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1190,7 +1193,7 @@ function pushCoreEvents(events, now) {
   const batch = preSealCoreBacklog.concat(events || []).filter((ev) => now - ev.t <= 2 * 60_000);
   preSealCoreBacklog = [];
   if (!batch.length) return;
-  if (now - preSealCorePushAt < PRESEAL_SCAN_MS) { preSealCoreBacklog = batch; return; }
+  if (now - preSealCorePushAt < PRESEAL_CORE_PUSH_GAP_MS) { preSealCoreBacklog = batch; return; }
   preSealCorePushAt = now;
   if (batch.length === 1) firePreSealAlert(batch[0]);
   else firePreSealBatch(batch);

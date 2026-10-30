@@ -437,6 +437,21 @@ export async function fetchTopGainers(limit = 300) {
   return [...merged.values()].slice(0, limit);
 }
 
+// 全市场跌幅榜(2026-10-30 封单预警批):复用 fetchAllMarket 仅改 order='asc'(f3 升序=跌幅最前)。
+// 只走东财主源;失败返回 [] 由调用方跳过(跌停侧整块不推,不影响涨停侧)。
+export async function fetchTopLosers(limit = 300) {
+  const merged = new Map();
+  for (let page = 1; page <= Math.ceil(limit / RANK_PAGE_SIZE); page += 1) {
+    try {
+      const { rows } = await fetchAllMarket({ page, pageSize: RANK_PAGE_SIZE, sort: 'f3', order: 'asc' });
+      if (!rows?.length) break;
+      for (const row of rows) merged.set(row.code, row);
+      if (rows.length < RANK_PAGE_SIZE) break;
+    } catch { break; }
+  }
+  return [...merged.values()].filter((r) => r.changePct < 0).slice(0, limit);
+}
+
 // 按名称/代码搜索（轻量；用于全市场搜索框）。B5:f2/f3 现价与涨跌幅——停牌 '-' 转 null 优雅降级
 export function mapSearchRow(row) {
   return {
@@ -451,6 +466,43 @@ export async function searchStock(q) {
   const url = `https://push2.eastmoney.com/api/qt/search/get?fltt=2&key=${encodeURIComponent(q)}&fields=f12,f13,f14,f2,f3&ut=${EMA.token}`;
   const data = await getJSON(url);
   return (data?.data?.diff || []).map(mapSearchRow);
+}
+
+/* ---------------- 腾讯批量报价(2026-10-30 封单预警批):与桌面 fetchTencentBatchQuotes 同源同口径 ---------------- */
+// 为什么不用东财 ulist:ulist 不返回盘口,封单量(买一量)/跌停封单(卖一量)拿不到。
+// 腾讯 qt.gtimg.cn 的 ~ 分隔字段:f[3]现价 f[4]昨收 f[5]今开 f[9]买一价 f[10]买一量(手)
+// f[19]卖一价 f[20]卖一量(手) f[30]时间戳。涨停时买一量=封单量,跌停时卖一量=跌停封单量。
+// 返回 { code: {price, prevClose, open, bid1Vol, ask1Vol, stamp} };失败返回 {} 由调用方跳过。
+export async function fetchTencentQuotes(codes = []) {
+  const out = {};
+  const list = (codes || []).map(String).filter(Boolean);
+  for (let i = 0; i < list.length; i += 60) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 100));
+    const symbols = list.slice(i, i + 60).map((code) => {
+      const c = String(code)[0];
+      const prefix = c === '6' || c === '5' ? 'sh' : c === '4' || c === '8' || c === '9' ? 'bj' : 'sz';
+      return prefix + code;
+    });
+    try {
+      const res = await fetch(`https://qt.gtimg.cn/q=${symbols.join(',')}`, {
+        headers: { referer: 'https://gu.qq.com/' }, signal: AbortSignal.timeout(8_000)
+      });
+      if (!res.ok) continue;
+      const text = await res.text(); // GBK 文本,数字字段不受影响
+      for (const line of text.split('\n')) {
+        const m = line.match(/v_([a-z]{2}\d{6})="([^"]*)"/);
+        if (!m) continue;
+        const f = m[2].split('~');
+        const code = m[1].slice(2);
+        const num = (v) => (v === '' || v === undefined || Number(v) < 0 ? null : Number(v));
+        out[code] = {
+          price: num(f[3]), prevClose: num(f[4]), open: num(f[5]),
+          bid1Vol: num(f[10]), ask1Vol: num(f[20]), stamp: String(f[30] || '')
+        };
+      }
+    } catch { /* 单块失败跳过,其余块仍可用 */ }
+  }
+  return out;
 }
 
 /* ---------------- 集合竞价（push2his trends/get 免费源，与桌面 server.js 同口径） ---------------- */

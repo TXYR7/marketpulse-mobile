@@ -1391,7 +1391,12 @@ const PARAM_MANIFEST = {
     marketMinAmount: 100_000_000, // 全市场摘要候选:当日成交额 ≥1亿
     auctionMinAmount: 5_000_000, // 9:26 竞价阶段:竞价成交额 ≥500万(竞价额远小于全天额)
     digestIntervalMs: 120_000,   // 全市场摘要最快每 2 分钟一条(全局节流,不设单日条数硬上限)
-    digestMaxItems: 8            // 每条摘要最多列 8 只,其余只报数量
+    digestMaxItems: 8,           // 每条摘要最多列 8 只,其余只报数量
+    // 2026-10-30 封单预警批(与桌面 PARAM_MANIFEST.preSealAlert 同值):开板/封单骤减/跌停系列
+    sealShrinkWindowMs: 120_000, // 封单骤减比较窗口(相对窗口前那次采样)
+    sealShrinkPct: 30,           // 窗口内封单量减少 ≥30% 视为骤减
+    sealShrinkMinHands: 3000,    // 封单量 ≥3000 手才监控,避免小票噪音
+    limitDownApproachPct: 1.5    // 距跌停 ≤1.5pp 开始预警
   }
 };
 
@@ -1422,6 +1427,16 @@ function limitPriceOf(preClose, code, name) {
   if (!Number.isFinite(base) || base <= 0) return null;
   const boardLimitPct = limitThresholdOf(code, name);
   const price = Math.round(base * (1 + boardLimitPct / 100) * 100) / 100;
+  return { price, boardLimitPct, effectiveLimitPct: (price / base - 1) * 100 };
+}
+
+// 跌停价(2026-10-30 封单预警批):镜像 limitPriceOf 取负方向,与桌面 server.js limitDownPriceOf 同口径。
+// effectiveLimitPct 为负值(如 -10.0),调用方用「现价 pct <= 跌停 pct + 容差」判已跌停。
+function limitDownPriceOf(preClose, code, name) {
+  const base = Number(preClose);
+  if (!Number.isFinite(base) || base <= 0) return null;
+  const boardLimitPct = limitThresholdOf(code, name);
+  const price = Math.round(base * (1 - boardLimitPct / 100) * 100) / 100;
   return { price, boardLimitPct, effectiveLimitPct: (price / base - 1) * 100 };
 }
 
@@ -1480,7 +1495,8 @@ function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(
 function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [], gap = {}, stocks = [], limit = 8 } = {}) {
   // 2026-10-30:未采集时也带 phase/available 出参,前端据此区分「竞价没开始」与「今天没采到」——
   // 原来这里的早退只给 reason,phase 丢失,前端无法判断是否已过竞价时段,只能整卡隐藏(用户报「有时不显示」)。
-  if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集', phase: auction?.phase || null, auctionAvailable: Boolean(auction?.available) };
+  // settled=撮合是否已出(≥9:25),前端据此判断才准:phase 只区分 live 窗口,开盘前同样是 'final' 会误判。
+  if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集', phase: auction?.phase || null, auctionAvailable: Boolean(auction?.available), settled: Boolean(auction?.settled) };
   const aucByCode = new Map((auction.items || []).map((it) => [String(it.code), it]));
   const stockByCode = new Map((stocks || []).map((s) => [String(s.code), s]));
   const tierByCode = new Map();
@@ -1521,7 +1537,7 @@ function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [],
     rows.push({ code, name: it.name || code, boards: it.boards ?? null, matchPct: Math.round(matchPct * 100) / 100, volRatio: it.volRatio ?? null, sealShares: it.sealedBuyShares ?? null, tier: meta.tier || null, gapStatus: g?.status || null, tag: tags.join('·'), score });
   }
   rows.sort((a, b) => b.score - a.score);
-  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选(盘中已剔除跳水/炸板)', asOf: auction.asOf || null, phase: auction.phase || 'final', auctionAvailable: true };
+  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选(盘中已剔除跳水/炸板)', asOf: auction.asOf || null, phase: auction.phase || 'final', auctionAvailable: true, settled: Boolean(auction?.settled) };
 }
 
 // 情绪阶段 → 三大周期（连板晋级体系的周期天花板）
@@ -1811,5 +1827,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
+  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, limitDownPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 };

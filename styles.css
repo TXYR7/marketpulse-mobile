@@ -563,7 +563,7 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .risk-item .lv.red { background: var(--danger-tint); color: var(--red); }
 .risk-item .lv.orange { background: var(--amber-tint); color: var(--amber); }
 .risk-item .lv.yellow { background: var(--amber-tint); color: var(--amber); }
-.risk-item .lv.green { background: var(--down-tint); color: var(--green); }
+.risk-item .lv.green { background: var(--pos-soft); color: var(--pos-ink); } /* 2026-10-30 与桌面统一:低风险/好避开 A股跌绿雷区,绿→青碧(同 .opp-card .reasons .plus 542 行先例) */
 .risk-item .lv.gray { background: var(--surface-2); color: var(--muted); }
 .risk-item .score { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
 .risk-item .action { font-size: 12px; color: var(--muted); margin-top: 3px; }

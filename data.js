@@ -321,15 +321,33 @@ export async function fetchKlineLite(code, lmt = 8) {
 // 腾讯兜底),两端各用各的源会让相似日数字漂移——相似案例固定走腾讯,两端永远同源逐位一致。
 // 桌面 server.js 的腾讯兜底解析格式(date 数组/索引列)在此按同口径实现。
 export async function fetchKlineTencent(code, lmt = 60) {
-  const sym = (/^(6|5)/.test(String(code)) ? 'sh' : 'sz') + String(code);
-  const url = `https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=${sym},day,,,${Math.max(lmt, 60)},qfq&_=${Date.now()}`; // 2026-10-28 去 web. 前缀:子域被腾讯 WAF 拦(501),裸域正常
-  const data = await getJSON(url, 2, 8000);
-  const node = data?.data?.[sym] || {};
-  const rows = node.qfqday || node.day || [];
-  return rows.slice(-lmt).map((b) => ({
-    date: String(b[0]).replace(/-/g, ''),
-    open: Number(b[1]), close: Number(b[2]), high: Number(b[3]), low: Number(b[4]), volume: Number(b[5]),
-  })).filter((b) => b.close > 0 && b.volume > 0);
+  const first = String(code)[0];
+  // '9'=北交所新代码段(920xxx,2024 年起 43xxx 换发),与桌面 server.js tencentSymbol 同口径(2026-10-30 两端同改)
+  const sym = (first === '6' || first === '5' ? 'sh' : first === '8' || first === '4' || first === '9' ? 'bj' : 'sz') + String(code);
+  // 2026-10-30 两端同改(桌面 0f91c2c):腾讯把 fqkline/get 路径在 web./裸域双双 WAF 拦(501实测各 5/5),
+  // 同数据的 newfqkline(get 与 proxy.finance.qq.com 反代全通(CORS 均为 *)。按(域名+路径)端点轮换,谁有数据用谁。
+  const EPS = [
+    { host: 'web.ifzq.gtimg.cn', path: '/appstock/app/newfqkline/get' },
+    { host: 'ifzq.gtimg.cn', path: '/appstock/app/newfqkline/get' },
+    { host: 'proxy.finance.qq.com', path: '/ifzqgtimg/appstock/app/fqkline/get' },
+    { host: 'web.ifzq.gtimg.cn', path: '/appstock/app/fqkline/get' },
+    { host: 'ifzq.gtimg.cn', path: '/appstock/app/fqkline/get' },
+  ];
+  let lastErr;
+  for (const ep of EPS) {
+    const url = `https://${ep.host}${ep.path}?param=${sym},day,,,${Math.max(lmt, 60)},qfq&_=${Date.now()}`;
+    try {
+      const data = await getJSON(url, 1, 8000);
+      const node = data?.data?.[sym] || {};
+      const rows = node.qfqday || node.day || [];
+      if (!rows.length) { lastErr = new Error('HTTP 200 空数据'); continue; } // 北交所老代码常年空 qfqday,换端点
+      return rows.slice(-lmt).map((b) => ({
+        date: String(b[0]).replace(/-/g, ''),
+        open: Number(b[1]), close: Number(b[2]), high: Number(b[3]), low: Number(b[4]), volume: Number(b[5]),
+      })).filter((b) => b.close > 0 && b.volume > 0);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('腾讯K线全部端点失败');
 }
 export function cachedKlineBars(code, tradeDate) {
   const hit = klineCacheByDate.get(String(code));

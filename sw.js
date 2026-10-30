@@ -277,14 +277,16 @@ async function bgPresealTick() {
   const topic = ntfyUrl.split('/').filter(Boolean).pop();
   const lineOf = (ev) => {
     const gap = Number.isFinite(Number(ev.gapPct)) ? Number(ev.gapPct).toFixed(1) : '--';
-    if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}距涨停 ${gap}pp（现 ${ev.pct}%）`;
-    if (ev.kind === 'reseal') return `回封 · 距涨停 ${gap}pp（现 ${ev.pct}%）`;
+    // 2026-10-30 对齐桌面 preSealLine:口径「离板还差 X%」(原「距涨停 Xpp」与桌面不一致)
+    if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}离板还差 ${gap}%（现 ${ev.pct}%）`;
+    if (ev.kind === 'reseal') return `回封 · 离板还差 ${gap}%（现 ${ev.pct}%）`;
     return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   };
   const lines = accepted.slice(0, 8).map((ev) => `${ev.name} ${lineOf(ev)}`);
   if (accepted.length > 8) lines.push(`另有 ${accepted.length - 8} 只`);
   if (lines.length) {
-    const title = accepted.length === 1 ? `MarketPulse · ${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `MarketPulse · 封板前预警 ${accepted.length} 只`;
+    // 2026-10-30 对齐桌面 93b6eaa:ntfy 标题去「MarketPulse ·」前缀(SW 通知标题本就没有)
+    const title = accepted.length === 1 ? `${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `封板前预警 ${accepted.length} 只`;
     const notifyTitle = accepted.length === 1 ? (accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警') : '封板前预警';
     const message = lines.join('\n');
     // 2026-10-26 与页面/网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),后台推送更怕一次抖动就丢。

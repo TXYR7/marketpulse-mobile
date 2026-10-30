@@ -645,11 +645,12 @@ function preSealResetRepeat(repeat, stocks, p) {
     if (s.changePercent <= base - (Number(p.repeatResetOffsetPct) || 3)) st.resetReady = true;
   }
 }
-// 单条消息的短文案(与桌面 preSealLine 同口径；批量摘要用)
+// 单条消息的短文案(与桌面 preSealLine 严格同口径；批量摘要用)
+// 2026-10-30 对齐桌面 93b6eaa:口径统一为「离板还差 X%」(原手机端「距涨停 Xpp」与桌面不一致)
 function preSealLine(ev) {
   const gap = Number.isFinite(Number(ev.gapPct)) ? Number(ev.gapPct).toFixed(1) : '--';
-  if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}距涨停 ${gap}pp（现 ${ev.pct}%）`;
-  if (ev.kind === 'reseal') return `回封 · 距涨停 ${gap}pp（现 ${ev.pct}%）`;
+  if (ev.kind === 'sealApproach') return `${ev.auction ? '[竞价] ' : ''}离板还差 ${gap}%（现 ${ev.pct}%）`;
+  if (ev.kind === 'reseal') return `回封 · 离板还差 ${gap}%（现 ${ev.pct}%）`;
   return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
 }
 // 涨幅榜(前 300,按涨幅倒序)。30s 缓存;分页/新浪兜底都在 data.js:fetchTopGainers(与桌面同源)。
@@ -774,9 +775,10 @@ async function pushPreSealDigest(candidates, { auction = false } = {}) {
   for (const c of items) st.byCode.set(c.code, { lastAt: now, lastPct: c.pct, resetReady: false });
   st.lastAt = now;
   savePreSealDigest();
-  const lines = items.map((c) => `${c.name} +${c.pct}%（距涨停 ${c.gapPct}pp · 成交 ${fmtDigestMoney(c.amount)}）`);
-  if (eligible.length > items.length) lines.push(`另有 ${eligible.length - items.length} 只，下一条摘要继续`);
-  pushNtfy(`MarketPulse · ${auction ? '竞价' : '主板'}临近涨停 ${eligible.length} 只`, lines);
+  // 2026-10-30 对齐桌面 pushPreSealDigest:正文「名字 +X% 离板还差 Y%（成交 Z）」、标题去 MarketPulse 前缀
+  const lines = items.map((c) => `${c.name} +${c.pct}% 离板还差 ${c.gapPct}%（成交 ${fmtDigestMoney(c.amount)}）`);
+  if (eligible.length > items.length) lines.push(`另有 ${eligible.length - items.length} 只,下一条继续`);
+  pushNtfy(`${auction ? '竞价' : '主板'}临近涨停 ${eligible.length} 只`, lines);
 }
 // 摘要金额口径与桌面 formatMoney 一致：≥1亿两位小数，否则取整到万
 function fmtDigestMoney(v) {
@@ -987,15 +989,16 @@ async function runC2Probe() {
 }
 
 // 三提醒统一入口:开关 store 读取;SW 通知(有权限才发)+震动+声音+行高亮
+// 2026-10-30 对齐桌面 pushPreSeal:口径「离板还差 X%」、标题去「MarketPulse ·」前缀(桌面 93b6eaa 已去)
 function firePreSealAlert(ev) {
   const label = ev.name && ev.name !== ev.code ? ev.name : ev.code;
   const auctionPrefix = ev.auction ? '集合竞价 · ' : '';
   const boardText = Number.isFinite(Number(ev.boardLimitPct)) ? `涨停 ${ev.boardLimitPct}%` : '';
   const boardsText = Number(ev.boards) > 1 ? ` · 昨日${ev.boards}板` : '';
   const text = ev.kind === 'sealApproach'
-    ? `${auctionPrefix}距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%${boardText ? '，' + boardText : ''}）${boardsText}`
+    ? `${auctionPrefix}离板还差 ${ev.gapPct ?? '--'}%（现 ${ev.pct}%${boardText ? '，' + boardText : ''}）${boardsText}`
     : ev.kind === 'reseal'
-      ? `${auctionPrefix}炸板回封 · 距涨停 ${ev.gapPct ?? '--'}pp（现 ${ev.pct}%）${boardsText}`
+      ? `${auctionPrefix}回封 · 离板还差 ${ev.gapPct ?? '--'}%（现 ${ev.pct}%）${boardsText}`
       : `30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   const title = ev.kind === 'sealApproach' ? '封板前预警' : ev.kind === 'reseal' ? '回封预警' : '急拉预警';
   toast(`${label} ${text}`);
@@ -1008,7 +1011,7 @@ function firePreSealAlert(ev) {
       new Notification(title, { body: `${label} ${text}`, tag: `preseal-${ev.code}` });
     }
   } catch { /* 通知失败静默 */ }
-  pushNtfy(`MarketPulse · ${label} ${title}`, [`${label} ${text}`, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]); // C3:再发一路 ntfy(锁屏送达率比 PWA SW 通知高,通道与桌面推送一致)
+  pushNtfy(`${label} ${title}`, [`${label} ${text}`, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]); // C3:再发一路 ntfy(锁屏送达率比 PWA SW 通知高,通道与桌面推送一致)
   try { if (navigator.vibrate) navigator.vibrate(ev.kind === 'surge' ? 150 : [200, 100, 200]); } catch { /* 震动失败静默 */ }
   playAlertSound(ev.kind);
   markPreSealRow(ev.code);
@@ -1038,7 +1041,7 @@ function firePreSealBatch(events) {
       new Notification('封板前预警', { body, tag: 'preseal-batch' });
     }
   } catch { /* 通知失败静默 */ }
-  pushNtfy(`MarketPulse · 封板前预警 ${events.length} 只`, [...lines, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]);
+  pushNtfy(`封板前预警 ${events.length} 只`, [...lines, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]);
   try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch { /* 震动失败静默 */ }
   playAlertSound(events.some((ev) => ev.kind !== 'surge') ? 'sealApproach' : 'surge');
   for (const ev of events) markPreSealRow(ev.code);

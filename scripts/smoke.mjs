@@ -645,6 +645,12 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
     && /st\.downApproachZone/.test(appSrc) && /st\.downShrinkAnchor/.test(appSrc));
   ok('手机开板/封单/跌停事件并入 accepted 流(self-gated 豁免价格类重复闸)', /\.\.\.resealEvents, \.\.\.openEvents\]/.test(appSrc)
     && /selfGatedKinds/.test(appSrc));
+  ok('手机推送逻辑自查修:迟滞/竞价对称/批量不截断/回封豁免闸', /downApproachExitHysteresisPct/.test(appSrc)
+    && /const inZone = wasInZone \? inZoneHeld : inZoneNow/.test(appSrc)
+    && /!st\.downOpenPushed && !inAuction/.test(appSrc)
+    && /'sealOpen', 'sealShrink', 'reseal'/.test(appSrc)
+    && !/另有 \$\{events\.length - 8\} 只/.test(appSrc)
+    && !/accepted\.slice\(0, 8\)/.test(swSrc));
   ok('手机批量标题按事件类型如实汇总(与桌面 preSealBatchLabel 同口径)', /function preSealBatchLabel/.test(appSrc)
     && /pushNtfy\(label, \[\.\.\.lines/.test(appSrc));
   ok('手机 ntfy 429 限流不重试', /res\.status === 429\) \{ console\.warn\('\[C3\] ntfy 限流\(429\),不重试'/.test(appSrc));

@@ -900,19 +900,24 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
     const st = stateMap.get(code) || {};
     const wasDown = st.downSealed === true;
     const askHands = q.ask1Vol != null ? Number(q.ask1Vol) : null;
-    // ① 马上跌停(锚点段落判据,与桌面同判定):进入区间报一次,离开区间后重新进入才再报;距跌停用实时价现算。
+    // ① 马上跌停(迟滞,与桌面同判定):进区用 approachPct、出区要 >approachPct+1pp,
+    //    单阈值时股价在阈值附近抖动会每轮「重新入区」重复推。距跌停用实时价现算。
     const liveGap = pct - downPct;
-    const inZone = !isDown && liveGap >= 0 && liveGap <= approachPct;
-    if (inZone && !st.downApproachZone) {
+    const exitGap = approachPct + (Number(p.downApproachExitHysteresisPct) || 1.0);
+    const inZoneNow = !isDown && liveGap >= 0 && liveGap <= approachPct;
+    const inZoneHeld = !isDown && liveGap >= 0 && liveGap <= exitGap;
+    const wasInZone = st.downApproachZone === true;
+    const inZone = wasInZone ? inZoneHeld : inZoneNow; // 进区严格、出区宽松 => 迟滞
+    if (inZone && !wasInZone) {
       const amount = Number(info.row?.amount || 0);
       const minAmount = Number(inAuction ? p.auctionMinAmount : (info.fromPool ? 0 : p.marketMinAmount)) || 0;
       if (amount >= minAmount) {
         events.push({ code, name: info.name, kind: 'downApproach', pct: round2(pct), limitPct: downPct, gapPct: round2(Math.max(0, liveGap)), auction: inAuction, t: now });
       }
     }
-    st.downApproachZone = inZone; // 本段区间状态:离开区间后此值变 false,再次进入即新段落
-    // ② 跌停开板
-    if (wasDown && !isDown && !st.downOpenPushed) {
+    st.downApproachZone = inZone; // 本段区间状态:跌出 exitGap 才置 false,再次进入即新段落
+    // ② 跌停开板(与涨停开板同口径排除竞价段)
+    if (wasDown && !isDown && !st.downOpenPushed && !inAuction) {
       st.downOpenPushed = true;
       events.push({ code, name: info.name, kind: 'downOpen', pct: round2(pct), limitPct: downPct, t: now });
     }
@@ -1044,7 +1049,9 @@ async function preSealTick() {
     const accepted = [];
     // 2026-10-30 封单预警批:开板/封单骤减并入同一 accepted 流(共用 15s 全局节流)。
     // 2026-10-30 晚用户拍板「频率不封顶、语义不重播」:段落判据自含的事件类不进价格类重复闸(与桌面同判定)。
-    const selfGatedKinds = new Set(['sealOpen', 'sealShrink', 'downApproach', 'downOpen', 'downShrink']);
+    // reseal 也豁免(与桌面同判定):段落判据由 st.broken 提供,报完立即置 false,
+    // 与 sealOpen 的 openPushed 是同一套「一段一次」机制,不必再加价格类重复闸。
+    const selfGatedKinds = new Set(['sealOpen', 'sealShrink', 'reseal', 'downApproach', 'downOpen', 'downShrink']);
     for (const ev of [...events.filter((e) => !resealCodes.has(e.code)), ...resealEvents, ...openEvents]) {
       const key = `${ev.code}:${ev.kind}`;
       if (!selfGatedKinds.has(ev.kind) && !preSealCanAlert(repeat, key, now)) continue;
@@ -1227,8 +1234,8 @@ function preSealBatchLabel(events) {
   return uniq.length >= 3 ? '多种预警' : uniq.join('·');
 }
 function firePreSealBatch(events) {
-  const lines = events.slice(0, 8).map((ev) => `${ev.name} ${preSealLine(ev)}`);
-  if (events.length > 8) lines.push(`另有 ${events.length - 8} 只`);
+  // 完整列出全部票,不截断成「另有 N 只」:被截掉的票当天不会再推,用户永远不知道是哪几只。
+  const lines = events.map((ev) => `${ev.name} ${preSealLine(ev)}`);
   const label = `${preSealBatchLabel(events)} ${events.length} 只`;
   toast(label);
   if (state.preSealOff) return;

@@ -1397,7 +1397,8 @@ const PARAM_MANIFEST = {
     sealShrinkPct: 30,           // 较当前基线再减 ≥30% 报一次(报后基线=当前量,段落内可报多档)
     sealShrinkMinHands: 3000,    // 基线封单量 ≥3000 手才监控,避免小票噪音
     sealShrinkAnchorMaxAgeMs: 90_000, // 锚点时效:超过 90 秒未更新的基线作废重立(与桌面同值)
-    limitDownApproachPct: 1.5    // 距跌停 ≤1.5pp 开始预警
+    limitDownApproachPct: 1.5,   // 距跌停 ≤1.5pp 开始预警
+    downApproachExitHysteresisPct: 1.0 // 跌停预警迟滞:进区 1.5pp、出区 >2.5pp(与桌面同值)
   }
 };
 

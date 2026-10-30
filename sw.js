@@ -282,8 +282,8 @@ async function bgPresealTick() {
     if (ev.kind === 'reseal') return `回封 · 离板还差 ${gap}%（现 ${ev.pct}%）`;
     return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   };
-  const lines = accepted.slice(0, 8).map((ev) => `${ev.name} ${lineOf(ev)}`);
-  if (accepted.length > 8) lines.push(`另有 ${accepted.length - 8} 只`);
+  // 完整列出全部票,不截断(与页面/桌面同口径):被截掉的票当天不会再推,用户永远不知道是哪几只。
+  const lines = accepted.map((ev) => `${ev.name} ${lineOf(ev)}`);
   if (lines.length) {
     // 2026-10-30 对齐桌面 93b6eaa:ntfy 标题去「MarketPulse ·」前缀(SW 通知标题本就没有)
     const title = accepted.length === 1 ? `${accepted[0].name} ${accepted[0].kind === 'sealApproach' ? '封板前预警' : accepted[0].kind === 'reseal' ? '回封预警' : '急拉预警'}` : `封板前预警 ${accepted.length} 只`;

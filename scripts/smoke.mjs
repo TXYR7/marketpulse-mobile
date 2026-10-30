@@ -562,7 +562,7 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('重复提醒参数:回落3pp + 20分钟', PARAM_MANIFEST.preSealAlert.repeatResetOffsetPct === 3 && PARAM_MANIFEST.preSealAlert.repeatMinIntervalMs === 20 * 60_000);
   ok('全市场摘要门槛与节流参数(无单日硬上限)', PARAM_MANIFEST.preSealAlert.marketMinAmount === 100_000_000
     && PARAM_MANIFEST.preSealAlert.auctionMinAmount === 5_000_000
-    && PARAM_MANIFEST.preSealAlert.digestIntervalMs === 15_000
+    && PARAM_MANIFEST.preSealAlert.digestIntervalMs === 30_000
     && PARAM_MANIFEST.preSealAlert.maxDigestPerDay === undefined
     && PARAM_MANIFEST.preSealAlert.maxAlertsPerDay === undefined);
   const wl = buildAuctionWatchlist({

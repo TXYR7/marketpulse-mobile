@@ -944,7 +944,7 @@ async function preSealTick() {
   const inAuction = minutes >= 566 && minutes < 570; // 9:26-9:29 竞价撮合价已定稿,避免 9:25 整拿到未定稿数据
   if (!inAuction && !isInTradingSession(new Date())) return [];
   if (preSealScanInflight) return preSealScanInflight;
-  if (Date.now() - preSealScanAt < PRESEAL_SCAN_MS - 1000) return [];
+  if (Date.now() - preSealScanAt < currentPreSealScanMs() - 1000) return [];
   preSealScanAt = Date.now();
   preSealScanInflight = (async () => {
     const p = PARAM_MANIFEST.preSealAlert;
@@ -1070,6 +1070,13 @@ async function preSealTick() {
   return preSealScanInflight;
 }
 let preSealTimer = null;
+// 自适应扫描节拍(2026-10-30 提速批):前台 5s(人正看着,要快),切后台降回 15s——
+// 后台已有 C1 五分钟宽限窗,那时送得稍慢没损失,省的是移动流量与电量。
+// 定时器固定 5s 唤醒,真正的降速由 preSealTick 内的动态守卫完成(setInterval 的间隔创建后改不了)。
+const PRESEAL_SCAN_MS_BACKGROUND = 15_000;
+function currentPreSealScanMs() {
+  return (typeof document !== 'undefined' && document.hidden) ? PRESEAL_SCAN_MS_BACKGROUND : PRESEAL_SCAN_MS;
+}
 function startPreSealMonitor() {
   if (preSealTimer) return;
   preSealTimer = setInterval(() => { preSealTick().catch(() => {}); }, PRESEAL_SCAN_MS);

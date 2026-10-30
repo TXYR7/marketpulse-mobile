@@ -1478,7 +1478,9 @@ function detectPreSealAlerts({ stocks = [], watchCodes = [], prevSnap = new Map(
 // 不新增选股算法——只是把已有的 gap/机会股/竞价三块数据聚合成一张可盯的名单,让决策提前到开盘前。
 // 返回 { available, items:[{code,name,boards,matchPct,volRatio,sealShares,tier,gapStatus,tag}], reason }
 function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [], gap = {}, stocks = [], limit = 8 } = {}) {
-  if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集' };
+  // 2026-10-30:未采集时也带 phase/available 出参,前端据此区分「竞价没开始」与「今天没采到」——
+  // 原来这里的早退只给 reason,phase 丢失,前端无法判断是否已过竞价时段,只能整卡隐藏(用户报「有时不显示」)。
+  if (!auction?.available || !(auction.items || []).length) return { available: false, items: [], reason: auction?.reason || '竞价未采集', phase: auction?.phase || null, auctionAvailable: Boolean(auction?.available) };
   const aucByCode = new Map((auction.items || []).map((it) => [String(it.code), it]));
   const stockByCode = new Map((stocks || []).map((s) => [String(s.code), s]));
   const tierByCode = new Map();
@@ -1519,7 +1521,7 @@ function buildAuctionWatchlist({ auction = {}, opportunities = {}, leaders = [],
     rows.push({ code, name: it.name || code, boards: it.boards ?? null, matchPct: Math.round(matchPct * 100) / 100, volRatio: it.volRatio ?? null, sealShares: it.sealedBuyShares ?? null, tier: meta.tier || null, gapStatus: g?.status || null, tag: tags.join('·'), score });
   }
   rows.sort((a, b) => b.score - a.score);
-  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选(盘中已剔除跳水/炸板)', asOf: auction.asOf || null, phase: auction.phase || 'final' };
+  return { available: rows.length > 0, items: rows.slice(0, limit), reason: rows.length ? null : '竞价有数据但无可盯候选(盘中已剔除跳水/炸板)', asOf: auction.asOf || null, phase: auction.phase || 'final', auctionAvailable: true };
 }
 
 // 情绪阶段 → 三大周期（连板晋级体系的周期天花板）

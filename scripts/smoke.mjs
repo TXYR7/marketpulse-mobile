@@ -635,12 +635,18 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
     && /base \* \(1 - boardLimitPct \/ 100\)/.test(analyticsSrc));
   ok('手机 PARAM_MANIFEST 登记封单骤减/跌停接近阈值(与桌面同值)',
     PARAM_MANIFEST.preSealAlert.sealShrinkPct === 30 && PARAM_MANIFEST.preSealAlert.sealShrinkMinHands === 3000
-    && PARAM_MANIFEST.preSealAlert.sealShrinkWindowMs === 120000 && PARAM_MANIFEST.preSealAlert.limitDownApproachPct === 1.5);
-  ok('手机涨停开板+封单骤减:sealed→破封推一次,封单量采样窗口比', /kind: 'sealOpen'/.test(appSrc)
-    && /kind: 'sealShrink'/.test(appSrc) && /st\.sealSamples/.test(appSrc) && /st\.openPushed/.test(appSrc));
-  ok('手机跌停侧三件:马上跌停/封单骤减/开板,独立状态', /kind: 'downApproach'/.test(appSrc)
-    && /kind: 'downShrink'/.test(appSrc) && /kind: 'downOpen'/.test(appSrc) && /preSealDownState/.test(appSrc));
-  ok('手机开板/封单/跌停事件并入 accepted 流(共用重复闸+15s节流)', /\.\.\.resealEvents, \.\.\.openEvents\]/.test(appSrc));
+    && PARAM_MANIFEST.preSealAlert.limitDownApproachPct === 1.5
+    && /sealShrinkWindowMs/.test(analyticsSrc) === false); // 2026-10-30 晚退役(锚点递增取代采样窗口)
+  ok('手机涨停开板+封单骤减:sealed→破封推一次,锚点递增基线', /kind: 'sealOpen'/.test(appSrc)
+    && /kind: 'sealShrink'/.test(appSrc) && /st\.sealShrinkAnchor/.test(appSrc) && /st\.openPushed/.test(appSrc));
+  ok('手机跌停侧三件:马上跌停/封单骤减/开板,独立状态+段落判据', /kind: 'downApproach'/.test(appSrc)
+    && /kind: 'downShrink'/.test(appSrc) && /kind: 'downOpen'/.test(appSrc) && /preSealDownState/.test(appSrc)
+    && /st\.downApproachZone/.test(appSrc) && /st\.downShrinkAnchor/.test(appSrc));
+  ok('手机开板/封单/跌停事件并入 accepted 流(self-gated 豁免价格类重复闸)', /\.\.\.resealEvents, \.\.\.openEvents\]/.test(appSrc)
+    && /selfGatedKinds/.test(appSrc));
+  ok('手机批量标题按事件类型如实汇总(与桌面 preSealBatchLabel 同口径)', /function preSealBatchLabel/.test(appSrc)
+    && /pushNtfy\(label, \[\.\.\.lines/.test(appSrc));
+  ok('手机 ntfy 429 限流不重试', /res\.status === 429\) \{ console\.warn\('\[C3\] ntfy 限流\(429\),不重试'/.test(appSrc));
   ok('手机推送文案覆盖 8 类(与桌面 pushPreSeal 逐字一致)', /涨停开板（现/.test(appSrc) && /封单骤减 \$\{shrink\}%（剩 \$\{hands\}）/.test(appSrc)
     && /跌停封单骤减 \$\{shrink\}%（剩 \$\{hands\}）/.test(appSrc) && /距跌停还差/.test(appSrc));
 }

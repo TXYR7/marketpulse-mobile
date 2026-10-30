@@ -1393,9 +1393,9 @@ const PARAM_MANIFEST = {
     digestIntervalMs: 120_000,   // 全市场摘要最快每 2 分钟一条(全局节流,不设单日条数硬上限)
     digestMaxItems: 8,           // 每条摘要最多列 8 只,其余只报数量
     // 2026-10-30 封单预警批(与桌面 PARAM_MANIFEST.preSealAlert 同值):开板/封单骤减/跌停系列
-    sealShrinkWindowMs: 120_000, // 封单骤减比较窗口(相对窗口前那次采样)
-    sealShrinkPct: 30,           // 窗口内封单量减少 ≥30% 视为骤减
-    sealShrinkMinHands: 3000,    // 封单量 ≥3000 手才监控,避免小票噪音
+    // 2026-10-30 晚改锚点递增语义,原先的 2 分钟采样窗口参数随语义退役(与桌面同步)。
+    sealShrinkPct: 30,           // 较当前基线再减 ≥30% 报一次(报后基线=当前量,段落内可报多档)
+    sealShrinkMinHands: 3000,    // 基线封单量 ≥3000 手才监控,避免小票噪音
     limitDownApproachPct: 1.5    // 距跌停 ≤1.5pp 开始预警
   }
 };

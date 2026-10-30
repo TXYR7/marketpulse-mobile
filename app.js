@@ -805,8 +805,8 @@ function updatePreSealResealState(today, stocks) {
   for (const s of state.pools?.broken || []) { const code = String(s.code); const st = map.get(code) || {}; st.sealed = false; st.broken = true; map.set(code, st); }
   for (const s of state.pools?.up || []) { const code = String(s.code); const st = map.get(code) || {}; st.sealed = true; st.broken = false; map.set(code, st); }
   // 2026-10-30 封单预警批:涨停开板 + 涨停封单骤减(与桌面 runPreSealScan 同判定)。
+  // 2026-10-30 晚改锚点递增语义(用户拍板频率不封顶、语义不重播),与桌面同判定。
   const now = Date.now();
-  const shrinkWinMs = Number(p.sealShrinkWindowMs) || 120_000;
   const shrinkPct = Number(p.sealShrinkPct) || 30;
   const minHands = Number(p.sealShrinkMinHands) || 3000;
   const openEvents = [];
@@ -827,23 +827,21 @@ function updatePreSealResealState(today, stocks) {
       openEvents.push({ code: s.code, name: s.name, kind: 'sealOpen', pct: round2(s.changePercent), limitPct: s.limitPct, boardLimitPct: s.boardLimitPct, boards: s.boards, t: now, sources: s.sources });
     }
     if (st.sealed) st.openPushed = false;
-    // ② 涨停封单骤减:仍在封 + 买一量≥门槛 + 窗口内较窗口前减少≥阈值%
-    if (st.sealed && Number.isFinite(Number(s.sealHands)) && Number(s.sealHands) >= minHands) {
-      const samples = Array.isArray(st.sealSamples) ? st.sealSamples : (st.sealSamples = []);
-      samples.push([now, s.sealHands]);
-      const winStart = now - shrinkWinMs;
-      while (samples.length && samples[0][0] < winStart - 60_000) samples.shift();
-      let base = null;
-      for (let i = samples.length - 1; i >= 0; i -= 1) { if (samples[i][0] <= winStart) { base = samples[i][1]; break; } }
-      if (base === null && samples.length) base = samples[0][1];
-      if (base && base >= minHands && Number(s.sealHands) < base) {
-        const shrinkPctNow = (1 - Number(s.sealHands) / base) * 100;
+    // ② 涨停封单骤减(锚点递增,与桌面同判定):基线=峰值,较基线再减≥阈值报一次,报后基线=当前量;拆封清基线。
+    if (st.sealed && Number.isFinite(Number(s.sealHands)) && Number(s.sealHands) > 0) {
+      const hands = Number(s.sealHands);
+      let anchor = st.sealShrinkAnchor;
+      if (anchor === undefined || hands > anchor) anchor = hands; // 首观测/封单堆起:基线抬高
+      st.sealShrinkAnchor = anchor;
+      if (anchor >= minHands) {
+        const shrinkPctNow = (1 - hands / anchor) * 100;
         if (shrinkPctNow >= shrinkPct) {
-          openEvents.push({ code: s.code, name: s.name, kind: 'sealShrink', pct: round2(s.changePercent), limitPct: s.limitPct, boardLimitPct: s.boardLimitPct, boards: s.boards, shrinkPct: shrinkPctNow, sealHands: Number(s.sealHands), t: now, sources: s.sources });
+          st.sealShrinkAnchor = hands; // 已报:新基线=当前量,下一档再报
+          openEvents.push({ code: s.code, name: s.name, kind: 'sealShrink', pct: round2(s.changePercent), limitPct: s.limitPct, boardLimitPct: s.boardLimitPct, boards: s.boards, shrinkPct: shrinkPctNow, sealHands: hands, t: now, sources: s.sources });
         }
       }
     } else if (!st.sealed) {
-      st.sealSamples = [];
+      st.sealShrinkAnchor = undefined; // 拆封清基线
     }
     map.set(s.code, st);
   }
@@ -859,7 +857,6 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
   const sealedTol = Number(p.sealedTolerancePct) || 0.15;
   const minHands = Number(p.sealShrinkMinHands) || 3000;
   const shrinkPct = Number(p.sealShrinkPct) || 30;
-  const winMs = Number(p.sealShrinkWindowMs) || 120_000;
   // ① 候选:今日跌停池 + 跌幅榜接近跌停的票
   const byCode = new Map();
   for (const s of state.pools?.down || []) {
@@ -874,7 +871,8 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
     const ld = limitDownPriceOf(row.prevClose, code, row.name);
     if (!ld) continue;
     const gapToDown = Number(row.changePct) - ld.effectiveLimitPct;
-    if (byCode.has(code) || gapToDown <= approachPct) byCode.set(code, { code, name: row.name, row, limitDown: ld, gapToDown });
+    // 候选门槛放宽一档:回落出预警区间的票继续监控(与桌面同判定),「重新进入」才报新段落。
+    if (byCode.has(code) || gapToDown <= approachPct + 1.0) byCode.set(code, { code, name: row.name, row, limitDown: ld, gapToDown });
   }
   if (!byCode.size) return [];
   // ② 实时报价(腾讯,含卖一量=跌停封单)
@@ -894,37 +892,37 @@ async function buildDownSideEvents({ now, inAuction, repeat, today }) {
     const st = stateMap.get(code) || {};
     const wasDown = st.downSealed === true;
     const askHands = q.ask1Vol != null ? Number(q.ask1Vol) : null;
-    // ① 马上跌停:未跌停 + 距跌停≤阈值 + 成交额达标
-    if (!isDown && info.gapToDown != null && info.gapToDown <= approachPct) {
+    // ① 马上跌停(锚点段落判据,与桌面同判定):进入区间报一次,离开区间后重新进入才再报;距跌停用实时价现算。
+    const liveGap = pct - downPct;
+    const inZone = !isDown && liveGap >= 0 && liveGap <= approachPct;
+    if (inZone && !st.downApproachZone) {
       const amount = Number(info.row?.amount || 0);
-      const minAmount = Number(inAuction ? p.auctionMinAmount : p.marketMinAmount) || 0;
+      const minAmount = Number(inAuction ? p.auctionMinAmount : (info.fromPool ? 0 : p.marketMinAmount)) || 0;
       if (amount >= minAmount) {
-        events.push({ code, name: info.name, kind: 'downApproach', pct: round2(pct), limitPct: downPct, gapPct: round2(Math.max(0, info.gapToDown)), auction: inAuction, t: now });
+        events.push({ code, name: info.name, kind: 'downApproach', pct: round2(pct), limitPct: downPct, gapPct: round2(Math.max(0, liveGap)), auction: inAuction, t: now });
       }
     }
+    st.downApproachZone = inZone; // 本段区间状态:离开区间后此值变 false,再次进入即新段落
     // ② 跌停开板
     if (wasDown && !isDown && !st.downOpenPushed) {
       st.downOpenPushed = true;
       events.push({ code, name: info.name, kind: 'downOpen', pct: round2(pct), limitPct: downPct, t: now });
     }
     if (isDown) st.downOpenPushed = false;
-    // ③ 跌停封单骤减
-    if (isDown && askHands != null && askHands >= minHands) {
-      const samples = Array.isArray(st.downSamples) ? st.downSamples : (st.downSamples = []);
-      samples.push([now, askHands]);
-      const winStart = now - winMs;
-      while (samples.length && samples[0][0] < winStart - 60_000) samples.shift();
-      let base = null;
-      for (let i = samples.length - 1; i >= 0; i -= 1) { if (samples[i][0] <= winStart) { base = samples[i][1]; break; } }
-      if (base === null && samples.length) base = samples[0][1];
-      if (base && base >= minHands && askHands < base) {
-        const shrink = (1 - askHands / base) * 100;
+    // ③ 跌停封单骤减(锚点递增,与桌面同判定):基线=峰值,较基线再减≥阈值报一次,报后基线=当前量;开板清基线。
+    if (isDown && askHands != null && askHands > 0) {
+      let anchor = st.downShrinkAnchor;
+      if (anchor === undefined || askHands > anchor) anchor = askHands;
+      st.downShrinkAnchor = anchor;
+      if (anchor >= minHands) {
+        const shrink = (1 - askHands / anchor) * 100;
         if (shrink >= shrinkPct) {
+          st.downShrinkAnchor = askHands; // 已报:新基线=当前量,下一档再报
           events.push({ code, name: info.name, kind: 'downShrink', pct: round2(pct), limitPct: downPct, shrinkPct: shrink, sealHands: askHands, t: now });
         }
       }
     } else if (!isDown) {
-      st.downSamples = [];
+      st.downShrinkAnchor = undefined; // 开板清基线
     }
     st.downSealed = isDown;
     stateMap.set(code, st);
@@ -1032,10 +1030,12 @@ async function preSealTick() {
     preSealPrevSnap = new Map(stocks.map((s) => [s.code, { pct: s.changePercent, t: now }]));
     const resealCodes = new Set(resealEvents.map((ev) => ev.code));
     const accepted = [];
-    // 2026-10-30 封单预警批:开板/封单骤减并入同一 accepted 流(共用重复闸 + 15s 全局节流)
+    // 2026-10-30 封单预警批:开板/封单骤减并入同一 accepted 流(共用 15s 全局节流)。
+    // 2026-10-30 晚用户拍板「频率不封顶、语义不重播」:段落判据自含的事件类不进价格类重复闸(与桌面同判定)。
+    const selfGatedKinds = new Set(['sealOpen', 'sealShrink', 'downApproach', 'downOpen', 'downShrink']);
     for (const ev of [...events.filter((e) => !resealCodes.has(e.code)), ...resealEvents, ...openEvents]) {
       const key = `${ev.code}:${ev.kind}`;
-      if (!preSealCanAlert(repeat, key, now)) continue; // 未回落重置/不满20分钟不重复
+      if (!selfGatedKinds.has(ev.kind) && !preSealCanAlert(repeat, key, now)) continue;
       preSealMarkAlerted(repeat, key, ev, now);
       accepted.push(ev);
     }
@@ -1049,7 +1049,7 @@ async function preSealTick() {
         const acceptedDown = [];
         for (const ev of downEvents) {
           const key = `${ev.code}:${ev.kind}`;
-          if (!preSealCanAlert(repeat, key, now)) continue;
+          if (!selfGatedKinds.has(ev.kind) && !preSealCanAlert(repeat, key, now)) continue;
           preSealMarkAlerted(repeat, key, ev, now);
           acceptedDown.push(ev);
         }
@@ -1082,11 +1082,13 @@ async function pushNtfy(title, lines) {
     const root = new URL(url).origin + '/';
     const body = JSON.stringify({ topic: url.split('/').filter(Boolean).pop(), title, message: lines.join('\n'), priority: 4, tags: ['warning', 'bell'] });
     // 2026-10-26 与网页同口径:偶发 5xx/网络抖动立即重试 2 次(2s/5s),不再一次失败就丢掉提醒。
+    // 2026-10-30 晚:429(限流)不重试——立即重试只会加重限流,与桌面 sendPushWithRetry 同口径。
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (attempt) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
       try {
         const res = await fetch(root, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
         if (res && res.ok) return;
+        if (res && res.status === 429) { console.warn('[C3] ntfy 限流(429),不重试', title); return; }
       } catch { /* 下一轮重试 */ }
     }
     console.warn('[C3] ntfy 推送重试 2 次后仍失败', title);
@@ -1194,20 +1196,30 @@ function pushCoreEvents(events, now) {
   else firePreSealBatch(batch);
 }
 // 批量提醒:一条系统通知 + 一条 ntfy,最多列 8 只(与桌面 pushPreSealBatch 同口径)
+// 2026-10-30 晚:标题按事件类型如实汇总,不再一律「封板前预警」(与桌面 preSealBatchLabel 同口径)。
+function preSealBatchLabel(events) {
+  const parts = events.map((ev) => ({
+    sealApproach: '冲刺', reseal: '回封', surge: '急拉', sealOpen: '涨停开板', sealShrink: '封单骤减',
+    downApproach: '马上跌停', downOpen: '跌停开板', downShrink: '跌停封单骤减'
+  })[ev.kind] || '异动');
+  const uniq = [...new Set(parts)];
+  return uniq.length >= 3 ? '多种预警' : uniq.join('·');
+}
 function firePreSealBatch(events) {
   const lines = events.slice(0, 8).map((ev) => `${ev.name} ${preSealLine(ev)}`);
   if (events.length > 8) lines.push(`另有 ${events.length - 8} 只`);
-  toast(`封板前预警 ${events.length} 只`);
+  const label = `${preSealBatchLabel(events)} ${events.length} 只`;
+  toast(label);
   if (state.preSealOff) return;
   const body = lines.join('\n');
   try {
     if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-      navigator.serviceWorker.ready.then((reg) => reg.showNotification('封板前预警', { body, tag: 'preseal-batch', icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
+      navigator.serviceWorker.ready.then((reg) => reg.showNotification(label, { body, tag: 'preseal-batch', icon: './icons/icon-192.png', badge: './icons/icon-192.png' })).catch(() => {});
     } else if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('封板前预警', { body, tag: 'preseal-batch' });
+      new Notification(label, { body, tag: 'preseal-batch' });
     }
   } catch { /* 通知失败静默 */ }
-  pushNtfy(`封板前预警 ${events.length} 只`, [...lines, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]);
+  pushNtfy(label, [...lines, `时间 ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`]);
   try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch { /* 震动失败静默 */ }
   playAlertSound(events.some((ev) => ev.kind !== 'surge') ? 'sealApproach' : 'surge');
   for (const ev of events) markPreSealRow(ev.code);

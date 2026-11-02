@@ -1,11 +1,11 @@
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
-import { fetchPools, fetchQuotes, fetchTopGainers, fetchTopLosers, fetchTencentQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中;2026-10-30 封单预警批:+跌幅榜/腾讯盘口
+import { fetchPools, fetchQuotes, fetchTopGainers, fetchTencentQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中;2026-10-30 封单预警批:+腾讯盘口
 import {
   calculateBreakRate, calculatePromotionStats, buildThemeRanking, rankCoreLeaders, rankOpportunities,
   calculateEmotionState, yesterdayPremium, buildRiskRadar, buildMarketStructure, buildPlan, buyTypeOf,
   buildExpectationGap, buildSignal, applyGate, assessmentRules,
   assessPromotion, klineFeatures, cycleOf, winratePosition, contextNotes, stockSimilarCases, exitSignalsOf,
-  detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession, limitPriceOf, limitDownPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
+  detectPreSealAlerts, buildAuctionWatchlist, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 } from './analytics.js';
 import { getWatch, putWatch, delWatch, clearWatch, getKV, setKV, getAllHistory, putHistory, pruneHistoryKeep } from './store.js';
 import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctClass, pctText, tierBadge, signalTag, setHTML, patchCardList, revealList } from './views.js'; // 2026-09-12 折叠版批:BD_LABELS 已随评分构成条删除(唯一调用方)
@@ -654,15 +654,12 @@ function preSealLine(ev) {
   const gap = Number.isFinite(Number(ev.gapPct)) ? Number(ev.gapPct).toFixed(1) : '--';
   const shrink = Number.isFinite(Number(ev.shrinkPct)) ? Math.round(Number(ev.shrinkPct)) : '--';
   const hands = Number.isFinite(Number(ev.sealHands)) ? `${Math.round(Number(ev.sealHands)).toLocaleString('zh-CN')} 手` : '--';
-  // 2026-10-30 封单预警批:新增开板/封单骤减/跌停三件,与桌面 preSealLine 逐字一致
+  // 2026-10-30 封单预警批:新增开板/封单骤减,与桌面 preSealLine 逐字一致
   switch (ev.kind) {
     case 'sealApproach': return `${ev.auction ? '[竞价] ' : ''}离板还差 ${gap}%（现 ${ev.pct}%）`;
     case 'reseal': return `回封 · 离板还差 ${gap}%（现 ${ev.pct}%）`;
     case 'sealOpen': return `${ev.auction ? '[竞价] ' : ''}涨停开板（现 ${ev.pct}%）`;
     case 'sealShrink': return `封单骤减 ${shrink}%（剩 ${hands}）`;
-    case 'downApproach': return `距跌停还差 ${gap}%（现 ${ev.pct}%）`;
-    case 'downOpen': return `跌停开板（现 ${ev.pct}%）`;
-    case 'downShrink': return `跌停封单骤减 ${shrink}%（剩 ${hands}）`;
     default: return `急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   }
 }
@@ -856,97 +853,6 @@ function updatePreSealResealState(today, stocks) {
   return { stateMap: map, openEvents };
 }
 
-// 跌停侧状态 + 判定(2026-10-30 封单预警批2):镜像涨停侧,与桌面 server.js buildDownSideEvents 同判定。
-// 监控对象 = 今日跌停池 ∪ 跌幅榜距跌停 ≤limitDownApproachPct 的票;只做沪深主板 A 股。
-let preSealDownState = { date: null, byCode: new Map() };
-async function buildDownSideEvents({ now, inAuction, repeat, today }) {
-  const p = PARAM_MANIFEST.preSealAlert;
-  const approachPct = Number(p.limitDownApproachPct) || 1.5;
-  const sealedTol = Number(p.sealedTolerancePct) || 0.15;
-  const minHands = Number(p.sealShrinkMinHands) || 3000;
-  const shrinkPct = Number(p.sealShrinkPct) || 30;
-  // ① 候选:今日跌停池 + 跌幅榜接近跌停的票
-  const byCode = new Map();
-  for (const s of state.pools?.down || []) {
-    const code = String(s.code || '');
-    if (!code || !isMainBoardShare(code) || isExcludedPreSealName(s.name)) continue;
-    byCode.set(code, { code, name: s.name, fromPool: true });
-  }
-  const losers = await fetchTopLosers(300).catch(() => []);
-  for (const row of losers) {
-    const code = String(row.code || '');
-    if (!code || !isMainBoardShare(code) || isExcludedPreSealName(row.name)) continue;
-    const ld = limitDownPriceOf(row.prevClose, code, row.name);
-    if (!ld) continue;
-    const gapToDown = Number(row.changePct) - ld.effectiveLimitPct;
-    // 候选门槛放宽一档:回落出预警区间的票继续监控(与桌面同判定),「重新进入」才报新段落。
-    if (byCode.has(code) || gapToDown <= approachPct + 1.0) byCode.set(code, { code, name: row.name, row, limitDown: ld, gapToDown });
-  }
-  if (!byCode.size) return [];
-  // ② 实时报价(腾讯,含卖一量=跌停封单)
-  const quotes = await fetchTencentQuotes([...byCode.keys()]).catch(() => ({}));
-  if (preSealDownState.date !== today) preSealDownState = { date: today, byCode: new Map() };
-  const stateMap = preSealDownState.byCode;
-  const events = [];
-  for (const [code, info] of byCode) {
-    const q = quotes[code];
-    if (!q || q.price == null || !q.prevClose) continue;
-    const pct = (q.price / q.prevClose - 1) * 100;
-    if (!Number.isFinite(pct)) continue;
-    const ld = limitDownPriceOf(q.prevClose, code, info.name);
-    if (!ld) continue;
-    const downPct = ld.effectiveLimitPct;
-    const isDown = pct <= downPct + sealedTol;
-    const st = stateMap.get(code) || {};
-    const wasDown = st.downSealed === true;
-    const askHands = q.ask1Vol != null ? Number(q.ask1Vol) : null;
-    // ① 马上跌停(迟滞,与桌面同判定):进区用 approachPct、出区要 >approachPct+1pp,
-    //    单阈值时股价在阈值附近抖动会每轮「重新入区」重复推。距跌停用实时价现算。
-    const liveGap = pct - downPct;
-    const exitGap = approachPct + (Number(p.downApproachExitHysteresisPct) || 1.0);
-    const inZoneNow = !isDown && liveGap >= 0 && liveGap <= approachPct;
-    const inZoneHeld = !isDown && liveGap >= 0 && liveGap <= exitGap;
-    const wasInZone = st.downApproachZone === true;
-    const inZone = wasInZone ? inZoneHeld : inZoneNow; // 进区严格、出区宽松 => 迟滞
-    if (inZone && !wasInZone) {
-      const amount = Number(info.row?.amount || 0);
-      const minAmount = Number(inAuction ? p.auctionMinAmount : (info.fromPool ? 0 : p.marketMinAmount)) || 0;
-      if (amount >= minAmount) {
-        events.push({ code, name: info.name, kind: 'downApproach', pct: round2(pct), limitPct: downPct, gapPct: round2(Math.max(0, liveGap)), auction: inAuction, t: now });
-      }
-    }
-    st.downApproachZone = inZone; // 本段区间状态:跌出 exitGap 才置 false,再次进入即新段落
-    // ② 跌停开板(与涨停开板同口径排除竞价段)
-    if (wasDown && !isDown && !st.downOpenPushed && !inAuction) {
-      st.downOpenPushed = true;
-      events.push({ code, name: info.name, kind: 'downOpen', pct: round2(pct), limitPct: downPct, t: now });
-    }
-    if (isDown) st.downOpenPushed = false;
-    // ③ 跌停封单骤减(锚点递增,与桌面同判定):基线=峰值,较基线再减≥阈值报一次,报后基线=当前量;开板清基线。
-    if (isDown && askHands != null && askHands > 0) {
-      const anchorAt = Number(st.downShrinkAnchorAt) || 0;
-      const anchorStale = anchorAt > 0 && now - anchorAt > (Number(p.sealShrinkAnchorMaxAgeMs) || 90_000);
-      let anchor = st.downShrinkAnchor;
-      if (anchor === undefined || anchorStale || askHands > anchor) anchor = askHands;
-      st.downShrinkAnchor = anchor;
-      st.downShrinkAnchorAt = now;
-      if (anchor >= minHands) {
-        const shrink = (1 - askHands / anchor) * 100;
-        if (shrink >= shrinkPct) {
-          st.downShrinkAnchor = askHands; // 已报:新基线=当前量,下一档再报
-          events.push({ code, name: info.name, kind: 'downShrink', pct: round2(pct), limitPct: downPct, shrinkPct: shrink, sealHands: askHands, t: now });
-        }
-      }
-    } else if (!isDown) {
-      st.downShrinkAnchor = undefined; // 开板清基线
-      st.downShrinkAnchorAt = 0;
-    }
-    st.downSealed = isDown;
-    stateMap.set(code, st);
-  }
-  return events;
-}
-
 // 独立扫描：不挂在 computeDerived 上，也不依赖页面 8s 刷新是否产生新派生
 async function preSealTick() {
   if (state.preSealOff || state.manualDate) return [];
@@ -1051,7 +957,7 @@ async function preSealTick() {
     // 2026-10-30 晚用户拍板「频率不封顶、语义不重播」:段落判据自含的事件类不进价格类重复闸(与桌面同判定)。
     // reseal 也豁免(与桌面同判定):段落判据由 st.broken 提供,报完立即置 false,
     // 与 sealOpen 的 openPushed 是同一套「一段一次」机制,不必再加价格类重复闸。
-    const selfGatedKinds = new Set(['sealOpen', 'sealShrink', 'reseal', 'downApproach', 'downOpen', 'downShrink']);
+    const selfGatedKinds = new Set(['sealOpen', 'sealShrink', 'reseal']);
     for (const ev of [...events.filter((e) => !resealCodes.has(e.code)), ...resealEvents, ...openEvents]) {
       const key = `${ev.code}:${ev.kind}`;
       if (!selfGatedKinds.has(ev.kind) && !preSealCanAlert(repeat, key, now)) continue;
@@ -1060,21 +966,6 @@ async function preSealTick() {
     }
     if (accepted.length) savePreSealRepeat();
     pushCoreEvents(accepted, now);
-
-    // —— 跌停侧(2026-10-30 封单预警批2):镜像三件,独立状态,失败不阻断涨停侧 ——
-    try {
-      const downEvents = await buildDownSideEvents({ now, inAuction, repeat, today });
-      if (downEvents.length) {
-        const acceptedDown = [];
-        for (const ev of downEvents) {
-          const key = `${ev.code}:${ev.kind}`;
-          if (!selfGatedKinds.has(ev.kind) && !preSealCanAlert(repeat, key, now)) continue;
-          preSealMarkAlerted(repeat, key, ev, now);
-          acceptedDown.push(ev);
-        }
-        if (acceptedDown.length) { savePreSealRepeat(); pushCoreEvents(acceptedDown, now); }
-      }
-    } catch { /* 跌停侧失败静默,不影响涨停侧 */ }
 
     // —— 全市场层：排除核心名单后，按摘要推送(盘中到这一步才拉榜单,不拖慢核心预警) ——
     if (!inAuction) rankingRows = (await preSealRanking().catch(() => [])).filter((row) => preSealRankFresh(row, now, { auction: false }));
@@ -1186,16 +1077,10 @@ function firePreSealAlert(ev) {
       text = `${auctionPrefix}涨停开板（现 ${ev.pct}%）${boardsText}`; break;
     case 'sealShrink':
       text = `封单骤减 ${shrink}%（剩 ${hands}）${boardsText}`; break;
-    case 'downApproach':
-      text = `距跌停还差 ${ev.gapPct ?? '--'}%（现 ${ev.pct}%）`; break;
-    case 'downOpen':
-      text = `跌停开板（现 ${ev.pct}%）`; break;
-    case 'downShrink':
-      text = `跌停封单骤减 ${shrink}%（剩 ${hands}）`; break;
     default:
       text = `30秒急拉 +${ev.rise ?? '--'}%（现 ${ev.pct}%）`;
   }
-  const titleMap = { sealApproach: '封板前预警', reseal: '回封预警', surge: '急拉预警', sealOpen: '涨停开板', sealShrink: '涨停封单骤减', downApproach: '跌停前预警', downOpen: '跌停开板', downShrink: '跌停封单骤减' };
+  const titleMap = { sealApproach: '封板前预警', reseal: '回封预警', surge: '急拉预警', sealOpen: '涨停开板', sealShrink: '涨停封单骤减' };
   const title = titleMap[ev.kind] || '急拉预警';
   toast(`${label} ${text}`);
   if (state.preSealOff) return; // 设置里关了就只 toast 不打扰
@@ -1227,8 +1112,7 @@ function pushCoreEvents(events, now) {
 // 2026-10-30 晚:标题按事件类型如实汇总,不再一律「封板前预警」(与桌面 preSealBatchLabel 同口径)。
 function preSealBatchLabel(events) {
   const parts = events.map((ev) => ({
-    sealApproach: '冲刺', reseal: '回封', surge: '急拉', sealOpen: '涨停开板', sealShrink: '封单骤减',
-    downApproach: '马上跌停', downOpen: '跌停开板', downShrink: '跌停封单骤减'
+    sealApproach: '冲刺', reseal: '回封', surge: '急拉', sealOpen: '涨停开板', sealShrink: '封单骤减'
   })[ev.kind] || '异动');
   const uniq = [...new Set(parts)];
   return uniq.length >= 3 ? '多种预警' : uniq.join('·');

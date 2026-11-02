@@ -1392,13 +1392,11 @@ const PARAM_MANIFEST = {
     auctionMinAmount: 5_000_000, // 9:26 竞价阶段:竞价成交额 ≥500万(竞价额远小于全天额)
     digestIntervalMs: 30_000,    // 全市场摘要最快每 30 秒一条(2026-10-30 提速批,与桌面同步;不设单日条数硬上限)
     digestMaxItems: 8,           // 每条摘要最多列 8 只,其余只报数量
-    // 2026-10-30 封单预警批(与桌面 PARAM_MANIFEST.preSealAlert 同值):开板/封单骤减/跌停系列
+    // 2026-10-30 封单预警批(与桌面 PARAM_MANIFEST.preSealAlert 同值):开板/封单骤减
     // 2026-10-30 晚改锚点递增语义,原先的 2 分钟采样窗口参数随语义退役(与桌面同步)。
     sealShrinkPct: 30,           // 较当前基线再减 ≥30% 报一次(报后基线=当前量,段落内可报多档)
     sealShrinkMinHands: 3000,    // 基线封单量 ≥3000 手才监控,避免小票噪音
-    sealShrinkAnchorMaxAgeMs: 90_000, // 锚点时效:超过 90 秒未更新的基线作废重立(与桌面同值)
-    limitDownApproachPct: 1.5,   // 距跌停 ≤1.5pp 开始预警
-    downApproachExitHysteresisPct: 1.0 // 跌停预警迟滞:进区 1.5pp、出区 >2.5pp(与桌面同值)
+    sealShrinkAnchorMaxAgeMs: 90_000 // 锚点时效:超过 90 秒未更新的基线作废重立(与桌面同值)
   }
 };
 
@@ -1429,16 +1427,6 @@ function limitPriceOf(preClose, code, name) {
   if (!Number.isFinite(base) || base <= 0) return null;
   const boardLimitPct = limitThresholdOf(code, name);
   const price = Math.round(base * (1 + boardLimitPct / 100) * 100) / 100;
-  return { price, boardLimitPct, effectiveLimitPct: (price / base - 1) * 100 };
-}
-
-// 跌停价(2026-10-30 封单预警批):镜像 limitPriceOf 取负方向,与桌面 server.js limitDownPriceOf 同口径。
-// effectiveLimitPct 为负值(如 -10.0),调用方用「现价 pct <= 跌停 pct + 容差」判已跌停。
-function limitDownPriceOf(preClose, code, name) {
-  const base = Number(preClose);
-  if (!Number.isFinite(base) || base <= 0) return null;
-  const boardLimitPct = limitThresholdOf(code, name);
-  const price = Math.round(base * (1 - boardLimitPct / 100) * 100) / 100;
   return { price, boardLimitPct, effectiveLimitPct: (price / base - 1) * 100 };
 }
 
@@ -1829,5 +1817,5 @@ export {
   buyTypeOf, expectedGapOf, buildExpectationGap, buildRiskRadar, buildSignal, applyGate,
   buildSimilarDays, vectorOfStocks, marketSimilarity, approximatePhaseOf, trajectoryLabel, buildMarketStructure, stockSimilarCases,
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
-  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, limitDownPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
+  PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 };

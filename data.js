@@ -455,21 +455,6 @@ export async function fetchTopGainers(limit = 300) {
   return [...merged.values()].slice(0, limit);
 }
 
-// 全市场跌幅榜(2026-10-30 封单预警批):复用 fetchAllMarket 仅改 order='asc'(f3 升序=跌幅最前)。
-// 只走东财主源;失败返回 [] 由调用方跳过(跌停侧整块不推,不影响涨停侧)。
-export async function fetchTopLosers(limit = 300) {
-  const merged = new Map();
-  for (let page = 1; page <= Math.ceil(limit / RANK_PAGE_SIZE); page += 1) {
-    try {
-      const { rows } = await fetchAllMarket({ page, pageSize: RANK_PAGE_SIZE, sort: 'f3', order: 'asc' });
-      if (!rows?.length) break;
-      for (const row of rows) merged.set(row.code, row);
-      if (rows.length < RANK_PAGE_SIZE) break;
-    } catch { break; }
-  }
-  return [...merged.values()].filter((r) => r.changePct < 0).slice(0, limit);
-}
-
 // 按名称/代码搜索（轻量；用于全市场搜索框）。B5:f2/f3 现价与涨跌幅——停牌 '-' 转 null 优雅降级
 export function mapSearchRow(row) {
   return {

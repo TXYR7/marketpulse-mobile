@@ -1623,7 +1623,7 @@ function assessPromotion(stock, ctx = {}) {
   const av = auctionVerdict(stock, ctx);
   // null 守卫：服务端缺数据传 null，Number(null)===0 曾被读成「平开=竞价低开」硬否决（2026-09-08 修）
   const openPct = finiteNumber(ctx.openPct);
-  if (openPct === null) push('auction', '竞价承接', 'na', '今开/昨收未取到');
+  if (openPct === null) push('auction', '竞价承接', 'na', boards >= 2 ? '今开/昨收未取到' : '首板无昨日池竞价，按不适用处理');
   else if (av.tag === '竞价避雷') push('auction', '竞价承接', 'fail', av.note);
   else if (av.tag === '弱转强') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
   else if (av.tag === '竞价合格') { scoreDim(15, undefined, 0.85); push('auction', '竞价承接', 'pass', av.note); }
@@ -1697,7 +1697,7 @@ function assessPromotion(stock, ctx = {}) {
   const missingCritical = [];
   if (fault === null) missingCritical.push('周期');
   if (sealSec === null) missingCritical.push('首封时间');
-  if (openPct === null) missingCritical.push('竞价');
+  if (openPct === null && boards >= 2) missingCritical.push('竞价'); // 2026-11-03：首板不在昨日池，竞价结构性缺失，按不适用处理，不降级
   if (themeSize === null) missingCritical.push('题材梯队');
   if (brk === null) missingCritical.push('炸板次数');
   if (sealRatio === null) missingCritical.push('封单占比');

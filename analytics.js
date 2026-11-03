@@ -1540,15 +1540,36 @@ function cycleOf(phase) {
 }
 
 // 竞价判定（高开区间 + 弱转强）：openPct=今开/昨收%
+// 涨跌停幅度（按代码/名称推断）：ST 5%、创业板/科创板 20%、北交所 30%、其余主板 10%
+function priceLimitPctOf(code = '', name = '') {
+  const n = String(name || '').toUpperCase();
+  if (n.includes('ST')) return 5;
+  const c = String(code || '');
+  if (c.startsWith('30') || c.startsWith('68')) return 20;
+  if (c.startsWith('8') || c.startsWith('4') || c.startsWith('92')) return 30;
+  return 10;
+}
+
+// 开盘即涨停（一字/贴板开）：openPct 接近当日涨停幅度，容差 0.2pp 吸收价格取整误差。
+// 2026-11-03 回放证伪：一字/贴板开次日晋级率 53.7%（162 条），远高于基线 22.2%——
+// 旧规则把它当「超级高开=情绪透支」硬否决，等于先干掉最强的一批。
+function isLimitOpen(stock = {}, openPct = null) {
+  const pct = finiteNumber(openPct);
+  if (pct === null || pct <= 0) return false;
+  return pct >= priceLimitPctOf(stock.code, stock.name) - 0.2;
+}
+
 function auctionVerdict(stock, ctx = {}) {
   const boards = Math.max(1, finiteNumber(stock.boards) || 1);
   // null 守卫：Number(null)===0 会把「缺数据」读成 0% 平开 → 竞价避雷；缺失必须保持 null
   const openPct = finiteNumber(ctx.openPct);
   if (openPct === null) return { tag: null, note: '竞价数据不足' };
+  const limitOpen = isLimitOpen(stock, openPct);
   const [lo, hi] = boards >= 3 ? PROMO_RULES.openBandBoard3Plus : PROMO_RULES.openBandBoard2;
   const prev = ctx.prevDay || null;
   const prevRotten = !!(prev && ((Number(prev.breakCount) || 0) >= 2 || (Number(prev.turnoverRate) || 0) >= 50));
   const volChg = finiteNumber(ctx.volChg);
+  if (limitOpen) return { tag: '竞价一字', note: `开盘即涨停（+${openPct}%）——最强承接，不做避雷` };
   if (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh) {
     return { tag: '竞价避雷', note: openPct <= 0 ? '低开=隔夜分歧严重，无人接力' : '超级高开=情绪透支，防高开低走炸板兑现' };
   }
@@ -1625,6 +1646,7 @@ function assessPromotion(stock, ctx = {}) {
   const openPct = finiteNumber(ctx.openPct);
   if (openPct === null) push('auction', '竞价承接', 'na', boards >= 2 ? '今开/昨收未取到' : '首板无昨日池竞价，按不适用处理');
   else if (av.tag === '竞价避雷') push('auction', '竞价承接', 'fail', av.note);
+  else if (av.tag === '竞价一字') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
   else if (av.tag === '弱转强') { scoreDim(15, undefined, 1); push('auction', '竞价承接', 'pass', av.note); }
   else if (av.tag === '竞价合格') { scoreDim(15, undefined, 0.85); push('auction', '竞价承接', 'pass', av.note); }
   else { scoreDim(15, undefined, 0.35); push('auction', '竞价承接', 'warn', av.note); }
@@ -1709,8 +1731,11 @@ function assessPromotion(stock, ctx = {}) {
   if (themeSize !== null && themeSize <= 1) hardFails.push('孤立独板');
   if (brk !== null && brk >= PROMO_RULES.breakFailMin) hardFails.push(`反复炸板 ${brk} 次`);
   if (sealSec !== null && sealSec >= PROMO_RULES.sealWeakAfter) hardFails.push('尾盘偷袭封板');
-  if (openPct !== null && (openPct <= 0 || openPct > PROMO_RULES.openSuperHigh)) hardFails.push(openPct <= 0 ? '竞价低开' : '竞价超级高开');
-  if (cycle === '退潮' && boards >= 3) hardFails.push('退潮周期高位板');
+  if (openPct !== null && openPct <= 0) hardFails.push('竞价低开');
+  // 一字/贴板开是最强承接（2026-11-03 回放 53.7%），不按「超级高开」硬否决；普通高开仍避雷
+  else if (openPct !== null && openPct > PROMO_RULES.openSuperHigh && !isLimitOpen(stock, openPct)) hardFails.push('竞价超级高开');
+  // 2026-11-03 回放证伪：「退潮周期高位板」65 条实际晋级率 44.6%（非一字 32.0%），高于基线 22.2%，
+  // 不再硬否决；退潮周期仍通过 cycle 分数（容错 15%）惩罚。
 
   const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
   let verdict;

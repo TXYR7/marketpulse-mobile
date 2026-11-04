@@ -15,7 +15,7 @@ const state = {
   pools: null, quotes: {}, watch: [], view: 'intraday',
   refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
-  lastPayload: null, history: [], historyLoading: false, historyLoaded: false,
+  lastPayload: null, history: [], historyLoaded: false,
   // 2026-09-11 一屏到底批:reviews/reviewsLoaded/trades 状态已随复盘+交易视图整删
   allMarket: null, marketPage: 1, gap: null, prevPremium: null,
   fromSnapshot: false, lastGoodAt: 0, lastSuccessAt: 0, lastErrorAt: 0, quotesAt: 0, lastFetchMs: null,
@@ -42,7 +42,7 @@ async function mapWithConcurrency(items, limit, fn) {
 }
 
 /* ---------------- 派生计算 ---------------- */
-// state.history 恒为按日期升序（init/loadHistory 写入前已排序），派生结果按 history+交易日 缓存，
+// state.history 恒为按日期升序（init 从 IDB 读入即排序），派生结果按 history+交易日 缓存，
 // 盘中每 tick 不再重复全量重算晋级率/昨板映射。
 let histMemo = { key: '', promo: null, prevBoards: null, prevStocks: [] };
 function historyDerived(poolsDate) {
@@ -395,7 +395,7 @@ function renderStructFold() {
   const hint = $('#structHint');
   if (hint) hint.textContent = state.themes?.length ? state.themes.length + ' 条主线' : '--';
   if (!$('#structFold').open) return;
-  renderStructure({ state, toast, actions: { loadHistory } });
+  renderStructure({ state, toast });
 }
 
 /* ---------------- 昨日涨停 · 今日开盘预期差 ---------------- */
@@ -416,7 +416,8 @@ async function loadGap(force = false) {
   const gapEl = $('#gapRows');
   const sum = $('#gapSummary');
   const yest = (state.history || []).filter((h) => state.pools && String(h.date) < String(state.pools.date)).pop();
-  // 2026-10-22 小字清理:原文案让用户「补录历史」,但设置页砍后手机端已无该入口(loadHistory 零调用方)——改中性空态
+  // 2026-10-22 小字清理:原文案让用户「补录历史」,但设置页砍后手机端已无该入口——改中性空态
+  // 2026-11-04: 死函数 loadHistory 已删;历史靠每日打开 app 自动落库(IDB)
   if (!yest) { sum.textContent = '需历史'; setHTML(gapEl, '<div class="muted">暂无前一交易日数据</div>'); return; }
   const candidates = (yest.stocks || []).map((c) => ({ code: c.code, name: c.name, boards: c.boards, industry: c.industry }));
   if (!candidates.length) { sum.textContent = '--'; setHTML(gapEl, '<div class="muted">昨日无涨停缓存</div>'); return; }
@@ -1191,7 +1192,7 @@ function renderAuctionWatchlist() {
 
 function renderIntraday() {
   // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
-  const ctx = { state, toast, actions: { loadHistory } };
+  const ctx = { state, toast };
   renderOpportunity(ctx);
   renderLadder(ctx);
   renderStructFold();
@@ -1854,7 +1855,7 @@ function refreshTick() {
   refresh();
 }
 
-/* ---------------- 历史补录 ---------------- */
+/* ---------------- 交易日回看（历史补录函数 2026-11-04 已删：零调用方，init 只读 IDB；修剪逻辑移到 init） ---------------- */
 function tradingDatesBack(n) {
   const out = [];
   const base = shanghaiNow();
@@ -1867,72 +1868,6 @@ function tradingDatesBack(n) {
   }
   return out;
 }
-async function loadHistory() {
-  if (state.historyLoading) return;
-  state.historyLoading = true;
-  try {
-    const existing = await getAllHistory();
-    const map = new Map(existing.map((h) => [h.date, h]));
-    let emptyDates = [];
-    try { emptyDates = (await getKV('emptyDates', [])) || []; } catch (e) { emptyDates = []; }
-    const emptySet = new Set(emptyDates);
-    const dates = tradingDatesBack(45);
-    let count = map.size;
-    let failRun = 0;
-    // 历史日期彼此独立——按 3 并发分块补录（此前逐日串行 + sleep，30 交易日约一分钟，现约 1/3 时长）；
-    // 失败语义保持：整块全失败连续累计 3 次即中止，部分失败退避后继续
-    const CONC = 3;
-    let aborted = false;
-    for (let start = 0; start < dates.length && !aborted; start += CONC) {
-      const batch = dates.slice(start, start + CONC).filter((dt) => !map.has(dt) && !emptySet.has(dt));
-      if (!batch.length) continue;
-      const results = await Promise.allSettled(batch.map((dt) => fetchPools(dt)));
-      const failures = results.filter((r) => r.status === 'rejected').length;
-      if (failures === batch.length) {
-        failRun += failures;
-        if (failRun >= 3) { toast('历史补录中止：接口连续失败'); break; }
-        await sleep(800 * failures + Math.floor(Math.random() * 300));
-        continue;
-      }
-      failRun = 0;
-      if (failures) await sleep(800 * failures + Math.floor(Math.random() * 300));
-      for (let i = 0; i < batch.length && !aborted; i++) {
-        const r = results[i];
-        if (r.status !== 'fulfilled') continue;
-        const dt = batch[i];
-        const p = r.value;
-        if (p.upCount > 0) {
-          // breaks/turnoverRate 供弱转强判定的「昨日烂板」维度（旧记录缺字段时评估器诚实标 na）
-          const rec = { date: dt, stocks: p.up.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
-          await putHistory(rec); map.set(dt, rec); count += 1;
-        } else {
-          // 空池（节假日/无数据）也记档，之后不再重复拉同一天
-          emptySet.add(dt);
-        }
-        if (count >= 30) aborted = true;
-      }
-      if (!aborted) await sleep(150);
-    }
-    if (emptySet.size !== emptyDates.length || [...emptySet].some((d2) => !emptyDates.includes(d2))) {
-      setKV('emptyDates', [...emptySet].slice(-200)).catch(() => {});
-    }
-    // 历史库只保留最近 60 个交易日，防止数月后无限增长拖慢启动
-    const KEEP = 60;
-    if (map.size > KEEP) {
-      const keep = [...map.keys()].sort(String.localeCompare).slice(-KEEP);
-      try { await pruneHistoryKeep(keep); } catch (e) { /* 修剪失败不影响主流程 */ }
-      for (const k of [...map.keys()]) { if (!keep.includes(k)) map.delete(k); }
-    }
-    state.history = [...map.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    state.historyLoaded = true;
-    if (state.pools) computeDerived(state.pools);
-    renderCurrentView();
-    toast('历史补录完成：' + state.history.length + ' 个交易日');
-  } finally {
-    state.historyLoading = false;
-  }
-}
-
 /* ---------------- 工具 ---------------- */
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -2151,7 +2086,15 @@ async function init() {
     state.refreshMs = 8000; // 2026-09-11 一屏到底批:设置已删,固定 8 秒(同日由 5s 上调——渲染压力减 40%,用户实测新鲜度差别不大;失败退避逻辑仍在)
     bind();
     state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    state.historyLoaded = hist.length > 0;
+    // 2026-11-04: 历史库只留最近 60 个交易日（原修剪只写在零调用方的 loadHistory 里,等于没执行过）。
+    // 触发条件极罕见(每天至多一条),失败静默不影响启动。
+    if (state.history.length > 60) {
+      const keep = state.history.map((h) => String(h.date)).sort(String.localeCompare).slice(-60);
+      const keepSet = new Set(keep);
+      state.history = state.history.filter((h) => keepSet.has(String(h.date)));
+      pruneHistoryKeep(keep).catch(() => {});
+    }
+    state.historyLoaded = state.history.length > 0;
     // 快照水合：离线/弱网冷启动先显示上次成功数据（状态条标「快照」），新数据到达后替换
     if (snap && snap.pools && Array.isArray(snap.pools.up)) {
       state.pools = snap.pools;

@@ -53,8 +53,8 @@ export function todayStr(d = shanghaiNow()) {
 
 // ===== 交易日历(2026-09-13 休市批) =====
 // 与桌面 trading-calendar.js 的 BUILTIN_HOLIDAYS 同源平行副本——改表必须两端同步
-// (登记于桌面 docs/tech-debt.md)。手机端不需要桌面的 observed/overrides(靠 DB),
-// 临时休市(日历未列)靠 loadHistory 的 emptyDates 学习兜底:拉空记档,次日不再打。
+// (登记于桌面 docs/tech-debt.md)。手机端不需要桌面的 observed/overrides(靠 DB)。
+// 2026-11-04: 临时休市学习(原 loadHistory 的 emptyDates)随死函数一并删除,日历表是唯一休市依据。
 export const BUILTIN_HOLIDAYS = new Set([
   // 2025 上海/深圳证券交易所休市日(周末由算法处理)
   '20250101', '20250128', '20250129', '20250130', '20250131', '20250203', '20250204',

@@ -291,6 +291,15 @@ function monFlag(code) { // 2026-09-15 避雷批:重点监控池标记(交易所
   return mon ? '<i class="mon-flag" title="重点监控至' + esc(mon.end) + '">监</i>' : '';
 }
 
+// 2026-11-04 对齐桌面涨停天梯的板型标记:首封 ≤09:25:30 = 竞价一字板
+// (与桌面 app.js isOneWord 同阈值;THS 的 boardType 手机端拿不到,用时间兜底)。
+// N天M板 不做:手机端只有东财 zttj(如 8天4板),桌面用同花顺 high_days(如 3天3板),两源口径不同,
+// 同票会显示两个数——宁可不显,避免两端对不上。
+function oneWordTag(x) {
+  const t = String(x.firstSealTime || '');
+  return t && t <= '09:25:30' ? '<i class="oneword-flag" title="开盘即封涨停">一字</i>' : '';
+}
+
 function ztCard(x) {
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
   const pv = x.promo && x.promo.available !== false ? x.promo : null;
@@ -299,7 +308,7 @@ function ztCard(x) {
   const auc = aucInfoOf(x.code);
   return '<div class="card" data-code="' + x.code + '" data-boards="' + (x.boards || 1) + '">' + // data-boards 供板位条点格定位(2026-09-11 拆解融合批)
     '<div class="' + bcls + '">' + (x.boards || 1) + '板</div>' +
-    '<div><div class="name">' + esc(x.name) + boardTag(x.code) + monFlag(x.code) + '</div>' +
+    '<div><div class="name">' + esc(x.name) + oneWordTag(x) + boardTag(x.code) + monFlag(x.code) + '</div>' +
     '<div class="code">' + x.code + ' · ' + esc(x.industry) + (x.role && x.role !== '后排' ? ' · ' + esc(x.role) : '') + '</div>' +
     (auc ? '<div class="auc">竞价 <b class="' + pctClass(auc.pct) + '">' + pctText(auc.pct) + '</b><em>' + (auc.matched ? '撮合' : '虚拟') + '</em></div>' : '') + '</div>' +
     '<div class="right">' +
@@ -321,7 +330,7 @@ function ztStructSig(x) {
   const pv = x.promo && x.promo.available !== false ? x.promo.verdict : '';
   const auc = aucInfoOf(x.code);
   const aucKey = auc ? (auc.pct + (auc.matched ? 'm' : 'v')) : '';
-  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', pv, aucKey].join('|');
+  return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', pv, aucKey, x.firstSealTime || ''].join('|');
 }
 function pctFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.seal ?? '', x.turnover ?? ''].join('|'); }
 function downFieldSig(x) { return [x.price ?? '', x.changePct ?? '', x.turnover ?? ''].join('|'); }

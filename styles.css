@@ -751,6 +751,8 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 
 /* 2026-09-15 情报批同步:监控标记/详情警示/概念命中 */
 .mon-flag { display: inline-flex; align-items: center; height: 13px; padding: 0 3px; margin-left: 3px; border-radius: 3px; font-style: normal; font-size: 9px; font-weight: 700; line-height: 1; vertical-align: 1px; color: var(--amber, #f79009); background: rgba(247, 144, 9, .12); border: 1px solid rgba(247, 144, 9, .3); }
+/* 2026-11-04 对齐桌面天梯的板型标记:一字(竞价即封) */
+.oneword-flag { display: inline-block; padding: 0 4px; margin-left: 4px; border-radius: 3px; background: var(--up-tint); color: var(--red); font-size: 10px; font-weight: 800; font-style: normal; line-height: 13px; vertical-align: 1px; white-space: nowrap; }
 .s-risk { margin: 6px 0 2px; padding: 6px 10px; border-left: 3px solid var(--amber, #f79009); background: rgba(247, 144, 9, .08); color: var(--amber, #ffb224); font-size: 12px; border-radius: 4px; }
 .s-concepts { margin-top: 8px; }
 .con-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

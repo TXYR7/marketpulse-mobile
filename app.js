@@ -89,6 +89,47 @@ function prevDayBoards(hist, today) {
   return map;
 }
 
+/* ---------------- 「昨日」历史守卫（2026-11-04） ----------------
+   历史库只有「打开过 app 的交易日」才有记录。几天没开就开 app 时，所有按
+   「最近一条早于今日」取昨日的消费方（loadGap 预期差 / prevDayBoards / 晋级率 /
+   promoContextOf 的 prevDay）都会把几天前的池当昨日用——数字不报错但前提错了。
+   这里只补拉「真正的前一交易日」一天（不是原 loadHistory 的 45 天批量）：通常命中历史
+   直接返回，缺才发 1 次请求；失败 5 分钟内不重试，避免弱网下每轮刷新都打接口。 */
+function previousTradingDayKey(dateKey) {
+  const key = String(dateKey || '');
+  if (!/^\d{8}$/.test(key)) return '';
+  const d = new Date(Number(key.slice(0, 4)), Number(key.slice(4, 6)) - 1, Number(key.slice(6, 8)));
+  d.setDate(d.getDate() - 1);
+  const prev = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  return lastTradingDate(prev);
+}
+let prevHistoryInflight = null;
+let prevHistoryRetryAt = 0;
+async function ensurePrevHistory(dateKey) {
+  const prevKey = previousTradingDayKey(dateKey);
+  if (!prevKey || prevKey >= String(dateKey)) return false;
+  if ((state.history || []).some((h) => String(h.date) === prevKey)) return false;
+  if (Date.now() < prevHistoryRetryAt) return false;
+  if (prevHistoryInflight) return prevHistoryInflight;
+  prevHistoryInflight = (async () => {
+    try {
+      const p = await fetchPools(prevKey, { tries: 2, timeoutMs: 8000 });
+      const ups = p.up || [];
+      if (!ups.length) { prevHistoryRetryAt = Date.now() + 5 * 60_000; return false; }
+      const rec = { date: prevKey, stocks: ups.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
+      await putHistory(rec);
+      state.history = [...(state.history || []).filter((h) => String(h.date) !== prevKey), rec].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      state.historyLoaded = true;
+      histMemo = { key: '', promo: null, prevBoards: null, prevStocks: [] }; // 历史变了，派生记忆失效
+      return true;
+    } catch {
+      prevHistoryRetryAt = Date.now() + 5 * 60_000;
+      return false;
+    }
+  })().finally(() => { prevHistoryInflight = null; });
+  return prevHistoryInflight;
+}
+
 function deriveSig(pools) {
   const up = pools.up || [];
   const hist = state.history || [];
@@ -1524,6 +1565,16 @@ async function refresh(force = false) {
     if (!state.monitorPool) refreshMonitorPool(); // 2026-09-15 避雷批:首次池成功后拉一次(30 分钟 TTL 内不重拉;失败静默)
     renderStatus();
     renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
+    // 2026-11-04: 历史里缺「真正的前一交易日」时后台补一天（通常已存在，直接返回）。
+    // 补到后清掉按旧历史算出的预期差缓存并重算/重渲染，保证「昨日」口径正确。
+    ensurePrevHistory(pools.date).then((added) => {
+      if (!added || state.pools !== pools) return;
+      state.gap = null; state.gapDate = null;
+      state.prevPremium = null;
+      computeDerived(pools);
+      renderStatus();
+      renderCurrentView();
+    }).catch(() => {});
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});

@@ -20,7 +20,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
+node scripts/build-worker.mjs
+if errorlevel 1 goto fail
+call npm test
+if errorlevel 1 goto fail
 node scripts/bump-sw.mjs
+if errorlevel 1 goto fail
 echo === Adding files ===
 git add -A
 if errorlevel 1 goto fail

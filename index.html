@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="icon" href="icons/icon-192.png" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=mp-mobile-20261109-3" />
     <link rel="preconnect" href="https://push2ex.eastmoney.com" />
     <link rel="preconnect" href="https://push2.eastmoney.com" />
     <link rel="preconnect" href="https://push2his.eastmoney.com" />
@@ -36,6 +36,7 @@
           <!-- 2026-09-12 合并批:更新时间并入日期(同属时间信息);阶段只留星脉旁徽标一处(横幅「风险」chip 与之重复且误标) -->
           <span class="date"><span id="dateLabel">--</span><b class="fresh-at" id="freshAt"></b></span>
           <button class="refresh-btn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题"><svg class="ic ic-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="ic ic-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></button>
+          <button class="refresh-btn" id="notifyBtn" type="button" title="通知设置" aria-label="通知设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg></button>
           <button class="refresh-btn" id="refreshBtn" title="刷新" aria-label="刷新"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v5h-5"/></svg></button>
         </div>
       </div>
@@ -131,6 +132,40 @@
 
     <div class="toast" id="toast" role="status"></div>
 
-    <script src="app.js" type="module"></script>
+    <dialog id="notifyDialog" class="notify-dialog" aria-labelledby="notifyTitle">
+      <div class="notify-head"><h2 id="notifyTitle">打板通知</h2><button id="notifyClose" type="button" aria-label="关闭通知设置">关闭</button></div>
+      <p class="notify-note">首板、连板、回封均覆盖。临板3档以内重点提醒，消息20秒后过期；手机后台由浏览器安排，不能保证锁屏及时。</p>
+      <div class="notify-grid">
+        <label class="notify-wide"><input id="notifyEnabled" type="checkbox" /> 开启手机提醒</label>
+        <label class="notify-wide">推送来源<select id="notifySource"><option value="phone">手机独立发送</option><option value="desktop">电脑发送，手机只看页面提醒</option></select></label>
+        <label class="notify-wide">ntfy主题地址<input id="notifyUrl" type="url" placeholder="https://ntfy.sh/你的主题" autocomplete="off" /></label>
+        <label><input id="notifyDiscover" type="checkbox" /> 全市场打板发现</label>
+        <label><input id="notifyAuction" type="checkbox" /> 竞价观察（默认关）</label>
+        <label><input id="notifyAllRisk" type="checkbox" /> 全监控池封单风险</label>
+        <label><input id="notifyLocal" type="checkbox" /> 浏览器通知兜底</label>
+        <label><input id="notifySound" type="checkbox" /> 兜底声音</label>
+        <label><input id="notifyVibrate" type="checkbox" /> 兜底震动</label>
+        <label class="notify-wide">持仓或特别关注的代码<input id="notifyRiskCodes" type="text" inputmode="text" placeholder="600001,000001" /></label>
+      </div>
+      <p class="notify-note">封单风险默认只报今天进入临板观察的股票和上方代码。配置ntfy后，浏览器通知、声音和震动不再同时触发；请在ntfy App订阅同一主题。</p>
+      <p class="notify-note">两端使用同一主题时，只保留一端自动推送，避免电脑和手机各发一次。此页只修改当前手机，电脑推送由电脑设置控制。</p>
+      <div class="notify-actions"><button id="notifySave" type="button" class="notify-primary">保存</button><button id="notifyTest" type="button">发送测试</button><button id="notifyPermission" type="button">浏览器通知授权</button></div>
+      <p id="notifyResult" class="notify-note" role="status" aria-live="polite"></p><p id="notifyStatus" class="notify-note" role="status" aria-live="polite"></p>
+    </dialog>
+
+    <script>
+      // 旧外壳也能先检查新Worker，避免旧app.js缓存阻断模块升级。
+      if ('serviceWorker' in navigator) {
+        const hadController = !!navigator.serviceWorker.controller;
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!hadController || reloaded) return;
+          reloaded = true; location.reload();
+        });
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+          .then(registration => registration.update()).catch(() => {});
+      }
+    </script>
+    <script src="app.js?v=mp-mobile-20261109-3" type="module"></script>
   </body>
 </html>

@@ -16,7 +16,7 @@ function open() {
       if (!db.objectStoreNames.contains('reviews')) db.createObjectStore('reviews', { keyPath: 'date' });
       if (!db.objectStoreNames.contains('history')) db.createObjectStore('history'); // key = YYYYMMDD -> {date, stocks:[{code,boards,industry,name}]}
     };
-    req.onsuccess = () => { _db = req.result; res(_db); };
+    req.onsuccess = () => { _db = req.result; _db.onversionchange=()=>{_db.close();_db=null;}; res(_db); };
     req.onerror = () => rej(req.error);
   });
 }
@@ -77,6 +77,24 @@ export async function setKV(k, v) {
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
   });
+}
+
+// 在同一IDB事务里读取并修改KV，页面与Service Worker不会互相覆盖。
+export async function atomicKV(keys, update) {
+  const db=await open();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('kv','readwrite'),store=tx.objectStore('kv'),values={};let remaining=keys.length,result;
+    function apply(){
+      try{const changed=update(values) || {};result=changed.result;for(const [key,value]of Object.entries(changed.values || {}))store.put(value,key);}
+      catch(error){tx.abort();reject(error);}
+    }
+    tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error || new Error('本地事务已取消'));
+    if(!remaining)apply();
+    for(const key of keys){const request=store.get(key);request.onsuccess=()=>{values[key]=request.result;if(--remaining===0)apply();};request.onerror=()=>{tx.abort();};}
+  });
+}
+export async function updateKV(key, update, fallback) {
+  return atomicKV([key],values=>{const next=update(values[key] ?? fallback);return {values:{[key]:next},result:next};});
 }
 
 /* ---------- 交易流水 ---------- */

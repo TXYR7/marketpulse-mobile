@@ -757,3 +757,33 @@ html[data-theme="light"] .tier-badge.B { color: #2563eb; }
 .s-concepts { margin-top: 8px; }
 .con-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .con-tag { padding: 2px 8px; border-radius: 4px; background: var(--teal-soft, rgba(59, 130, 246, .08)); color: var(--teal-strong, #60a5fa); font-size: 11px; }
+
+/* 打板通知设置：轻量弹层，不新增页面导航。 */
+.notify-dialog { width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); overflow: auto; box-sizing: border-box; }
+.notify-dialog::backdrop { background: rgba(0,0,0,.65); }
+.notify-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.notify-head h2 { font-size:18px; margin:0; }
+.notify-dialog button { min-height:40px; padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:var(--surface-2); color:var(--ink); font:inherit; cursor:pointer; }
+.notify-dialog button:disabled { opacity:.55; cursor:wait; }
+.notify-dialog .notify-primary { background:var(--fill-teal); border-color:var(--fill-teal); color:#fff; }
+.notify-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:16px 0; }
+.notify-grid label { font-size:14px; min-width:0; }
+.notify-wide { grid-column:1/-1; }
+.notify-grid input[type=url],.notify-grid input[type=text],.notify-grid select { display:block; width:100%; box-sizing:border-box; margin-top:6px; min-height:40px; padding:8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); font:inherit; }
+.notify-grid input[type=checkbox] { accent-color:var(--teal); }
+.notify-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.notify-note { color:var(--muted); font-size:12px; line-height:1.6; margin:10px 0; overflow-wrap:anywhere; }
+.notify-degraded { color:var(--amber) !important; }
+@media (max-width:340px) { .notify-grid { grid-template-columns:1fr; } }
+/* 顶部保留44px点击区域，日期分两行，避免新增通知按钮挤出窄屏。 */
+.topbar-row { gap:6px; }
+.topbar-row > div:first-child { flex-shrink:0; }
+.topbar-row > div:last-child { flex-shrink:0; gap:4px !important; }
+.topbar-row .date { display:flex; flex-direction:column; align-items:flex-end; gap:0; white-space:nowrap; }
+.topbar-row .fresh-at { display:block; margin-left:0; }
+@media (max-width:360px) {
+ .topbar-row .brand { max-width:70px; flex-wrap:wrap; column-gap:6px; row-gap:0; }
+ .topbar-row .phase-badge { flex-basis:100%; box-sizing:border-box; max-width:100%; margin-left:0; text-align:center; }
+}
+@supports (height:100dvh) { .notify-dialog { max-height:calc(100dvh - 32px); } }
+.topbar .status-strip { margin-left:0; margin-right:0; max-width:100%; box-sizing:border-box; }

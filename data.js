@@ -476,36 +476,19 @@ export async function searchStock(q) {
 // 腾讯 qt.gtimg.cn 的 ~ 分隔字段:f[3]现价 f[4]昨收 f[5]今开 f[9]买一价 f[10]买一量(手)
 // f[19]卖一价 f[20]卖一量(手) f[30]时间戳。涨停时买一量=封单量,跌停时卖一量=跌停封单量。
 // 返回 { code: {price, prevClose, open, bid1Vol, ask1Vol, stamp} };失败返回 {} 由调用方跳过。
-export async function fetchTencentQuotes(codes = []) {
-  const out = {};
-  const list = (codes || []).map(String).filter(Boolean);
-  for (let i = 0; i < list.length; i += 60) {
-    if (i > 0) await new Promise((r) => setTimeout(r, 100));
-    const symbols = list.slice(i, i + 60).map((code) => {
-      const c = String(code)[0];
-      const prefix = c === '6' || c === '5' ? 'sh' : c === '4' || c === '8' || c === '9' ? 'bj' : 'sz';
-      return prefix + code;
-    });
-    try {
-      const res = await fetch(`https://qt.gtimg.cn/q=${symbols.join(',')}`, {
-        headers: { referer: 'https://gu.qq.com/' }, signal: AbortSignal.timeout(8_000)
-      });
-      if (!res.ok) continue;
-      const text = await res.text(); // GBK 文本,数字字段不受影响
-      for (const line of text.split('\n')) {
-        const m = line.match(/v_([a-z]{2}\d{6})="([^"]*)"/);
-        if (!m) continue;
-        const f = m[2].split('~');
-        const code = m[1].slice(2);
-        const num = (v) => (v === '' || v === undefined || Number(v) < 0 ? null : Number(v));
-        out[code] = {
-          price: num(f[3]), prevClose: num(f[4]), open: num(f[5]),
-          bid1Vol: num(f[10]), ask1Vol: num(f[20]), stamp: String(f[30] || '')
-        };
+export async function fetchTencentQuotes(codes = [], {timeoutMs=2500,concurrency=2}={}) {
+  const out={},list=(codes || []).map(String).filter(Boolean),chunks=[];
+  for(let i=0;i<list.length;i+=60)chunks.push(list.slice(i,i+60));let next=0;
+  const worker=async()=>{while(next<chunks.length){const chunk=chunks[next++],symbols=chunk.map(code=>(code[0]==='6'||code[0]==='5'?'sh':/^[489]/.test(code)?'bj':'sz')+code);
+    try{const response=await fetch(`https://qt.gtimg.cn/q=${symbols.join(',')}`,{signal:AbortSignal.timeout(timeoutMs)});if(!response.ok)continue;
+      const text=new TextDecoder('gb18030').decode(await response.arrayBuffer());
+      for(const line of text.split('\n')){const match=line.match(/v_([a-z]{2}\d{6})="([^"]*)"/);if(!match)continue;const fields=match[2].split('~'),code=match[1].slice(2);
+        const num=value=>value===''||value==null||!Number.isFinite(Number(value))||Number(value)<0?null:Number(value);
+        out[code]={name:fields[1] || code,price:num(fields[3]),prevClose:num(fields[4]),open:num(fields[5]),bid1Price:num(fields[9]),bid1Vol:num(fields[10]),ask1Price:num(fields[19]),ask1Vol:num(fields[20]),stamp:String(fields[30] || '')};
       }
-    } catch { /* 单块失败跳过,其余块仍可用 */ }
-  }
-  return out;
+    }catch{ /* 单块失败保留其他报价 */ }
+  }};
+  await Promise.all(Array.from({length:Math.min(Math.max(1,Math.min(2,concurrency)),chunks.length)},worker));return out;
 }
 
 /* ---------------- 集合竞价（push2his trends/get 免费源，与桌面 server.js 同口径） ---------------- */

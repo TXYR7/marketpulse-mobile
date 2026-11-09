@@ -199,14 +199,14 @@ console.log('[B8] 版本一致性（sw.js CACHE ↔ version.js APP_VERSION）');
 console.log('[B9] 整文件语法护栏（vm.SourceTextModule 只编译不执行）');
 {
   ok('vm.SourceTextModule 可用（需 --experimental-vm-modules，用 npm test 跑）', typeof vm.SourceTextModule === 'function');
-  const files = ['app.js', 'analytics.js', 'views.js', 'views-extra.js', 'data.js', 'store.js', 'version.js'];
+  const files = ['app.js','analytics.js','views.js','views-extra.js','data.js','store.js','version.js','sw.js','board-alerts.js','notify.js','mobile-alerts.js','mobile-worker.js'];
   const broken = [];
   for (const f of files) {
     const src = readFileSync(new URL('../' + f, import.meta.url), 'utf8');
     try { new vm.SourceTextModule(src, { identifier: f }); } catch (e) { broken.push(f + ': ' + e.message); }
   }
   if (broken.length) console.error('  语法错误明细：\n    ' + broken.join('\n    '));
-  ok('7 个运行时 JS 文件全部通过模块语法编译', broken.length === 0);
+  ok('12 个运行时 JS 文件全部通过模块语法编译', broken.length === 0);
 }
 
 console.log('[B10] 批B/D3 优化项（gap 缓存策略 / K线缓存复用 / 搜索价格 / token / 信号通知）');
@@ -573,78 +573,13 @@ console.log('[B21] 休市批检查批:mergePools date 必须是字符串(qdate �
   ok('buildAuctionWatchlist 空竞价返回 unavailable', buildAuctionWatchlist({ auction: { available: false } }).available === false);
 }
 
-// 2026-10-24 封板前预警结构哨兵:两个「必须刷新才推」的根因不能回潮
+// 通知的行为回归在 scripts/mobile-alerts.test.mjs 中；这里只保留资源接线检查。
 {
-  const appSrc = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
-  const swSrc = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
-  const dataSrc = readFileSync(new URL('../data.js', import.meta.url), 'utf8');
-  const viewsSrc = readFileSync(new URL('../views.js', import.meta.url), 'utf8');
-  const analyticsSrc = readFileSync(new URL('../analytics.js', import.meta.url), 'utf8');
-  // 2026-10-26 与网页同批:机会分展示/排序用未取整归一化分,同分按封单比,不再按代码随机。
-  ok('机会分与网页同口径:未取整归一化分展示 + 封单比排序', /scoreNormExact/.test(analyticsSrc) && /sealRatio/.test(analyticsSrc)
-    && /scoreNormExact/.test(viewsSrc) && /sealRatio/.test(viewsSrc) && /oppScoreText\(x\)/.test(viewsSrc)
-    && /oppSortList\(/.test(viewsSrc) && /oppScoreText\(x\) \+ ':'/.test(viewsSrc));
-  ok('detectPreSeal 不再挂在 computeDerived 派生链里(派生签名早退会饿死检测)', !/\n\s*detectPreSeal\(\);/.test(appSrc));
-  ok('封板前预警有独立 15s 定时器', /setInterval\(\(\) => \{ preSealTick\(\)\.catch/.test(appSrc));
-  ok('监控名单取上一交易日涨停池,不回退今日涨停池', /preSealPrevTradingDate/.test(appSrc) && /上一交易日涨停池/.test(appSrc));
-  ok('核心名单含今日炸板 + 竞价候选', /state\.pools\?\.broken/.test(appSrc) && /buildAuctionWatchlist/.test(appSrc));
-  ok('全市场层:涨幅榜前300 + 摘要推送(不逐票刷屏)', /fetchTopGainers\(300\)/.test(appSrc) && /preSealMarketCandidates/.test(appSrc) && /pushPreSealDigest/.test(appSrc));
-  ok('竞价预扫 9:26-9:29(避开 9:25 未定稿数据)', /minutes >= 566 && minutes < 570/.test(appSrc));
-  ok('全市场摘要竞价段只发一条', /auctionSent/.test(appSrc));
-  ok('摘要重复与核心层同口径:按票记涨幅/时间,回落≥3pp+20分钟', /preSealDigest\.byCode/.test(appSrc) && /saved\.byCode/.test(appSrc)
-    && /resetOffset = Number\(p\.repeatResetOffsetPct\)/.test(appSrc) && /now - s\.lastAt >= minInterval/.test(appSrc)
-    && /eligible\.length/.test(appSrc));
-  ok('ntfy 推送失败重试 2 次(1s/2s+8s超时+429不重试),页面与 SW 同口径', /attempt < 3/.test(appSrc) && /attempt < 3/.test(swSrc)
-    && /attempt === 1 \? 1000 : 2000/.test(appSrc) && /attempt === 1 \? 1000 : 2000/.test(swSrc)
-    && /AbortSignal\.timeout\(8_000\)/.test(appSrc) && /AbortSignal\.timeout\(8_000\)/.test(swSrc));
-  ok('涨幅榜东财失败时走新浪兜底(GBK 解码)', /fetchTopGainers/.test(appSrc) && /fetchTopGainers/.test(swSrc) && /fetchSinaTopGainers/.test(dataSrc) && /TextDecoder\('gbk'\)/.test(dataSrc));
-  // 东财 clist 会把 pz 截到 100(2026-10-26 实测请求 300 仍只回 100):必须分页,否则每轮都判「不足」白打新浪。
-  ok('涨幅榜分页:每页固定 100(接口上限),页面与 SW 同源', /const RANK_PAGE_SIZE = 100/.test(dataSrc)
-    && /pageSize: RANK_PAGE_SIZE/.test(dataSrc) && /for \(let page = 1; page <= Math\.ceil\(limit \/ RANK_PAGE_SIZE\)/.test(dataSrc)
-    && !/pageSize: 300/.test(appSrc) && !/pageSize: 300/.test(swSrc));
-  ok('涨幅榜主源中断/兜底失败都保留已抓到的行', /catch \{ break; \} \/\/ 主源中断/.test(dataSrc)
-    && /catch \{ break; \} \/\/ 单页失败保留已抓到的行/.test(dataSrc));
-  ok('精确涨停价判定(按昨收算到分)', /limitPriceOf\(/.test(appSrc) && /limitPriceOf\(/.test(swSrc));
-  ok('急拉单条文案不重复股票名(标题/正文已各带一次)', !/\$\{label\} 30秒急拉/.test(appSrc));
-  ok('炸板回封(受重复提醒约束,页面与 SW 同口径)', /kind: 'reseal'/.test(appSrc) && /kind: 'reseal'/.test(swSrc) && /resealTriggerOffsetPct/.test(appSrc));
-  ok('重复提醒账本持久化(KV),回落重置+20分钟才重复', /preSealRepeat/.test(appSrc) && /preSealRepeat/.test(swSrc)
-    && /preSealCanAlert/.test(appSrc) && /resetReady/.test(appSrc) && /resetReady/.test(swSrc));
-  ok('核心推送全局节流(15s 一条,多事件合并)', /function pushCoreEvents/.test(appSrc) && /preSealCoreBacklog/.test(appSrc) && /function firePreSealBatch/.test(appSrc));
-  ok('不再有单日次数/条数硬上限', !/maxAlertsPerDay/.test(appSrc) && !/maxDigestPerDay/.test(appSrc));
-  ok('SW 后台读写页面库 mp-mobile(不再是孤立的 mp-preseal-bg 库)', /const PAGE_DB = 'mp-mobile'/.test(swSrc) && !/PRESEAL_DB = 'mp-preseal-bg'/.test(swSrc));
-  ok('SW 后台按实时报价+精确涨停价判定', /bgFetchQuotes/.test(swSrc) && /detectPreSealAlerts/.test(swSrc));
-  // 2026-10-30 推送文案两端对齐(桌面 93b6eaa/1f67d18,手机此前未跟):
-  ok('推送口径对齐桌面:离板还差X%(不再是距涨停Xpp),页面+SW 两处平行实现同改',
-    /离板还差 \$\{gap\}%/.test(appSrc) && /离板还差 \$\{gap\}%/.test(swSrc)
-    && !/距涨停 \$\{gap\}pp/.test(appSrc) && !/距涨停 \$\{gap\}pp/.test(swSrc));
-  ok('ntfy 标题去 MarketPulse 前缀(对齐桌面 93b6eaa)', !/MarketPulse · \$\{/.test(appSrc) && !/MarketPulse · \$\{/.test(swSrc));
-  ok('摘要正文对齐桌面:名字 +X% 离板还差 Y%(成交 Z)', /离板还差 \$\{c\.gapPct\}%/.test(appSrc));
-  // 2026-10-30 补桌面 1f67d18 竞价早段异动推送(手机此前完全没有):
-  ok('竞价异动推送常量化 auctionSurgePct 入 PARAM_MANIFEST(与桌面同值 3)', PARAM_MANIFEST.preSealAlert.auctionSurgePct === 3);
-  ok('maybePushAuctionSurge 存在于 app.js 且仅 live 采集后触发', /function maybePushAuctionSurge/.test(appSrc)
-    && /if \(mode === 'live'\) maybePushAuctionSurge\(result\)/.test(appSrc));
-  ok('竞价一字/抢筹标题与桌面 1f67d18 逐字一致(不带前缀)', /竞价一字 · \$\{label\}/.test(appSrc)
-    && /竞价抢筹 · \$\{label\} \+\$\{livePct\}%/.test(appSrc) && /一字封死/.test(appSrc) && /万手/.test(appSrc));
-  ok('竞价异动同票只报一次(按天重置 auctionSurgeState)', /auctionSurgeState\.alerted\.has\(code\)/.test(appSrc)
-    && /auctionSurgeState = \{ date: today, alerted: new Set\(\) \}/.test(appSrc));
-  ok('竞价异动只推昨日涨停核心票(result.core,不是全市场)', /for \(const c of result\.core \|\| \[\]\)/.test(appSrc));
-  // 2026-10-30 封单预警批:开板/封单骤减(与桌面 e9b37c7/3ae85e2 对齐)
-  ok('手机腾讯报价解析买一/卖一量(封单量唯一实时源,东财 ulist 无盘口)', /fetchTencentQuotes/.test(dataSrc)
-    && /bid1Vol: num\(f\[10\]\)/.test(dataSrc) && /ask1Vol: num\(f\[20\]\)/.test(dataSrc));
-  ok('手机 PARAM_MANIFEST 登记封单骤减阈值(与桌面同值)',
-    PARAM_MANIFEST.preSealAlert.sealShrinkPct === 30 && PARAM_MANIFEST.preSealAlert.sealShrinkMinHands === 3000
-    && /sealShrinkWindowMs/.test(analyticsSrc) === false); // 2026-10-30 晚退役(锚点递增取代采样窗口)
-  ok('手机涨停开板+封单骤减:sealed→破封推一次,锚点递增基线', /kind: 'sealOpen'/.test(appSrc)
-    && /kind: 'sealShrink'/.test(appSrc) && /st\.sealShrinkAnchor/.test(appSrc) && /st\.openPushed/.test(appSrc));
-  ok('手机开板/封单事件并入 accepted 流(self-gated 豁免价格类重复闸)', /\.\.\.resealEvents, \.\.\.openEvents\]/.test(appSrc)
-    && /selfGatedKinds/.test(appSrc));
-  ok('手机推送逻辑自查修:竞价对称/批量不截断/回封豁免闸', /'sealOpen', 'sealShrink', 'reseal'/.test(appSrc)
-    && !/另有 \$\{events\.length - 8\} 只/.test(appSrc)
-    && !/accepted\.slice\(0, 8\)/.test(swSrc));
-  ok('手机批量标题按事件类型如实汇总(与桌面 preSealBatchLabel 同口径)', /function preSealBatchLabel/.test(appSrc)
-    && /pushNtfy\(label, \[\.\.\.lines/.test(appSrc));
-  ok('手机 ntfy 429 限流不重试', /res\.status === 429\) \{ console\.warn\('\[C3\] ntfy 限流\(429\),不重试'/.test(appSrc));
-  ok('手机推送文案覆盖涨停侧(与桌面 pushPreSeal 逐字一致)', /涨停开板（现/.test(appSrc) && /封单骤减 \$\{shrink\}%（剩 \$\{hands\}）/.test(appSrc));
+ const appSrc=readFileSync(new URL('../app.js',import.meta.url),'utf8'),swSrc=readFileSync(new URL('../sw.js',import.meta.url),'utf8');
+ ok('手机页面接入共享打板通知模块', /createMobileAlerts/.test(appSrc)&&/preSealTick/.test(appSrc));
+ ok('后台使用生成的经典Worker，不使用被SW禁止的动态导入', /importScripts/.test(swSrc)&&/mobile-worker.js/.test(swSrc)&&!/await import\(/.test(swSrc));
+ ok('新通知模块全部纳入离线外壳', ['board-alerts.js','notify.js','mobile-alerts.js','mobile-worker.js'].every(file=>swSrc.includes(file)));
+ ok('手机仍只保留原盘中页，通知设置是轻量弹层', /id="notifyDialog"/.test(readFileSync(new URL('../index.html',import.meta.url),'utf8')));
 }
 
 console.log(`\nAll ${pass} smoke checks passed.`);

@@ -1,6 +1,4 @@
-/* 手机工作区：中性灰、蓝色操作、竖向阅读与底部导航。 */
-:root { --bg:#09090b; --surface:#18181b; --surface-2:#27272a; --surface-raised:#27272a; --surface-glass:#18181b; --surface-raise:#202023; --line:#3f3f46; --line-soft:#27272a; --ink:#fafafa; --muted:#a1a1aa; --teal:#60a5fa; --teal-strong:#60a5fa; --data-ink:#60a5fa; --data-soft:rgba(59,130,246,.1); --pos-ink:#34d399; --red:#f87171; --green:#34d399; --amber:#fbbf24; --r-s:6px; --r-m:10px; --r-l:16px; --fs:14px; --chart-ma5:#fbbf24; --chart-ma10:#60a5fa; --chart-ma20:#c4b5fd; }
-html[data-theme="light"] { --bg:#f4f4f5; --surface:#fff; --surface-2:#f4f4f5; --surface-raised:#f4f4f5; --surface-glass:#fff; --surface-raise:#f4f4f5; --line:#d4d4d8; --line-soft:#e4e4e7; --ink:#18181b; --muted:#52525b; --teal:#2563eb; --teal-strong:#2563eb; --data-ink:#2563eb; --data-soft:rgba(37,99,235,.07); --pos-ink:#15803d; --red:#dc2626; --green:#15803d; --amber:#a16207; --chart-ma5:#a16207; --chart-ma10:#2563eb; --chart-ma20:#7c3aed; }
+/* 手机工作区：竖向阅读与底部导航；颜色由网页共享主题提供。 */
 html:not([data-theme="light"]) body, html:not([data-theme="light"]) .topbar { background:var(--bg); background-image:none; }
 html:not([data-theme="light"]) body::before, html:not([data-theme="light"]) body::after, html:not([data-theme="light"]) .topbar::before, html:not([data-theme="light"]) .topbar::after { display:none; }
 [hidden] { display:none !important; }

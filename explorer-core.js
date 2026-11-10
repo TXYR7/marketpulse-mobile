@@ -85,8 +85,8 @@ export function snapshotMetaText(data, fallbackSource = '') {
 }
 
 // 同页单飞、限时等待；失败保留最后成功数据，后台重建最多追查三次。
-export function createExplorerLoader({ url, fetcher = (...args) => fetch(...args), onData, onStatus = () => {}, schedule = setTimeout }) {
-  let pending = null, timer = null, lastData = null;
+export function createExplorerLoader({ url, fetcher = (...args) => fetch(...args), onData, onStatus = () => {}, schedule = setTimeout, now = Date.now }) {
+  let pending = null, timer = null, lastData = null, loadedAt = 0;
   function load(refresh = false, attempt = 0) {
     if (pending) return pending;
     if (timer) { clearTimeout(timer); timer = null; }
@@ -97,6 +97,7 @@ export function createExplorerLoader({ url, fetcher = (...args) => fetch(...args
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const data = await response.json();
         lastData = data;
+        loadedAt = now();
         onData(data);
         onStatus(data.refreshError ? 'error' : data.pendingRefresh ? 'pending' : 'ready', data);
         if (data.pendingRefresh && !data.refreshError && attempt < 3) timer = schedule(() => { timer = null; load(false, attempt + 1); }, 6000);
@@ -110,5 +111,11 @@ export function createExplorerLoader({ url, fetcher = (...args) => fetch(...args
     })();
     return pending;
   }
-  return { load };
+  function enter() {
+    if (pending) return pending;
+    // 切回页面复用最近快照；保留后台重建追查计时器，手动更新仍直接请求。
+    if (lastData && (timer || (!lastData.refreshError && now() - loadedAt < 60_000))) return Promise.resolve(lastData);
+    return load();
+  }
+  return { load, enter };
 }

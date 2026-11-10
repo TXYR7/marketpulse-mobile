@@ -1,0 +1,196 @@
+/* 星脉矿物色：只覆盖品牌、界面材质和非方向性数据色。
+   涨跌、盈亏、风险、情绪阶段、交易所角标与均线保留 tokens.css 的业务色。 */
+:root, html[data-theme="light"] {
+  --brand-gold: #d7b36a;
+  --brand-gold-ink: #e0be7e;
+  --brand-gold-fill: #8b672d;
+  --brand-copper: #e29b75;
+  --brand-copper-ink: #edaa87;
+  --brand-copper-fill: #9e4f2b;
+  --brand-amber: #e7be63;
+  --brand-amber-ink: #efd087;
+  --brand-amber-fill: #87611a;
+  --brand-jade: #9fbd98;
+  --brand-jade-ink: #b1cba9;
+  --brand-jade-fill: #506c47;
+  --brand-rose: #dd8eab;
+  --brand-rose-ink: #e9a7bd;
+  --brand-rose-fill: #9b435e;
+  --brand-plum: #c3a0b7;
+  --brand-plum-ink: #d1b0c5;
+  --brand-plum-fill: #79516c;
+  --brand-olive: #a8bc93;
+  --brand-olive-ink: #bacba8;
+  --brand-olive-fill: #596f3c;
+  --brand-mauve: #bfa7c6;
+  --brand-mauve-ink: #ccb7d2;
+  --brand-mauve-fill: #815c87;
+  --brand-clay: #d3ac7e;
+  --brand-clay-ink: #dfbd94;
+  --brand-clay-fill: #8d6635;
+  --brand-slate: #a5bab0;
+  --brand-slate-ink: #b7c9bf;
+  --brand-slate-fill: #4f7463;
+  --brand-stone: #c4b69d;
+  --brand-stone-ink: #d2c6b1;
+  --brand-stone-fill: #796c53;
+  --brand-constellation: #b6ad8b;
+  --brand-star: #f1d59d;
+  --brand-metal-light: #fff0d4;
+  --brand-metal-dark: #694936;
+
+  --tsp-base: 30 9% 6%;
+  --tsp-surface: 30 8% 10%;
+  --tsp-elevated: 34 10% 14%;
+  --tsp-border: 34 12% 22%;
+  --tsp-fg-primary: 38 35% 94%;
+  --tsp-fg-secondary: 36 16% 73%;
+  --tsp-fg-muted: 34 10% 62%;
+  --tsp-accent: 40 56% 63%;
+  --canvas: #11100e;
+  --surface: #1b1916;
+  --surface-2: #25221d;
+  --surface-3: #302b24;
+  --ink: #e3ddd2;
+  --ink-strong: #f4eee4;
+  --muted: #bfb5a7;
+  --muted-2: #aaa091;
+  --line: #3a342c;
+  --line-soft: #302b25;
+  --control-line: #50473b;
+  --hover-bg: #302a22;
+  --selection-bg: #322a20;
+  --surface-glass: color-mix(in srgb, var(--surface) 95%, transparent);
+  --panel-dark: var(--surface);
+  --chart-tooltip-surface: color-mix(in srgb, var(--surface) 97%, transparent);
+  --chart-tooltip-ink: var(--ink-strong);
+  --chart-tooltip-line: var(--line);
+  --chart-info-surface: color-mix(in srgb, var(--surface-2) 85%, transparent);
+  --chart-text: var(--muted-2);
+  --chart-strong: var(--ink-strong);
+  --chart-grid: color-mix(in srgb, var(--line) 66%, transparent);
+  --chart-guide: color-mix(in srgb, var(--muted) 40%, transparent);
+  --chart-border: var(--line);
+  --chart-indigo: var(--brand-plum);
+  --chart-cyan: var(--brand-slate);
+  --chart-pink: var(--brand-rose);
+  --chart-violet: var(--brand-mauve);
+  --tier-s: var(--brand-gold-ink);
+  --tier-s-soft: color-mix(in srgb, var(--brand-gold) 12%, transparent);
+  --tier-a: var(--brand-plum-ink);
+  --tier-a-soft: color-mix(in srgb, var(--brand-plum) 12%, transparent);
+  --on-accent: #fffaf2;
+}
+html[data-theme="light"] {
+  --brand-gold: #977124;
+  --brand-gold-ink: #76551b;
+  --brand-gold-fill: #846026;
+  --brand-copper: #b7643b;
+  --brand-copper-ink: #9b4826;
+  --brand-copper-fill: #9b4826;
+  --brand-amber: #94661a;
+  --brand-amber-ink: #7b5211;
+  --brand-amber-fill: #87611a;
+  --brand-jade: #507451;
+  --brand-jade-ink: #416343;
+  --brand-jade-fill: #506c47;
+  --brand-rose: #ae506a;
+  --brand-rose-ink: #95405b;
+  --brand-rose-fill: #9b435e;
+  --brand-plum: #855b77;
+  --brand-plum-ink: #775069;
+  --brand-plum-fill: #79516c;
+  --brand-olive: #596f3c;
+  --brand-olive-ink: #4b6134;
+  --brand-mauve: #815c87;
+  --brand-mauve-ink: #735078;
+  --brand-clay: #8d6635;
+  --brand-clay-ink: #7a5429;
+  --brand-slate: #4f7463;
+  --brand-slate-ink: #416453;
+  --brand-stone: #796c53;
+  --brand-stone-ink: #6b5e48;
+  --brand-constellation: #7d714e;
+  --brand-star: #a56b28;
+  --brand-metal-light: #e7d1ac;
+  --brand-metal-dark: #4b3427;
+  --tsp-base: 40 31% 95%;
+  --tsp-surface: 40 100% 99%;
+  --tsp-elevated: 40 29% 91%;
+  --tsp-border: 38 21% 80%;
+  --tsp-fg-primary: 33 15% 15%;
+  --tsp-fg-secondary: 35 15% 36%;
+  --tsp-fg-muted: 34 10% 43%;
+  --tsp-accent: 40 62% 37%;
+  --canvas: #f5f2ec;
+  --surface: #fffdf9;
+  --surface-2: #eee9df;
+  --surface-3: #e6dfd2;
+  --ink: #383127;
+  --ink-strong: #2b2620;
+  --muted: #655d52;
+  --muted-2: #6d655a;
+  --line: #d8d0c3;
+  --line-soft: #e7e0d5;
+  --control-line: #b3a793;
+  --hover-bg: #eae3d7;
+  --selection-bg: #e9dfcd;
+}
+
+/* 共用入口、弹层与每个工作区分别继承自己的矿物主色。 */
+:root, html[data-theme="light"], :is(#vitalsView, #boardView, #heatView, #sectorsView, #hotrankView, #advisorView, #tradesView, #reviewView, #backtestView, #datacenterView, #rulesView, #detailDrawer, #settingsDrawer) {
+  --accent: var(--view-accent, var(--brand-gold));
+  --accent-ink: var(--view-ink, var(--brand-gold-ink));
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-line: var(--accent);
+  --fill-accent: var(--view-fill, var(--brand-gold-fill));
+  --fill-accent-hover: color-mix(in srgb, var(--fill-accent) 85%, #32251a);
+  --teal: var(--accent-ink);
+  --teal-strong: var(--accent-ink);
+  --teal-soft: var(--accent-soft);
+  --data-ink: var(--accent-ink);
+  --data-soft: var(--accent-soft);
+  --focus-ring: var(--accent-ink);
+  --text-selection-bg: color-mix(in srgb, var(--accent) 28%, transparent);
+  --explorer-highlight: var(--accent-ink);
+  accent-color: var(--accent);
+}
+#vitalsView { --view-accent: var(--brand-gold); --view-ink: var(--brand-gold-ink); --view-fill: var(--brand-gold-fill); }
+#boardView { --view-accent: var(--brand-copper); --view-ink: var(--brand-copper-ink); --view-fill: var(--brand-copper-fill); }
+#heatView { --view-accent: var(--brand-amber); --view-ink: var(--brand-amber-ink); --view-fill: var(--brand-amber-fill); }
+#sectorsView { --view-accent: var(--brand-jade); --view-ink: var(--brand-jade-ink); --view-fill: var(--brand-jade-fill); }
+#hotrankView { --view-accent: var(--brand-rose); --view-ink: var(--brand-rose-ink); --view-fill: var(--brand-rose-fill); }
+#advisorView { --view-accent: var(--brand-plum); --view-ink: var(--brand-plum-ink); --view-fill: var(--brand-plum-fill); }
+#tradesView { --view-accent: var(--brand-olive); --view-ink: var(--brand-olive-ink); --view-fill: var(--brand-olive-fill); }
+#reviewView { --view-accent: var(--brand-mauve); --view-ink: var(--brand-mauve-ink); --view-fill: var(--brand-mauve-fill); }
+#backtestView { --view-accent: var(--brand-clay); --view-ink: var(--brand-clay-ink); --view-fill: var(--brand-clay-fill); }
+#datacenterView, #detailDrawer { --view-accent: var(--brand-slate); --view-ink: var(--brand-slate-ink); --view-fill: var(--brand-slate-fill); }
+#rulesView, #settingsDrawer { --view-accent: var(--brand-stone); --view-ink: var(--brand-stone-ink); --view-fill: var(--brand-stone-fill); }
+html[data-theme="light"] :is(#heatView, #sectorsView, #hotrankView) { --explorer-highlight: var(--accent-ink); }
+
+/* 原先的局部灰阶覆盖与写死的 HSL 选中底色在这里统一回页面主色。 */
+#boardView .workspace-sections button.is-active,
+#advisorView .adv-tab.is-active,
+#detailDrawer .inspector-chart-controls button[aria-pressed="true"],
+:is(#heatView, #sectorsView, #hotrankView) .segment.is-active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+#boardView .workspace-sections.motion-track button.is-active,
+#advisorView .adv-tabs.motion-track .adv-tab.is-active,
+#detailDrawer .inspector-chart-controls.motion-track button[aria-pressed="true"],
+:is(#heatView, #sectorsView, #hotrankView) .ranking-tabs.motion-track .segment.is-active { background: transparent; }
+#heatView .structure-track > i {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand-amber) 35%, var(--surface-2)), var(--brand-amber));
+}
+#heatView .structure-rung.is-highest .structure-track > i { background: var(--brand-amber-ink); }
+#hotrankView .hot-volume-track i {
+  background: linear-gradient(0deg, color-mix(in srgb, var(--brand-rose) 24%, var(--surface)), color-mix(in srgb, var(--brand-rose) 68%, var(--surface)));
+}
+#hotrankView .hot-volume-col:nth-child(-n+3) i {
+  background: linear-gradient(0deg, color-mix(in srgb, var(--brand-rose) 45%, var(--surface)), var(--brand-rose));
+}
+.sector-spotlight { background: radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--brand-jade) 7%, transparent), transparent 58%), var(--surface); }
+.brand-mark-galaxy { border-color: color-mix(in srgb, var(--brand-gold) 30%, var(--line)); }
+.profile-avatar { background: color-mix(in srgb, var(--brand-gold) 9%, var(--surface-2)); color: var(--brand-gold-ink); }

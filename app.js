@@ -1,3 +1,4 @@
+import { createMobileInteractions, createMobileRefresh } from './mobile-interactions.js';
 import { createMobileWorkspace } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
@@ -33,11 +34,13 @@ const state = {
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
-const workspace = createMobileWorkspace({ state, onStock: openSheet, onRefresh: refresh,
+const interactions=createMobileInteractions();
+const workspace = createMobileWorkspace({ state, onStock: openSheet, onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
   onTheme: () => $('#themeBtn').click(), onNotify: () => openNotificationSettings().catch(e => toast(e.message)),
   onDate: openHistoryDate, onToken: async value => { const token = String(value || '').trim(); if (token) localStorage.setItem('mp_ema_token', token); else localStorage.removeItem('mp_ema_token'); setEmaToken(token); },
   onRefreshInterval: async value => { if (![8000,15000,30000].includes(value)) throw new Error('无效更新间隔'); state.refreshMs=value; await setKV('mobileRefreshMs',value); applyRefreshTimer(); }
 });
+const manualRefresh=createMobileRefresh({button:$('#refreshBtn'),status:$('#refreshStatus'),perform:()=>workspace.refreshActive(),motion:interactions.motion});
 const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; applyMobileJudgements(state); syncDetailJudgement(); workspace.refresh(); } });
 let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
 function syncDetailJudgement() {
@@ -292,7 +295,7 @@ function renderStatus() {
     // 2026-09-16 界面优化批⑤:收盘定格标识(与桌面会话条同口径)——数字不会再变须明说,防把收盘数据当盘中读
     const now = shanghaiNow();
     const afterClose = isTradingDay(todayStr()) && (now.getHours() > 15 || (now.getHours() === 15 && now.getMinutes() >= 5));
-    if (afterClose && !failed) { freshAt.textContent = ' · 已收盘'; freshAt.className = 'fresh-at stale'; freshAt.title = '收盘定格数据,明日开盘恢复刷新'; }
+    if (afterClose && !failed) { freshAt.textContent = ' · 已收盘' + (state.lastSuccessAt ? ' · '+hhmmss(state.lastSuccessAt) : ''); freshAt.className = 'fresh-at stale'; freshAt.title = '收盘定格数据,明日开盘恢复刷新'; }
     else if (failed) { freshAt.textContent = ' · 失败'; freshAt.className = 'fresh-at bad'; freshAt.title = '最近刷新失败,展示上次数据'; }
     else if (state.lastSuccessAt) { freshAt.textContent = ' · ' + hhmmss(state.lastSuccessAt); freshAt.className = 'fresh-at'; freshAt.title = '更新于 ' + hhmmss(state.lastSuccessAt) + (state.lastFetchMs != null ? ` · 本轮抓取 ${state.lastFetchMs}ms` : ''); }
     else if (state.lastGoodAt) { freshAt.textContent = ' · 快照 ' + hhmm(state.lastGoodAt); freshAt.className = 'fresh-at stale'; freshAt.title = '离线快照(未成功连上实时源)'; }
@@ -777,7 +780,7 @@ async function openSheet(code) {
   if (state.sheetCode === null) sheetOrigin = document.activeElement;
   if ($('#membersDialog').open) { sheetReturnDialog = $('#membersDialog'); sheetReturnDialog.close(); }
   detailChart.close(); state.sheetCode = code;
-  sheet.scrollTop = 0; sheet.inert = false; sheet.setAttribute('aria-hidden', 'false');
+  sheet.hidden=false;sheet.classList.remove('is-closing');sheet.scrollTop = 0; sheet.inert = false; sheet.setAttribute('aria-hidden', 'false');
   document.querySelector('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.mobile-bottom-nav').inert = true;
   // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
   //（旧版渲染前 await 报价，弱网下最坏 3×9s 抽屉不出现，体感「点了没反应」）
@@ -832,6 +835,7 @@ async function openSheet(code) {
     '<div class="s-similar" id="boardPromoRef"></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
+  interactions.motion.inspector(sheet,{opening:true,docked:false});
   detailChart.mount(code, $('#sheetKline'));
   syncDetailJudgement();
   $('#sheetClose').focus({preventScroll:true});
@@ -896,7 +900,15 @@ function kvEss(s) {
   return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
 // 2026-09-13 精简批:kvDet 已随「行情明细」折叠组砍(用户拍板)
-function closeSheet() { sheetSequence++; state.sheetCode = null; detailChart.close(); $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); $('#sheet').inert=true; $('#sheet').setAttribute('aria-hidden','true'); document.querySelector('main').inert=false; document.querySelector('.topbar').inert=false; document.querySelector('.mobile-bottom-nav').inert=false; if(sheetReturnDialog){sheetReturnDialog.showModal();sheetReturnDialog=null;} if(sheetOrigin?.isConnected)sheetOrigin.focus({preventScroll:true}); sheetOrigin=null; }
+function closeSheet() {
+  const run=++sheetSequence,origin=sheetOrigin,returnDialog=sheetReturnDialog,sheet=$('#sheet');
+  const returnFocus=sheet.contains(document.activeElement),viewAtClose=state.view;
+  state.sheetCode=null;detailChart.close();sheetOrigin=null;sheetReturnDialog=null;
+  sheet.inert=true;sheet.setAttribute('aria-hidden','true');sheet.classList.add('is-closing');$('#scrim').classList.remove('show');
+  document.querySelector('main').inert=false;document.querySelector('.topbar').inert=false;document.querySelector('.mobile-bottom-nav').inert=false;
+  if(returnFocus&&!returnDialog&&origin?.isConnected&&origin.getClientRects().length)origin.focus({preventScroll:true});
+  interactions.motion.inspector(sheet,{opening:false,docked:false}).then(()=>{if(run!==sheetSequence)return;sheet.classList.remove('show','is-closing');sheet.hidden=true;if(returnDialog&&state.view===viewAtClose&&!document.querySelector('dialog[open]')){returnDialog.showModal();if(origin?.isConnected&&returnDialog.contains(origin))origin.focus({preventScroll:true});}});
+}
 
 // 2026-09-11 拆解融合批:情绪 chip 点开分指标明细(驾驶舱移入横幅的归宿)——复用 scrim+sheet,不动 sheetCode
 function openEmoSheet() {
@@ -972,34 +984,12 @@ function renderCurrentView() { state.previousTradingDate = previousTradingDayKey
 
 /* ---------------- 刷新 ---------------- */
 let refreshing = false;
-// 图标旋转走 WAAPI:按钮是 44×38 非正方形,转按钮会晃;只转内层 .ic(inline-block 可 transform)。
-// 停止时从当前角度 ease-out 滑完本圈归位(360°≡0°),避免直接摘 class 瞬间跳回 0° 的急停感。
-let spinAnim = null;
-function spinStart() {
-  const icon = $('#refreshBtn .ic');
-  if (!icon?.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  icon.getAnimations().forEach(a => a.cancel()); // 清理上次减速尾动画,防快速连点角度跳变
-  spinAnim = icon.animate(
-    [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
-    { duration: 800, iterations: Infinity, easing: 'linear' }
-  );
-}
-function spinStop() {
-  if (!spinAnim) return;
-  const t = spinAnim.currentTime % 800;
-  const angle = (t / 800) * 360;
-  spinAnim.cancel(); spinAnim = null;
-  $('#refreshBtn .ic').animate(
-    [{ transform: `rotate(${angle}deg)` }, { transform: 'rotate(360deg)' }],
-    { duration: Math.max((360 - angle) / 360 * 800, 260), easing: 'cubic-bezier(0.3, 0, 0.2, 1)' }
-  );
-}
-async function refresh(force = false) {
-  if (refreshing) return;
+let refreshPromise=null;
+function refresh(force=false){if(refreshPromise)return refreshPromise;refreshPromise=performRefresh(force).finally(()=>{refreshPromise=null;});return refreshPromise;}
+async function performRefresh(force = false) {
   refreshing = true;
   // B1:手动刷新不再无条件作废预期差缓存(省 1-5 个报价请求)——09:30 后开盘价已定型
   if (force && shouldRefetchGap(shanghaiNow(), state.manualDate)) state.gapDate = null;
-  spinStart();
   const fetchStart = performance.now();
   try {
     // 2026-09-13 休市批:休市日自动回拉最近交易日的池——不再拿周六/节假日打空接口
@@ -1036,14 +1026,17 @@ async function refresh(force = false) {
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});
     Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); return warmMobileJudgements(state,()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();}); }).catch(() => {});
+    return {ok:true,partial:pools.partial,fromSnapshot:state.fromSnapshot};
   } catch (e) {
     state.lastErrorAt = Date.now();
     if (state.pools) { applyMobileJudgements(state); workspace.refresh(); syncDetailJudgement(); }
     renderStatus();
     if (!state.pools) showOfflineEmpty(e); // 无任何可用数据（含快照）：清骨架屏给显式离线态
     toast('刷新失败：' + e.message);
+    workspace.refresh();
+    return {ok:false,error:e.message};
   }
-  finally { spinStop(); refreshing = false; }
+  finally { refreshing = false; }
 }
 let historySavedAt = 0;
 function saveCurrentHistory(pools) {
@@ -1367,7 +1360,7 @@ function toast(msg) {
 function bind() {
   // 全局事件委托：任何带 data-code 的卡片点按都打开详情（替代逐卡 addEventListener，刷新不再累积监听器）
   document.addEventListener('click', (e) => {
-    if (e.target.closest('#retryBtn')) { refresh(true); return; } // 离线空态里的重试按钮
+    if (e.target.closest('#retryBtn')) { manualRefresh.run(); return; } // 离线空态里的重试按钮
     const t = e.target.closest('[data-code]');
     if (t) openSheet(t.dataset.code);
   });
@@ -1383,23 +1376,17 @@ function bind() {
   });
   // 2026-09-11 一屏到底批:bottomnav 绑定已随导航整删
   // 2026-09-11 减法批:menu-item 委托已随侧滑菜单整删(零元素,绑定是死代码)
-  $('#refreshBtn').addEventListener('click', () => workspace.refreshActive());
+  $('#refreshBtn').addEventListener('click', () => manualRefresh.run());
   // 2026-09-11 详情抽屉下拉关闭(用户点名只能点关闭太死板)——sheet 顶部 60px 拖拽热区,
   // 跟手位移(transition 摘掉防打架),下拉超 80px 松手关,不足回弹;滚到顶再往下拉也关(自然手势)
   setupSheetDrag();
   workspace.bind();
-  document.addEventListener('keydown',e=>{if(!$('#sheet').classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();closeSheet();}if(e.key==='Tab'){const items=[...$('#sheet').querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);const first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
+  document.addEventListener('keydown',e=>{if(!$('#sheet').classList.contains('show')||$('#sheet').inert)return;if(e.key==='Escape'){e.preventDefault();closeSheet();}if(e.key==='Tab'){const items=[...$('#sheet').querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);const first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
   $('#historyClose').addEventListener('click',()=>$('#dateDialog').close());
-  $('#historyToday').addEventListener('click',()=>{state.manualDate='';$('#dateDialog').close();refresh(true);});
-  $('#historyApply').addEventListener('click',()=>{const date=$('#historyDate').value.replaceAll('-','');if(!/^\d{8}$/.test(date)||date>todayStr()||!isTradingDay(date)){$('#historyStatus').textContent='请选择有效的历史交易日';return;}state.manualDate=date;$('#dateDialog').close();workspace.navigate('rank');refresh(true);});
+  $('#historyToday').addEventListener('click',()=>{state.manualDate='';$('#dateDialog').close();manualRefresh.run();});
+  $('#historyApply').addEventListener('click',()=>{const date=$('#historyDate').value.replaceAll('-','');if(!/^\d{8}$/.test(date)||date>todayStr()||!isTradingDay(date)){$('#historyStatus').textContent='请选择有效的历史交易日';return;}state.manualDate=date;$('#dateDialog').close();workspace.showHeat();manualRefresh.run();});
   // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
-  $('#themeBtn').addEventListener('click', () => {
-    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = next;
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', next === 'light' ? '#ffffff' : '#18181b');
-    try { localStorage.setItem('mp-theme', next); } catch {}
-  });
+  $('#themeBtn').addEventListener('click',event=>interactions.toggleTheme(event));
   // 折叠池首次展开才渲染
   // 折叠池首次展开才渲染(structFold 题材/龙头同口径——2026-09-11 拆解融合批)
   // 2026-10-07 卡片打开动画批:dtFold/zbFold 走 patchCardList(成员变化时已自带 .list-reveal 入场),
@@ -1459,7 +1446,7 @@ function setupPTR() {
     if (ptr.classList.contains('show')) {
       // 2026-09-11 修下拉卡顿:等 PTR 收起动画先走一帧再触发刷新——refresh 第一步是 SWR 全量渲染,
       // 同步跑会把松手的过渡卡成瞬跳;列表区已有签名守卫,真重建也只是变化的部分
-      requestAnimationFrame(() => { ptr.classList.remove('show'); requestAnimationFrame(() => refresh(true)); });
+      requestAnimationFrame(() => { ptr.classList.remove('show'); requestAnimationFrame(() => manualRefresh.run()); });
       startY = null;
       return;
     }

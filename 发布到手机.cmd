@@ -20,6 +20,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if exist "..\codex\ui\color-identity.css" (
+  node scripts/sync-workspace.mjs
+  if errorlevel 1 goto fail
+)
 node scripts/build-worker.mjs
 if errorlevel 1 goto fail
 call npm test

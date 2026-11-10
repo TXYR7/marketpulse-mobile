@@ -1,3 +1,4 @@
+import { createRefreshFeedback } from './refresh-feedback.js';
 import { shanghaiNow } from './data.js';
 import { esc, pctText, pctClass, fmtMoney, setHTML } from './views.js';
 import { filterHeatStocks, filterSectorRows, filterHotRank, hotRankTier, snapshotMetaText, heatConceptsOf, marketNumber as num } from './explorer-core.js';
@@ -27,8 +28,9 @@ function decisionCard(s) {
   const reason = p.hardFails?.[0] || p.downgrades?.[0] || p.checklist?.find(r => r.status !== 'pass')?.note || p.checklist?.[0]?.note || '判断数据待补齐';
   return '<article class="decision-card"><div class="decision-heading"><div><strong>' + esc(s.name) + '</strong><small>' + esc(s.code) + ' · ' + (s.boards || 1) + '板 · ' + esc(s.industry || '未分类') + '</small></div><span class="decision-verdict ' + (avoid ? 'avoid' : '') + '">' + esc(p.verdict || '待确认') + '</span></div><p class="decision-reason">' + esc(reason) + '</p><div class="decision-next"><span>下一步</span><p>' + esc(plan.entry || s.signal?.next || '等待市场、价格与承接证据') + '</p></div><div class="decision-footer"><span>失效参考 <b>' + price(Number(/价格失效参考 ([\d.]+)/.exec((plan.invalidation || []).join(' '))?.[1]) || null) + '</b></span><span>现价 <b class="' + pctClass(s.changePct) + '">' + price(s.price) + '</b></span><button type="button" class="stock-detail" data-code="' + s.code + '">详情 / K线</button></div></article>';
 }
-export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNotify, onDate, onToken, onRefreshInterval, doc = document }) {
+export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNotify, onDate, onToken, onRefreshInterval, interactions = null, onManualRefresh = null, doc = document }) {
   const $ = id => doc.getElementById(id);
+  const memberFeedback=createRefreshFeedback($('membersRefresh'),{doc});
   const cache = new Map(), pending = new Map();
   let page = 'market', rank = 'heat', scope = 'priority', searchSeq = 0, searchTimer = null, composing = false;
   let marketQuery = '', marketPage = 1, marketMarket = '', marketSort = 'gain';
@@ -54,9 +56,10 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   function meta(el, data) { if (!el) return; el.textContent = data?.loading ? '正在更新…' : data?.error ? '更新失败' + (data.rows ? '，保留上次快照' : '') + ' · 点击重试' : snapshotMetaText(data); }
   function navigate(next, { history = true } = {}) {
     if (!['market', 'intraday', 'rank', 'tools'].includes(next)) next = 'market';
+    const previousPage=page;
     const main = doc.querySelector('main'); scroll.set(page, main.scrollTop); page = next; state.view = next;
     doc.querySelectorAll('.view').forEach(el => { const active = el.id === 'view-' + next; el.hidden = !active; el.classList.toggle('active', active); });
-    doc.querySelectorAll('[data-mobile-nav]').forEach(button => { const active = button.dataset.mobileNav === next; button.classList.toggle('active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); });
+    doc.querySelectorAll('[data-mobile-nav]').forEach(button => { const active = button.dataset.mobileNav === next; button.classList.toggle('active', active); button.classList.toggle('is-active',active); button.setAttribute('aria-current', active ? 'page' : 'false'); });
     main.scrollTop = scroll.get(next) || 0;
     doc.title = ({ market: '全市场', intraday: '打板', rank: '排行', tools: '工具' })[next] + ' · 星脉';
     if (history) window.history.pushState({ mobilePage: next }, '', '#' + next);
@@ -64,9 +67,11 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     if (next === 'intraday') renderBoard();
     if (next === 'rank') renderRank();
     if (next === 'tools') renderTools();
-    const view = $('view-' + next); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) view.animate?.([{ opacity: .4, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    const view=$('view-'+next),order=['market','intraday','rank','tools'];
+    applyPageColor();interactions?.motion.page(view,{direction:order.indexOf(next)>=order.indexOf(previousPage)?1:-1});interactions?.refresh();updateFreshness();
   }
   function renderMarket() {
+    const phase=state.emotion?.phase; $('marketHero').dataset.phaseTone=['退潮','退潮初期','冰点'].includes(phase)?'risk':phase==='主升期'?'positive':phase?'caution':'unknown';
     const p = state.pools, e = state.emotion || {}, themes = state.themes || [], leaders = state.leaders || [];
     setHTML($('marketHero'), '<div class="market-phase"><span>市场情绪</span><span class="mobile-tag">' + esc(state.fromSnapshot ? '缓存快照' : state.marketClosed || state.manualDate || shanghaiNow().getHours() >= 15 ? '收盘快照' : '盘面观察') + '</span></div><div class="market-hero-value"><strong>' + esc(e.phase || '等待行情') + '</strong><div><b>' + (e.emotionIndex ?? '—') + '</b><small>情绪指数</small></div></div><p>' + esc(e.advice || state.plan?.summary || '先看情绪、主线与核心，再看个股确认') + '</p><div class="market-kpis">' + [['涨停', p?.upCount], ['跌停', p?.downCount], ['最高板', p?.sources?.up ? Math.max(0, ...(p.up || []).map(s => s.boards || 1)) : null], ['炸板率', state.breakRate?.rate != null ? state.breakRate.rate.toFixed(1) + '%' : null]].map(([label, v]) => '<div><b>' + (v ?? '—') + '</b><span>' + label + '</span></div>').join('') + '</div>');
     const max = Math.max(1, ...themes.slice(0, 6).map(t => t.limitUpCount || t.count || t.stocks?.length || 0));
@@ -79,7 +84,8 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     paintIndices(cache.get('indices'));
     if ($('marketListFold').open) void loadMarket();
   }
-  function paintIndices(data) { if (!data?.rows) { setHTML($('marketIndices'), '<span class="mobile-meta">' + esc(data?.error || '指数加载中…') + '</span>'); return; } setHTML($('marketIndices'), data.rows.map(r => '<div><span>' + esc(r.name) + '</span><b>' + price(r.price) + '</b><small class="' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</small></div>').join('')); }
+  function paintIndices(data) {
+    if(page==='market')updateFreshness(); if (!data?.rows) { setHTML($('marketIndices'), '<span class="mobile-meta">' + esc(data?.error || '指数加载中…') + '</span>'); return; } setHTML($('marketIndices'), data.rows.map(r => '<div><span>' + esc(r.name) + '</span><b>' + price(r.price) + '</b><small class="' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</small></div>').join('')); }
   function marketKey() { return ['market', marketPage, marketMarket, marketSort, marketQuery].join(':'); }
   function loadMarket(force = false) {
     const key = marketKey(), args = { page: marketPage, market: marketMarket, sort: marketSort, query: marketQuery };
@@ -92,9 +98,10 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('candidateCount').textContent = rows.length + ' / ' + stocks.length + '只';
     const p = state.opportunities; $('mobileGate').hidden = !p?.noTrade?.triggered; $('mobileGate').textContent = p?.noTrade?.reason || '';
     $('decisionModel').textContent = (state.unifiedDecision?.modelVersion || 'unified-2.0.0') + ' · 待前瞻验证 · 分数代表一致度';
-    doc.querySelectorAll('[data-candidate-scope]').forEach(b => { b.classList.toggle('active', b.dataset.candidateScope === scope); b.setAttribute('aria-pressed', String(b.dataset.candidateScope === scope)); });
+    doc.querySelectorAll('[data-candidate-scope]').forEach(b => { b.classList.toggle('active', b.dataset.candidateScope === scope); b.classList.toggle('is-active',b.dataset.candidateScope === scope); b.setAttribute('aria-pressed', String(b.dataset.candidateScope === scope)); });
   }
   function renderRank() {
+    applyPageColor();
     doc.querySelectorAll('[data-rank-tab]').forEach(b => { b.classList.toggle('active', b.dataset.rankTab === rank); b.setAttribute('aria-selected', String(b.dataset.rankTab === rank)); });
     for (const name of ['heat', 'sectors', 'hot']) $('rank-' + name).hidden = name !== rank;
     if (rank === 'heat') paintHeat();
@@ -116,27 +123,28 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   function paintSectors(data = cache.get('sectors:' + sectorType)) {
     if (rank !== 'sectors') return;
     if (data?.type && data.type !== sectorType) return;
-    meta($('sectorMeta'), data); $('membersToHeat').disabled = !memberData?.complete; $('membersToHeat').disabled = !memberData?.complete;
+    meta($('sectorMeta'), data); updateFreshness(); $('membersToHeat').disabled = !memberData?.complete; $('membersToHeat').disabled = !memberData?.complete;
     const rows = filterSectorRows(data?.rows || [], { query: sectorQuery, sort: sectorSort });
     setHTML($('sectorRows'), rows.length ? rows.map((s, i) => '<button class="sector-row" type="button" data-sector="' + s.code + '"><span class="sector-rank">' + (i + 1) + '</span><div><strong>' + esc(s.name) + '</strong><small>领涨 ' + esc(s.leaderName) + '</small><span class="sector-breadth">上涨 ' + (s.upCount ?? '—') + ' / 下跌 ' + (s.downCount ?? '—') + (s.limitUpCount != null ? ' · 涨停 ' + s.limitUpCount : '') + '</span></div><b class="' + pctClass(s.changePercent) + '">' + pctText(s.changePercent) + '<small>查看成员 ›</small></b></button>').join('') : empty(data?.loading ? '正在加载板块…' : data?.error || '没有匹配板块'));
   }
   function paintHot(data = cache.get('hot')) {
-    if (rank !== 'hot') return; register(data?.rows); meta($('hotMeta'), data);
+    if (rank !== 'hot') return; register(data?.rows); meta($('hotMeta'), data); updateFreshness();
     const up = new Set((state.pools?.up || []).map(s => s.code));
     const rows = filterHotRank((data?.rows || []).map(s => ({ ...s, isLimitUp: state.pools?.sources?.up ? up.has(s.code) : null })), { query: hotQuery, sort: hotSort, scope: hotScope });
     const list = rows.map(s => stockRow(s, '<b class="hot-rank-number">' + s.rank + '</b>', (s.rankChange != null ? '名次' + (s.rankChange > 0 ? '升' : '降') + Math.abs(s.rankChange) + ' · ' : '') + (s.heat != null ? '热度 ' + money(s.heat) : '人气名次')));
     setHTML($('hotRows'), rows.length ? hotLayout === 'list' ? list.join('') : [0, 1, 2, 3, 4].map(t => { const group = rows.filter(s => hotRankTier(s.rank) === t); return group.length ? '<section class="hot-tier"><div class="mobile-section-head"><h3>' + ['榜首', '第2—5名', '第6—15名', '第16—35名', '第36—100名'][t] + '</h3><span>' + group.length + '只</span></div>' + group.map(s => stockRow(s, '<b class="hot-rank-number">' + s.rank + '</b>', s.heat == null ? '人气名次' : '热度 ' + money(s.heat))).join('') + '</section>' : ''; }).join('') : empty(data?.loading ? '正在加载热榜…' : data?.error || '没有匹配股票'));
   }
-  async function openMembers(code) {
-    const sequence = ++memberSequence;
-    const s = cache.get('sectors:' + sectorType)?.rows?.find(s => s.code === code); if (!s) return;
-    currentSector = s; memberData = null; $('membersTitle').textContent = s.name; $('membersMeta').textContent = '正在加载完整成员…'; $('membersRows').innerHTML = empty('正在加载…'); $('membersSearch').value = ''; $('membersToHeat').disabled = true; $('membersDialog').showModal();
-    const data = await load('members:' + code, () => loadSectorMembers(code));
-    if (sequence !== memberSequence || !$('membersDialog').open) return;
-    memberData = data; register(data.rows);
-    if (data.complete && state.pools?.sources?.up) { const up = new Set(state.pools.up.map(s => s.code)); s.limitUpCount = data.rows.filter(r => up.has(r.code)).length; }
-    $('membersMeta').textContent = data.error ? data.error : data.complete ? '完整成员 ' + data.rows.length + '只' + (s.limitUpCount != null ? ' · 涨停 ' + s.limitUpCount + '只' : '') : '部分成员 ' + (data.rows?.length || 0) + '只，涨停数暂不计算';
-    $('membersToHeat').disabled = !data.complete; $('membersToHeat').disabled = !data.complete; paintMembers(); paintSectors();
+  async function openMembers(code,refresh=false) {
+    const sequence=++memberSequence,s=cache.get('sectors:'+sectorType)?.rows?.find(s=>s.code===code);if(!s)return;
+    const scrollTop=$('membersDialog').scrollTop;currentSector=s;
+    if(!refresh){memberData=null;$('membersRows').innerHTML=empty('正在加载…');$('membersSearch').value='';$('membersToHeat').disabled=true;$('membersDialog').showModal();interactions?.motion.search($('membersDialog'),true);}
+    $('membersTitle').textContent=s.name;$('membersMeta').textContent=refresh?'正在更新成员…':'正在加载完整成员…';$('membersRefresh').disabled=true;memberFeedback.set('loading');
+    const data=await load('members:'+code,()=>loadSectorMembers(code),refresh);
+    if(sequence!==memberSequence||!$('membersDialog').open)return;
+    memberData=data;register(data.rows);interactions?.refresh();
+    if(data.complete&&!data.error&&state.pools?.sources?.up){const up=new Set(state.pools.up.map(s=>s.code));s.limitUpCount=data.rows.filter(r=>up.has(r.code)).length;}
+    $('membersMeta').textContent=data.error?'更新失败'+(data.rows?.length?'，保留上次成员':'')+'：'+data.error:data.complete?'完整成员 '+data.rows.length+'只'+(s.limitUpCount!=null?' · 涨停 '+s.limitUpCount+'只':''):'部分成员 '+(data.rows?.length||0)+'只，涨停数暂不计算';
+    $('membersRefresh').disabled=false;memberFeedback.set(data.error?'error':data.complete?'success':'degraded');$('membersToHeat').disabled=!data.complete;paintMembers();paintSectors();if(refresh)$('membersDialog').scrollTop=scrollTop;
   }
   function paintMembers() { const q = $('membersSearch').value.trim(); const rows = (memberData?.rows || []).filter(s => !q || [s.name, s.code].join(' ').includes(q)).sort((a, b) => (b.changePct ?? -Infinity) - (a.changePct ?? -Infinity)); setHTML($('membersRows'), rows.length ? rows.map(s => stockRow(s, '', s.industry)).join('') : empty(memberData?.error || '没有匹配成员')); }
   function renderTools() {
@@ -158,11 +166,11 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     void getReviews().then(rows=>setHTML($('reviewEntries'),rows.slice(0,20).map(r=>'<article class="journal-entry"><strong>'+esc(r.date)+'</strong><p>'+esc(r.note||r.summary||r.content||'')+'</p></article>').join('')||empty('暂无复盘记录'))).catch(()=>{});
     void getTrades().then(rows=>setHTML($('toolTrades'),rows.length?rows.map(r=>'<article class="journal-entry"><strong>'+esc(r.name||r.code)+' · '+esc(r.date||'')+'</strong><p>'+esc(r.buyReason||r.reason||'')+(r.sellReason?' / '+esc(r.sellReason):'')+'</p><span>盈亏 '+pctText(r.pnlPct??r.profitPct)+'</span></article>').join(''):empty('暂无交易记录'))).catch(()=>{});
   }
-  async function runAdvisor() {
-    if (!advisorStock) { $('advisorResult').innerHTML = empty('请先搜索并选择股票'); return; }
+  async function runAdvisor(refresh=false) {
+    if (!advisorStock) { $('advisorResult').innerHTML = empty('请先搜索并选择股票'); return {ok:false,error:'未选择股票'}; }
     const seq = ++advisorSeq, stock = advisorStock, btn = $('advisorRun'); btn.disabled = true; $('advisorResult').innerHTML = empty('正在读取历史日K并计算…');
     try {
-      const [data, quotes, indexCloses] = await Promise.all([loadChartBars(stock.code, { limit: 320 }), import('./data.js').then(m => m.fetchQuotes([stock.code], { tries: 1, timeoutMs: 4000 })).catch(() => ({})), loadIndexCloses().catch(()=>null)]);
+      const [data, quotes, indexCloses] = await Promise.all([loadChartBars(stock.code, { limit: 320, refresh }), import('./data.js').then(m => m.fetchQuotes([stock.code], { tries: 1, timeoutMs: 4000 })).catch(() => ({})), loadIndexCloses().catch(()=>null)]);
       if (seq !== advisorSeq) return;
       const mode = $('advisorMode').value, inputs = {};
       for (const key of ['capital', 'riskPct', 'amount', 'cost', 'shares']) { const value = $('advisor-' + key).value; if(value.trim()){ const n=Number(value);if(!Number.isFinite(n)||n<=0)throw new Error('资金、成本、股数与风险预算需大于0');inputs[key]=n;} }
@@ -175,7 +183,8 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
       const position=p.position;
       if(position)$('advisorResult').insertAdjacentHTML('beforeend','<div class="factor-grid">'+[['浮动盈亏',money(position.pnl)],['盈亏比例',pctText(position.pnlPct)],[position.totalLossFromCost < 0 ? '止损时仍盈利' : '止损时总亏损',money(Math.abs(position.totalLossFromCost))],['当前持仓市值',money(position.value)]].map(([label,v])=>'<div><span>'+label+'</span><b>'+v+'</b></div>').join('')+'</div>'+(p.reduce?'<p class="mobile-note">减仓参考 '+price(p.reduce.price)+' · '+esc(p.reduce.note)+'</p>':''));
       $('advisorResult').insertAdjacentHTML('beforeend','<div class="mobile-section-head"><h3>同档历史表现</h3><span>'+(result.history.insufficient?'样本不足':'历史样本')+'</span></div><div class="advisor-factors">'+result.history.horizons.map(h=>'<div><strong>'+h.days+'日后</strong><span>胜率 '+(h.winRate??'—')+'% · 均值 '+pctText(h.mean)+'</span><b>n='+h.n+'</b></div>').join('')+'</div>');
-    } catch (e) { if (seq === advisorSeq) $('advisorResult').innerHTML = empty(e.message); }
+      return {ok:true};
+    } catch (e) { if (seq === advisorSeq) $('advisorResult').innerHTML = empty(e.message); return {ok:false,error:e.message}; }
     finally { if (seq === advisorSeq) btn.disabled = false; }
   }
   async function exportData() {
@@ -191,6 +200,7 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
       const local = [...(state.pools?.up || []), ...(state.pools?.down || []), ...(state.pools?.broken || [])].filter(s => [s.name, s.code].join(' ').includes(q));
       const remote = await lookupMobileStocks(q).catch(error => { if (!local.length) throw error; return []; }); if (seq !== searchSeq) return;
       const rows = [...new Map([...local, ...remote].map(s => [s.code, s])).values()].slice(0, 8); register(rows);
+      interactions?.refresh();
       setHTML($('mobileSearchResults'), rows.length ? rows.map(s => '<button type="button" class="mobile-search-result" data-search-code="' + s.code + '"><strong>' + esc(s.name) + '</strong><span>' + s.code + '</span></button>').join('') : empty('没有匹配的股票'));
     } catch (e) { if (seq === searchSeq) $('mobileSearchResults').innerHTML = empty('查询失败，请重试'); }
   }
@@ -215,18 +225,18 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('marketSearch').addEventListener('change', () => { marketQuery = $('marketSearch').value; marketPage = 1; void loadMarket(); });
     $('marketMarket').addEventListener('change', () => { marketMarket = $('marketMarket').value; marketPage = 1; void loadMarket(); });
     $('marketSort').addEventListener('change', () => { marketSort = $('marketSort').value; marketPage = 1; void loadMarket(); });
-    $('marketPrev').addEventListener('click', () => { marketPage--; void loadMarket(); }); $('marketNext').addEventListener('click', () => { marketPage++; void loadMarket(); });
-    $('marketListRefresh').addEventListener('click', () => void loadMarket(true));
+    $('marketPrev').addEventListener('click',()=>{marketPage--;loadMarket().then(()=>$('marketRows').scrollIntoView({block:'start'}));});$('marketNext').addEventListener('click',()=>{marketPage++;loadMarket().then(()=>$('marketRows').scrollIntoView({block:'start'}));});
+    $('marketListRefresh').addEventListener('click', () => onManualRefresh?onManualRefresh():loadMarket(true));
     $('heatSearch').addEventListener('input', () => { heat.query = $('heatSearch').value; paintHeat(); });
     for (const [id, key] of [['heatLevel', 'level'], ['heatMarket', 'market'], ['heatSort', 'sort'], ['heatConcept', 'concept']]) $(id).addEventListener('change', () => { heat[key] = $(id).value; heatBoard = null; paintHeat(); });
     $('heatTime').addEventListener('change', () => { heat.time = { early: [925, 1000], morning: [1000, 1131], afternoon: [1300, 1501] }[$('heatTime').value] || null; paintHeat(); });
     $('heatReset').addEventListener('click', () => { heat = { query: '', level: 'all', market: 'all', sort: 'seal', concept: '', time: null }; heatBoard = null; for (const [id, value] of [['heatSearch', ''], ['heatLevel', 'all'], ['heatMarket', 'all'], ['heatSort', 'seal'], ['heatConcept', ''], ['heatTime', '']]) $(id).value = value; paintHeat(); });
     $('sectorType').addEventListener('change', () => { sectorType = $('sectorType').value; renderRank(); }); $('sectorSort').addEventListener('change', () => { sectorSort = $('sectorSort').value; paintSectors(); }); $('sectorSearch').addEventListener('input', () => { sectorQuery = $('sectorSearch').value; paintSectors(); });
-    $('sectorRefresh').addEventListener('click', () => void load('sectors:' + sectorType, () => loadSectors(sectorType), true, paintSectors));
+    $('sectorRefresh').addEventListener('click',()=>onManualRefresh?onManualRefresh():load('sectors:'+sectorType,()=>loadSectors(sectorType),true,paintSectors));
     $('hotSearch').addEventListener('input', () => { hotQuery = $('hotSearch').value; paintHot(); });
     for (const [id, fn] of [['hotSort', () => { hotSort = $('hotSort').value; }], ['hotScope', () => { hotScope = $('hotScope').value; }], ['hotLayout', () => { hotLayout = $('hotLayout').value; }]]) $(id).addEventListener('change', () => { fn(); paintHot(); });
-    $('hotRefresh').addEventListener('click', () => void load('hot', loadHotRank, true, paintHot));
-    $('membersClose').addEventListener('click', () => $('membersDialog').close()); $('membersDialog').addEventListener('close', () => memberSequence++); $('membersSearch').addEventListener('input', paintMembers);
+    $('hotRefresh').addEventListener('click',()=>onManualRefresh?onManualRefresh():load('hot',loadHotRank,true,paintHot));
+    $('membersClose').addEventListener('click', () => $('membersDialog').close()); $('membersDialog').addEventListener('close',()=>{memberSequence++;memberFeedback.set('idle');});$('membersRefresh').addEventListener('click',()=>{if(currentSector)void openMembers(currentSector.code,true);}); $('membersSearch').addEventListener('input', paintMembers);
     $('membersToHeat').addEventListener('click', () => { if (!memberData?.complete) return; heat.codes = memberData.rows.map(s => s.code); heat.concept = ''; heatBoard = null; $('membersDialog').close(); rank = 'heat'; navigate('rank'); });
     $('advisorChoose').addEventListener('click', () => openSearch('advisor')); $('advisorRun').addEventListener('click', () => void runAdvisor()); $('advisorMode').addEventListener('change', () => { advisorSeq++; $('advisorResult').innerHTML = ''; $('advisorHoldInputs').hidden = $('advisorMode').value !== 'hold'; $('advisorRun').disabled = false; });
     $('toolTheme').addEventListener('click', onTheme); $('toolNotify').addEventListener('click', onNotify); $('toolDate').addEventListener('click', onDate); $('toolExport').addEventListener('click', () => exportData().catch(e => { $('toolExportStatus').textContent = e.message; }));
@@ -236,7 +246,31 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     window.addEventListener('popstate', () => navigate(location.hash.slice(1), { history: false }));
     navigate(location.hash.slice(1) || 'market', { history: false });
   }
-  function openSearch(purpose) { clearResults(); $('searchPurpose').value = purpose; $('globalStockSearch').value = ''; $('searchDialog').showModal(); $('globalStockSearch').focus(); }
-  function refresh() { register(state.pools?.up); if (page === 'market') renderMarket(); if (page === 'intraday') renderBoard(); if (page === 'rank') { if (rank === 'heat') paintHeat(); if (rank === 'hot') paintHot(); } if (page === 'tools') renderTools(); }
-  return { bind, refresh, navigate, openSearch, stock: code => state.workspaceStocks.get(code), refreshActive: () => { if (page === 'rank' && rank === 'sectors') return load('sectors:' + sectorType, () => loadSectors(sectorType), true, paintSectors); if (page === 'rank' && rank === 'hot') return load('hot', loadHotRank, true, paintHot); if (page === 'market') void load('indices', loadIndices, true, paintIndices); return onRefresh(true); } };
+  function openSearch(purpose) { clearResults(); $('searchPurpose').value = purpose; $('globalStockSearch').value = ''; $('searchDialog').showModal(); interactions?.motion.search($('searchDialog'),true); $('globalStockSearch').focus(); }
+  function refresh() { updateFreshness();interactions?.refresh(); register(state.pools?.up); if (page === 'market') renderMarket(); if (page === 'intraday') renderBoard(); if (page === 'rank') { if (rank === 'heat') paintHeat(); if (rank === 'hot') paintHot(); } if (page === 'tools') renderTools(); }
+  function applyPageColor(){doc.documentElement.dataset.workspaceColor=page==='rank'?rank:page;interactions?.refresh();}
+  function updateFreshness(){
+    const data=page==='rank'&&rank==='sectors'?cache.get('sectors:'+sectorType):page==='rank'&&rank==='hot'?cache.get('hot'):null;
+    const failed=data?Boolean(data.error):state.lastErrorAt>state.lastSuccessAt;
+    const at=data?.at || state.lastSuccessAt || state.lastGoodAt,stamp=at?new Date(at):null;
+    const clock=stamp&&Number.isFinite(stamp.getTime())?stamp.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'';
+    if(data){$('freshAt').textContent=(failed?' · 更新失败':data.loading?' · 正在更新':' · 快照')+(clock?' '+clock:'');$('freshAt').className='fresh-at'+(failed?' bad':'');}
+    const warning=data?failed:failed||state.fromSnapshot||state.pools?.partial;
+    $('mobileDataStatus').hidden=!warning;
+    $('mobileDataStatus').classList.toggle('is-warning',Boolean(warning));
+    $('mobileDataStatus').textContent=failed?'最新请求失败，保留上次成功数据。':state.fromSnapshot?'正在使用本地缓存快照，联网后更新。':state.pools?.partial?'缺失来源：'+state.pools.partialMissing.join('、')+'；判断暂按缺失数据处理。':'';
+  }
+  async function refreshActive(){
+    const label=page==='rank'?{heat:'涨停天梯',sectors:'人气板块',hot:'热度榜'}[rank]:{market:'全市场',intraday:'打板',tools:'工具'}[page];
+    let result;
+    if(page==='rank'&&rank==='sectors'){const type=sectorType;result=await load('sectors:'+type,()=>loadSectors(type),true,paintSectors);}
+    else if(page==='rank'&&rank==='hot')result=await load('hot',loadHotRank,true,paintHot);
+    else if(page==='tools'&&advisorStock)result=await runAdvisor(true);
+    else if(page==='market'){
+      const values=await Promise.all([onRefresh(true),load('indices',loadIndices,true,paintIndices),...($('marketListFold').open?[loadMarket(true)]:[])]);
+      const failures=values.filter(data=>!data||data.error||data.ok===false);result=failures.length===values.length?{ok:false,error:'全市场更新失败'}:{ok:true,partial:failures.length>0||values.some(data=>data?.partial||data?.delayed)};
+    }else result=await onRefresh(true);
+    interactions?.refresh();updateFreshness();return {...result,targetLabel:label};
+  }
+  return {bind,refresh,navigate,openSearch,refreshActive,stock:code=>state.workspaceStocks.get(code),showHeat(){rank='heat';navigate('rank');}};
 }

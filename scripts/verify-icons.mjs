@@ -32,11 +32,11 @@ function luminance(px, i) {
   const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
-// 标记判定:纯白(三通道均 ≥245)——蜡烛白边框/白影线专属;
+// 标记判定:暖白(三通道均 ≥245)——蜡烛白边框/白影线专属;
 // 星海(向深空底混色,min 通道 ≤~212)与银河填充(暖奶油/紫/蓝/粉)都不算标记,
 // 否则背景星点会被误计入标记范围/安全区。
 function isMarkPx(px, i) {
-  return px[i] >= 245 && px[i + 1] >= 245 && px[i + 2] >= 245;
+  return px[i] >= 250 && px[i + 1] >= 238 && px[i + 2] >= 216;
 }
 
 // 退出码化（2026-09-08 评审批）：maskable FAIL 或标记判定空转（whites=0 会让安全区检查空转 PASS）→ exit 1，
@@ -47,7 +47,7 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
   console.log(`\n=== ${name} ${w}x${h} depth=${bitDepth} colorType=${colorType} ===`);
   const at = (x, y) => Array.from(px.slice((y * w + x) * 4, (y * w + x) * 4 + 3));
   console.log('四角:', at(0, 0).join(','), at(w - 1, 0).join(','), at(0, h - 1).join(','), at(w - 1, h - 1).join(','));
-  // 标记范围(纯白 = 蜡烛边框/影线)
+  // 标记范围(暖白 = 蜡烛边框/影线)
   let minX = w, minY = h, maxX = 0, maxY = 0, whites = 0;
   for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
     if (isMarkPx(px, (y * w + x) * 4)) {
@@ -56,8 +56,8 @@ for (const name of ['icon-512.png', 'icon-192.png', 'maskable-512.png']) {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
     }
   }
-  if (!whites) { console.log('❌ 标记判定空转：0 个纯白像素（isMarkPx 失灵或图标为纯底），安全区检查无意义'); verifyFailed = true; }
-  console.log(`白色占比 ${(100 * whites / (w * h)).toFixed(1)}% | 标记范围 x ${minX}-${maxX}(${(100 * (maxX - minX) / w).toFixed(0)}%宽) y ${minY}-${maxY}(${(100 * (maxY - minY) / h).toFixed(0)}%高)`);
+  if (!whites) { console.log('❌ 标记判定空转：0 个暖白像素（isMarkPx 失灵或图标为纯底），安全区检查无意义'); verifyFailed = true; }
+  console.log(`暖白占比 ${(100 * whites / (w * h)).toFixed(1)}% | 标记范围 x ${minX}-${maxX}(${(100 * (maxX - minX) / w).toFixed(0)}%宽) y ${minY}-${maxY}(${(100 * (maxY - minY) / h).toFixed(0)}%高)`);
   if (name === 'maskable-512.png') {
     const cx = w / 2, cy = h / 2;
     let far = 0;

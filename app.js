@@ -1,3 +1,6 @@
+import { createMobileWorkspace } from './mobile-workspace.js';
+import { createMobileChart } from './mobile-chart.js';
+import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
 import { createMobileAlerts, formatMobileNotice, mobileDay, mobileSession } from './mobile-alerts.js';
 // app.js — 编排层：数据加载、刷新循环、导航、共享渲染、详情抽屉、历史补录
 import { fetchPools, fetchQuotes, fetchTopGainers, fetchTencentQuotes, fetchKlineLite, cachedKlineBars, storeKlineBars, hydrateKlineCache, exportKlineCache, todayStr, fmtTime, shanghaiNow, shanghaiOf, setEmaToken, shouldRefetchGap, collectAuctionSnapshot, pickAuctionCoreCodes, boardTag, isTradingDay, lastTradingDate, fetchKlineTencent, fetchMonitorPool, fetchHotConcepts } from './data.js'; // 2026-09-15 情报批:+监控池/概念命中;2026-10-30 封单预警批:+腾讯盘口
@@ -30,6 +33,26 @@ const state = {
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const workspace = createMobileWorkspace({ state, onStock: openSheet, onRefresh: refresh,
+  onTheme: () => $('#themeBtn').click(), onNotify: () => openNotificationSettings().catch(e => toast(e.message)),
+  onDate: openHistoryDate, onToken: async value => { const token = String(value || '').trim(); if (token) localStorage.setItem('mp_ema_token', token); else localStorage.removeItem('mp_ema_token'); setEmaToken(token); },
+  onRefreshInterval: async value => { if (![8000,15000,30000].includes(value)) throw new Error('无效更新间隔'); state.refreshMs=value; await setKV('mobileRefreshMs',value); applyRefreshTimer(); }
+});
+const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; applyMobileJudgements(state); syncDetailJudgement(); workspace.refresh(); } });
+let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
+function syncDetailJudgement() {
+  if (!state.sheetCode) return;
+  const stock = state.pools?.up?.find(s => s.code === state.sheetCode); if (!stock?.promo?.modelVersion) return;
+  const p=stock.promo, icons={pass:'✓',warn:'!',fail:'✕',na:'–'};
+  const verdict=$('#sheetDecisionVerdict'); if(verdict) verdict.innerHTML='<div class="s-verdict"><strong>'+esc(p.verdict)+'</strong><span class="mobile-meta">一致度 '+p.score+' · 证据 '+p.coverage.percent+'%</span></div>';
+  const evidence=$('#sheetPromoEvidence'); if(evidence) evidence.innerHTML='<div class="s-promo">'+p.checklist.map(row=>'<div class="promo-row status-'+row.status+'"><i>'+icons[row.status]+'</i><span class="k">'+esc(row.label)+'</span><em>'+esc(row.note)+'</em></div>').join('')+'</div>';
+  const plan=$('#sheetPlan'); if(plan) plan.innerHTML=buildPlanHtml(stock);
+}
+function openHistoryDate() {
+  const date=state.manualDate || String(state.pools?.date || todayStr());
+  $('#historyDate').value=date.slice(0,4)+'-'+date.slice(4,6)+'-'+date.slice(6,8); $('#historyDate').max=todayStr().replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3');
+  $('#historyStatus').textContent=''; $('#dateDialog').showModal();
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 并发限额执行：把 items 分给 limit 个 worker 并行处理（避免 24 次串行 K 线等重网络往返拖慢首屏）
 async function mapWithConcurrency(items, limit, fn) {
@@ -117,7 +140,7 @@ async function ensurePrevHistory(dateKey) {
       const p = await fetchPools(prevKey, { tries: 2, timeoutMs: 8000 });
       const ups = p.up || [];
       if (!ups.length) { prevHistoryRetryAt = Date.now() + 5 * 60_000; return false; }
-      const rec = { date: prevKey, stocks: ups.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
+      const rec = { date: prevKey, stocks: ups.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, breakCount: s.breakCount ?? null, breakCountAvailable: s.breakCountAvailable, amount:s.amount, price:s.price, turnoverRate: s.turnoverRate ?? null })) };
       await putHistory(rec);
       state.history = [...(state.history || []).filter((h) => String(h.date) !== prevKey), rec].sort((a, b) => String(a.date).localeCompare(String(b.date)));
       state.historyLoaded = true;
@@ -344,7 +367,7 @@ function oneWordTag(x) {
 
 function ztCard(x) {
   const bcls = x.boards >= 4 ? 'boards-tag hi' : x.boards === 1 ? 'boards-tag b1' : 'boards-tag';
-  const pv = x.promo && x.promo.available !== false ? x.promo : null;
+  const pv = x.promo && (x.promo.modelVersion || x.promo.available !== false) ? x.promo : null;
   const pvc = pv ? (pv.verdict === '可接力' ? 'pass' : pv.verdict === '观望' ? 'warn' : 'fail') : '';
   const pvTip = pv ? esc(pv.score + ' 分 · ' + ((pv.hardFails || []).length ? pv.hardFails.join('；') : '点开看八维检查表')) : '';
   const auc = aucInfoOf(x.code);
@@ -369,7 +392,7 @@ function filterZt() {
 }
 // 涨停池卡片签名：结构（连板数/评级/信号/角色/自选星/晋级结论/竞价行）变了才整卡重建；数值（价/涨跌/封单/换手）变了只原地改字段
 function ztStructSig(x) {
-  const pv = x.promo && x.promo.available !== false ? x.promo.verdict : '';
+  const pv = x.promo && (x.promo.modelVersion || x.promo.available !== false) ? x.promo.verdict : '';
   const auc = aucInfoOf(x.code);
   const aucKey = auc ? (auc.pct + (auc.matched ? 'm' : 'v')) : '';
   return [x.boards || 1, x.tier || '', x.signal ? x.signal.state : '', x.role || '', pv, aucKey, x.firstSealTime || ''].join('|');
@@ -570,7 +593,7 @@ async function preSealPrevPool(today) {
       const p = await fetchPools(prevDate, { tries: 2, timeoutMs: 6000 });
       pool = p.up || [];
       if (pool.length) {
-        const rec = { date: prevDate, stocks: pool.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, turnoverRate: s.turnoverRate ?? null })) };
+        const rec = { date: prevDate, stocks: pool.map((s) => ({ code: s.code, boards: s.boards, industry: s.industry, name: s.name, breaks: s.breakCount ?? null, breakCount: s.breakCount ?? null, breakCountAvailable: s.breakCountAvailable, amount:s.amount, price:s.price, turnoverRate: s.turnoverRate ?? null })) };
         putHistory(rec).catch(() => {});
       }
     } catch { pool = null; }
@@ -702,6 +725,7 @@ function renderAuctionWatchlist() {
 }
 
 function renderIntraday() {
+  if (state.pools) applyMobileJudgements(state);
   // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
   const ctx = { state, toast };
   renderOpportunity(ctx);
@@ -710,7 +734,7 @@ function renderIntraday() {
   renderZt(); renderDowns(); renderRadar();
   // 2026-09-10:日期紧凑格式 09-10 周四;2026-09-13 休市批:显示数据的日期而非今天
   // (休市日回拉上一交易日,标签必须跟着数据走,否则周六显示"09-13 周六"配周五数据)
-  const d = state.manualDate || String(state.pools?.date || '') || todayStr(); // String():旧 IDB 快照的 date 是数字(qdate 原样),拔类型雷
+  const d = String(state.pools?.date || '') || state.manualDate || todayStr(); // String():旧 IDB 快照的 date 是数字(qdate 原样),拔类型雷
   const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(d.slice(0, 4), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8))).getDay()];
   $('#dateLabel').textContent = d.slice(4, 6) + '-' + d.slice(6, 8) + ' 周' + wd;
   $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
@@ -746,8 +770,15 @@ async function openSheet(code) {
   let stock = null;
   if (state.pools) stock = state.pools.up.find((x) => x.code === code) || state.pools.down.find((x) => x.code === code) || state.pools.broken.find((x) => x.code === code);
   if (!stock) { const w = state.watch.find((x) => x.code === code); if (w) stock = { code, name: (state.quotes[code] && state.quotes[code].name) || w.name || code, boards: 1, industry: '—', changePct: null, price: null }; }
+  if (!stock) stock = workspace.stock(code) || null;
   if (!stock) return;
-  state.sheetCode = code;
+  if (state.sheetCode === code && sheet.classList.contains('show')) { syncDetailJudgement(); return; }
+  const sheetRun = ++sheetSequence;
+  if (state.sheetCode === null) sheetOrigin = document.activeElement;
+  if ($('#membersDialog').open) { sheetReturnDialog = $('#membersDialog'); sheetReturnDialog.close(); }
+  detailChart.close(); state.sheetCode = code;
+  sheet.scrollTop = 0; sheet.inert = false; sheet.setAttribute('aria-hidden', 'false');
+  document.querySelector('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.mobile-bottom-nav').inert = true;
   // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
   //（旧版渲染前 await 报价，弱网下最坏 3×9s 抽屉不出现，体感「点了没反应」）
   let d = freshQuote(code) || {};
@@ -762,13 +793,13 @@ async function openSheet(code) {
   // 2026-09-13 精简批(用户拍板):抽屉最终形态——10秒层 + 晋级检查表(唯一深挖区,默认展开)
   // + 相似日后续表现单行(后台静默加载)。集合竞价/行情明细/相似形态卡三组砍
   // (竞价信息仍活在卡片竞价行与八维「竞价承接」维度,只是抽屉无深挖区)。
-  const pv = stock.promo && stock.promo.available !== false;
+  const pv = stock.promo && (stock.promo.modelVersion || stock.promo.available !== false);
   let verdictHtml = '<div class="s-verdict">';
   if (stock.tier) verdictHtml += '<span class="sv-line">' + tierBadge(stock.tier) + ' <b>评分 ' + (stock.score ?? '--') + '</b></span>';
   if (pv) {
     const vcls = stock.promo.verdict === '可接力' ? 'pass' : stock.promo.verdict === '观望' ? 'warn' : 'fail';
     verdictHtml += '<span class="sp-verdict verdict-' + vcls + '"><b>' + esc(stock.promo.verdict) + '</b><span>' + stock.promo.score +
-      ' · 容错 ' + (stock.promo.faultTolerance != null ? Math.round(stock.promo.faultTolerance * 100) + '%' : '--') + '</span></span>';
+      (stock.promo.modelVersion ? ' · 情境一致度' : ' · 原规则证据') + '</span></span>';
     if ((stock.promo.hardFails || []).length) verdictHtml += '<span class="sv-fail">硬否决：' + esc(stock.promo.hardFails.join('、')) + '</span>';
     if ((stock.promo.downgrades || []).length) verdictHtml += '<span class="sv-warn">降级：' + esc(stock.promo.downgrades.join('、')) + '</span>';
   } else if (!stock.tier) verdictHtml += '<span class="muted">暂无评级</span>';
@@ -790,19 +821,23 @@ async function openSheet(code) {
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
   const mon = (state.monitorPool || []).find((m) => m.code === code);
-  body.innerHTML = head + verdictHtml + signalHtml +
+  body.innerHTML = head + '<div id="sheetDecisionVerdict">' + verdictHtml + '</div>' + signalHtml + '<div class="mobile-chart-panel" id="sheetKline"></div>' +
     (mon ? '<div class="s-risk">⚠ 交易所重点监控中 · 至' + esc(mon.end) + '</div>' : '') +
     '<div class="s-concepts" id="sheetConcepts" hidden><span class="muted">概念命中</span><div class="con-tags" id="sheetConceptTags"></div></div>' +
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
-    promoHtml +
+    '<div id="sheetPromoEvidence">' + promoHtml + '</div>' +
     '<div id="sheetPlan"></div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似日表现计算中…</div></div>' +
     '<div class="s-similar" id="boardPromoRef"></div>' +
     '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
+  detailChart.mount(code, $('#sheetKline'));
+  syncDetailJudgement();
+  $('#sheetClose').focus({preventScroll:true});
   loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
   fetchHotConcepts(code).then((list) => { // 2026-09-15 概念命中(东财 CORS 开,失败静默)
+    if (state.sheetCode !== code || sheetRun !== sheetSequence) return;
     const box = $('#sheetConcepts');
     if (!box) return;
     box.hidden = !list.length;
@@ -829,7 +864,7 @@ async function openSheet(code) {
   }
   // 2026-09-13 操作参考卡:先渲染(红档缺席),出场形态后台算完原地补——抽屉零等待弹出
   $('#sheetPlan').innerHTML = buildPlanHtml(stock);
-  loadExitSignals(code, stock).then(() => { if (state.sheetCode === code) { const el = $('#sheetPlan'); if (el) el.innerHTML = buildPlanHtml(stock); } });
+
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
   // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出
@@ -837,7 +872,7 @@ async function openSheet(code) {
     const q = await fetchQuotes([code], { tries: 2, timeoutMs: 5000 }).catch(() => ({}));
     const nd = q[code];
     if (nd && nd.price != null) mergeQuotes(q);
-    if (state.sheetCode !== code) return; // 已关抽屉/切到别的股：丢弃补数
+    if (state.sheetCode !== code || sheetRun !== sheetSequence) return; // 已关抽屉/切股：丢弃补数
     if (nd && nd.price != null) patchSheetQuote(stock, nd);
     else { const err = $('#sheetQuoteErr'); if (err) err.textContent = '实时报价获取失败，展示最近数据'; }
   }
@@ -861,7 +896,7 @@ function kvEss(s) {
   return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
 // 2026-09-13 精简批:kvDet 已随「行情明细」折叠组砍(用户拍板)
-function closeSheet() { state.sheetCode = null; $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); }
+function closeSheet() { sheetSequence++; state.sheetCode = null; detailChart.close(); $('#scrim').classList.remove('show'); $('#sheet').classList.remove('show'); $('#sheet').inert=true; $('#sheet').setAttribute('aria-hidden','true'); document.querySelector('main').inert=false; document.querySelector('.topbar').inert=false; document.querySelector('.mobile-bottom-nav').inert=false; if(sheetReturnDialog){sheetReturnDialog.showModal();sheetReturnDialog=null;} if(sheetOrigin?.isConnected)sheetOrigin.focus({preventScroll:true}); sheetOrigin=null; }
 
 // 2026-09-11 拆解融合批:情绪 chip 点开分指标明细(驾驶舱移入横幅的归宿)——复用 scrim+sheet,不动 sheetCode
 function openEmoSheet() {
@@ -892,51 +927,10 @@ const simBarsCache = new Map();
 // 灰档=站岗条件(发生了就走)。卖出理由=买入逻辑失效(断板=晋级失效/爆量大阴=高位分歧/竞价不及预期=承接证伪)。
 const planBarsCache = new Map();
 function buildPlanHtml(stock) {
-  const boards = Math.max(1, Number(stock.boards) || 1);
-  const [lo, hi] = boards >= 3 ? assessmentRules.openBandBoard3Plus : assessmentRules.openBandBoard2;
-  const rows = [];
-  // 买点:竞价合格区间 + 信号触发条件(引擎原话)——跌停池股票不显示(引擎从未给跌停股
-  // 买点,无差别套模板是误导;炸板股保留,弱转强次日模式成立)
-  const inDownPool = (state.pools?.down || []).some((x) => x.code === stock.code);
-  if (!inDownPool) {
-    const triggers = (stock.signal?.triggers || []).slice(0, 2).join(' · ');
-    rows.push(['buy', '买点', `竞价高开 ${lo}~${hi}%(${boards}板合格区间)` + (triggers ? ' · ' + esc(triggers) : '')]);
-  }
-  // 回避:硬否决清单(引擎原话,不新编)
-  const avoids = (stock.promo?.hardFails || []).slice(0, 2);
-  if (avoids.length) rows.push(['avoid', '回避', esc(avoids.join(' / '))]);
-  // 失效-红档:出场形态引擎(Tencent 真实K线;exitSignalsOf 同步哨兵锁两端一致)
-  const exits = stock.__exits || [];
-  for (const x of exits) rows.push(['hit', '失效 ▲', esc(x.note)]);
-  // 失效-灰档:站岗条件(按板位/模式给适用条款)
-  const watch = [];
-  if (boards >= 2) watch.push('断板当日走 · 盘中炸板不回封当日走');
-  else watch.push('盘中炸板不回封当日走');
-  const gapRow = (state.gap?.candidates || []).find((c) => c.code === stock.code);
-  if (gapRow && gapRow.expectedMid != null) watch.push(`次日开盘不及 +${gapRow.expectedMid}%(预期中值)`);
-  if (stock.buyType === '弱转强') watch.push('次日开盘 ≤0%(套利不成即走)');
-  rows.push(['watch', '失效', esc(watch.join(' · '))]);
-  // 仓位:市场级赢面档(养家表)
-  const pa = state.positionAdvice;
-  if (pa && pa.label && pa.label !== '--') rows.push(['pos', '仓位', esc(pa.label) + '(' + (pa.winrateSource === 'measured' ? '实测校准' : '情绪代理') + ')']);
-  return '<div class="s-plan">' + rows.map(([cls, k, v]) =>
-    '<div class="plan-row ' + cls + '"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>').join('') +
-    '<div class="muted" style="margin-top:6px">体系规则拼装,非投资建议 · 判决前阈值冻结</div></div>';
+  const p=stock.promo?.actionPlan;
+  if(!p)return '<p class="mobile-note">池外股票不使用涨停池判决；可在工具中查看独立买卖参考。</p>';
+  return '<div class="s-plan"><div class="mobile-section-head"><h3>操作参考</h3><span>统一判决</span></div>'+[['下一步',p.entry],['待确认',(p.conditions||[]).join('；')],['失效参考',(p.invalidation||[]).join('；')],['持有',p.hold],['风险预算',p.position],['成交',p.execution]].filter(row=>row[1]).map(row=>'<div class="pl-row"><span>'+esc(row[0])+'</span><b>'+esc(row[1])+'</b></div>').join('')+'</div>';
 }
-async function loadExitSignals(code, stock) {
-  // 出场形态判定:腾讯 60 根(复用相似案例通道),补 preClose 后喂 exitSignalsOf
-  let bars = planBarsCache.get(code) || null;
-  if (!bars || bars.length < 8) {
-    try { bars = await fetchKlineTencent(code, 60); } catch (e) { bars = null; }
-    if (bars && bars.length) {
-      bars = bars.map((b, i) => ({ ...b, preClose: i > 0 ? bars[i - 1].close : null }));
-      planBarsCache.set(code, bars);
-    }
-  }
-  if (!bars || bars.length < 6) { stock.__exits = []; return; }
-  stock.__exits = exitSignalsOf(bars, { boards: stock.boards != null ? Number(stock.boards) : undefined, mode: stock.buyType, openPct: state.auctionPctByCode[code] ?? null });
-}
-
 async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');
   if (!el) return;
@@ -972,7 +966,7 @@ async function loadSimilarCases(code) {
 /* ---------------- 导航(2026-09-11 一屏到底批:复盘/设置已删,单视图无需切换) ----------------
    switchView/renderView 简化为 renderCurrentView 直渲染盘中;视图切换的痕迹
    (state.view==='intraday' 判断)保留——省得全文件改判空 */
-function renderCurrentView() { renderIntraday(); }
+function renderCurrentView() { state.previousTradingDate = previousTradingDayKey(String(state.pools?.date || '')); applyMobileJudgements(state); renderIntraday(); workspace.refresh(); }
 
 /* ---------------- 侧滑菜单已删(2026-09-11 减法批) ---------------- */
 
@@ -1023,7 +1017,9 @@ async function refresh(force = false) {
     persistLastGood(pools); // 先落原始池（未挂派生字段，体积小），失败静默
     computeDerived(pools);
     state.pools = pools;
+    saveCurrentHistory(pools);
     if (!state.monitorPool) refreshMonitorPool(); // 2026-09-15 避雷批:首次池成功后拉一次(30 分钟 TTL 内不重拉;失败静默)
+    applyMobileJudgements(state);
     renderStatus();
     renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
     // 2026-11-04: 历史里缺「真正的前一交易日」时后台补一天（通常已存在，直接返回）。
@@ -1039,14 +1035,23 @@ async function refresh(force = false) {
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});
-    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); }).catch(() => {}); // 2026-09-11:notifySignalChanges 调用已随通知链删
+    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); return warmMobileJudgements(state,()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();}); }).catch(() => {});
   } catch (e) {
     state.lastErrorAt = Date.now();
+    if (state.pools) { applyMobileJudgements(state); workspace.refresh(); syncDetailJudgement(); }
     renderStatus();
     if (!state.pools) showOfflineEmpty(e); // 无任何可用数据（含快照）：清骨架屏给显式离线态
     toast('刷新失败：' + e.message);
   }
   finally { spinStop(); refreshing = false; }
+}
+let historySavedAt = 0;
+function saveCurrentHistory(pools) {
+  if (!pools.sources?.up || state.manualDate || Date.now()-historySavedAt<30000) return;
+  historySavedAt=Date.now();
+  const rec={date:String(pools.date),phase:state.phase,stocks:pools.up.map(s=>({code:s.code,name:s.name,boards:s.boards,industry:s.industry,price:s.price,amount:s.amount,breaks:s.breakCount,breakCount:s.breakCount,breakCountAvailable:s.breakCountAvailable,turnoverRate:s.turnoverRate}))};
+  state.history=[...state.history.filter(h=>String(h.date)!==rec.date),rec].sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  void putHistory(rec).catch(()=>{});
 }
 // lastGood 落盘节流：此前每 15s tick 全量直写 IDB（整池结构克隆+写盘，低端机可感知卡顿）；
 // 收敛为至多 30s 一次，隐藏/关闭时立即冲刷，离线快照最多旧 30s（冷启动 SWR 完全可接受）。
@@ -1279,6 +1284,7 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
           pullbackFirstBoard: feats.pullbackFirstBoard === true,
         });
       }
+      applyMobileJudgements(state); workspace.refresh();
       renderZt(); // 徽标随行级 diff 原地更新
       // 抽屉正开着池内涨停股时同步重渲染：promo 刚定稿立即回填检查表
       //（此前只刷 renderZt，开着抽屉点开的股检查表永不出现）。
@@ -1377,10 +1383,15 @@ function bind() {
   });
   // 2026-09-11 一屏到底批:bottomnav 绑定已随导航整删
   // 2026-09-11 减法批:menu-item 委托已随侧滑菜单整删(零元素,绑定是死代码)
-  $('#refreshBtn').addEventListener('click', () => refresh(true));
+  $('#refreshBtn').addEventListener('click', () => workspace.refreshActive());
   // 2026-09-11 详情抽屉下拉关闭(用户点名只能点关闭太死板)——sheet 顶部 60px 拖拽热区,
   // 跟手位移(transition 摘掉防打架),下拉超 80px 松手关,不足回弹;滚到顶再往下拉也关(自然手势)
   setupSheetDrag();
+  workspace.bind();
+  document.addEventListener('keydown',e=>{if(!$('#sheet').classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();closeSheet();}if(e.key==='Tab'){const items=[...$('#sheet').querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);const first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}});
+  $('#historyClose').addEventListener('click',()=>$('#dateDialog').close());
+  $('#historyToday').addEventListener('click',()=>{state.manualDate='';$('#dateDialog').close();refresh(true);});
+  $('#historyApply').addEventListener('click',()=>{const date=$('#historyDate').value.replaceAll('-','');if(!/^\d{8}$/.test(date)||date>todayStr()||!isTradingDay(date)){$('#historyStatus').textContent='请选择有效的历史交易日';return;}state.manualDate=date;$('#dateDialog').close();workspace.navigate('rank');refresh(true);});
   // 主题切换（TSP 式明暗双主题；默认暗色，localStorage 记忆；首屏初始化在 index.html 内联脚本防闪色）
   $('#themeBtn').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
@@ -1404,10 +1415,7 @@ function bind() {
     dateEl.addEventListener('pointerdown', () => {
       lpTimer = setTimeout(() => {
         lpTimer = null;
-        const v = prompt('查看历史行情日期 (YYYYMMDD),留空=今日', state.manualDate || '');
-        if (v === null) return;
-        state.manualDate = v.trim();
-        refresh();
+        openHistoryDate();
       }, 550);
     });
     ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => dateEl.addEventListener(ev, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }));
@@ -1545,7 +1553,7 @@ function setupEdgeJump() {
 /* ---------------- 启动 ---------------- */
 async function init() {
   // SW 注册放最前：弱网首访不至于等几十秒的网络超时后才装上
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(() => {});
+
   window.addEventListener('unhandledrejection', (e) => { console.warn('[mp] 未处理的 Promise 拒绝：', e.reason); });
   // 2026-09-11 一屏到底批:版本号进日期长按弹层 title;设置页已删
   try {
@@ -1560,6 +1568,7 @@ async function init() {
     // 竞价终态水合（date 校验当日有效）：重开 app 免重抓全池，promo/预期差/抽屉立即有撮合口径
     if (warm && warm.auction && warm.auction.available && String(warm.auction.date) === todayStr()) applyAuctionPayload(warm.auction);
     state.refreshMs = 8000; // 2026-09-11 一屏到底批:设置已删,固定 8 秒(同日由 5s 上调——渲染压力减 40%,用户实测新鲜度差别不大;失败退避逻辑仍在)
+    state.refreshMs = await getKV('mobileRefreshMs', 8000).catch(()=>8000); if(![8000,15000,30000].includes(state.refreshMs))state.refreshMs=8000;
     bind();
     state.history = hist.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     // 2026-11-04: 历史库只留最近 60 个交易日（原修剪只写在零调用方的 loadHistory 里,等于没执行过）。
@@ -1592,16 +1601,5 @@ async function init() {
     console.error('[mp] 启动失败：', e);
     try { toast('启动出现问题：' + (e.message || e)); } catch (e2) { /* ignore */ }
   }
-}
-// 新 SW 接管后自动重载一次，消除「新 HTML 配旧 JS/CSS」的混合版本窗口；
-// 首次安装的 claim 不算升级；sessionStorage 防循环重载。
-if ('serviceWorker' in navigator) {
-  let hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController) { hadController = true; return; }
-    if (sessionStorage.getItem('mp-sw-reloaded')) return;
-    sessionStorage.setItem('mp-sw-reloaded', '1');
-    location.reload();
-  });
 }
 init();

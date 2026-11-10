@@ -223,7 +223,7 @@ function mapPool(row) {
     code: String(row.c),
     market: row.m,
     name: row.n,
-    price: (row.p || 0) / 1000, // 池价格单位为厘，÷1000 得元
+    price: toNum(row.p) > 0 ? toNum(row.p) / 1000 : null, // 池价格单位为厘，÷1000 得元
     changePct: zdp,
     changePercent: zdp,
     boards,
@@ -288,10 +288,11 @@ function mergePools(date, settled) {
 async function fetchPools(date, opts = {}) {
   const tries = opts.tries ?? 3;
   const timeoutMs = opts.timeoutMs ?? 9000;
+  const validPool = promise => promise.then(data => { if (!data?.data || (!Array.isArray(data.data.pool) && data.data.tc !== 0)) throw new Error('池响应缺少有效数据'); return data; });
   const settled = await Promise.allSettled([
-    getJSON(EMA.pool('up', date), tries, timeoutMs),
-    getJSON(EMA.pool('down', date), tries, timeoutMs),
-    getJSON(EMA.pool('broken', date), tries, timeoutMs),
+    validPool(getJSON(EMA.pool('up', date), tries, timeoutMs)),
+    validPool(getJSON(EMA.pool('down', date), tries, timeoutMs)),
+    validPool(getJSON(EMA.pool('broken', date), tries, timeoutMs)),
   ]);
   return mergePools(date, settled);
 }
@@ -300,7 +301,7 @@ const ULIST_CHUNK = 60; // 单次 ulist secids 上限，超出的分块
 // 分块后并发拉取（并发上限 6），避免 300+ 代码串行往返拖慢首屏；单块失败仅缺失该块，其余正常返回。
 // opts 透传 fail-fast 参数（tries/timeoutMs）给 getJSON——抽屉后台补价等「有本地数据兜底」的调用方应传短超时。
 // 停牌/缺字段时东财返回 '-'（字符串）：统一清洗成 null，下游 toFixed/fmtMoney 只判 null（曾致抽屉 toFixed 抛错打不开）。
-const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const toNum = (v) => (v == null || v === '' || typeof v === 'boolean' || !Number.isFinite(Number(v)) ? null : Number(v));
 async function fetchQuotes(codes, opts = {}) {
   const list = (codes || []).map(String);
   if (!list.length) return {};
@@ -370,7 +371,7 @@ async function fetchKlineLite(code, lmt = 8) {
   const data = await withPush2HisSlot(() => getJSON(url));
   const bars = (data?.data?.klines || []).map((line) => {
     const p = String(line).split(',');
-    return { date: p[0], open: Number(p[1]), close: Number(p[2]), high: Number(p[3]), low: Number(p[4]), volume: Number(p[5]) };
+    return { date: p[0], open: Number(p[1]), close: Number(p[2]), high: Number(p[3]), low: Number(p[4]), volume: Number(p[5]), amount: toNum(p[6]) };
   }).filter((b) => b.close > 0 && b.volume > 0);
   return bars;
 }
@@ -472,7 +473,7 @@ const FS_ALL = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048';
 const FS_MAP = { '': FS_ALL, sh: 'm:1+t:2,m:1+t:23', sz: 'm:0+t:80,m:0+t:6', bj: 'm:0+t:81+s:2048' };
 async function fetchAllMarket({ market = '', page = 1, pageSize = 60, sort = 'f6', order = 'desc' } = {}) {
   const fs = FS_MAP[market] || FS_ALL;
-  const po = order === 'desc' ? 0 : 1; // 0=降序 1=升序
+  const po = order === 'desc' ? 1 : 0; // 东方财富：1=降序，0=升序
   const url = `https://push2.eastmoney.com/api/qt/clist/get?pn=${page}&pz=${pageSize}&po=${po}&np=1&fltt=2&invt=2&fid=${sort}&fs=${encodeURIComponent(fs)}&fields=f12,f13,f14,f2,f3,f5,f6,f18,f100,f124&ut=${EMA.token}`;
   const data = await getJSON(url);
   const total = data?.data?.total ?? 0;

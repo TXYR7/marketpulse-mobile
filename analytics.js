@@ -1844,3 +1844,5 @@ export {
   buildPlan, attributionOf, DEFAULT_RISK_LIMITS, evaluatePortfolioRisk, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery,
   PROMO_RULES as assessmentRules, EXIT_RULES, assessPromotion, auctionVerdict, exitSignalsOf, klineFeatures, cycleOf, detectPreSealAlerts, buildAuctionWatchlist, winratePosition, MENTAL_NOTES, contextNotes, diffSignalSnapshot, limitThresholdOf, isInTradingSession, limitPriceOf, isMainBoardShare, isExcludedPreSealName, PARAM_MANIFEST
 };
+
+export { fmtSealTime };

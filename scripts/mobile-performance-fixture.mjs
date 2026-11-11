@@ -30,6 +30,7 @@ export async function workspaceFixture(source=readFileSync(new URL('../mobile-wo
     './analytics.js':`export const limitThresholdOf=()=>10,COPILOT_QUESTIONS=[],buildCopilotAnswer=()=>'',routeCopilotQuery=()=>'',buildModeMonitor=()=>fixture.monitor();`,
     './store.js':`export const getKV=async(_k,v)=>v,setKV=async()=>{},getReviews=()=>fixture.readReviews(),getTrades=()=>fixture.readTrades(),putReview=async()=>{};`,
     './version.js':`export const APP_VERSION='test';`,
+    './mobile-detail.js':readFileSync(new URL('../mobile-detail.js',import.meta.url),'utf8'),
     './mobile-render.js':readFileSync(new URL('../mobile-render.js',import.meta.url),'utf8')
   };
   const modules=new Map();const link=async spec=>{if(!modules.has(spec)){const m=new vm.SourceTextModule(mocks[spec],{context});modules.set(spec,m);await m.link(link);}return modules.get(spec);};

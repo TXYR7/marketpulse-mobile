@@ -8,6 +8,7 @@ import { limitThresholdOf, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQu
 import { getKV, setKV, getTrades, getReviews, putReview } from './store.js';
 import { APP_VERSION } from './version.js';
 import { createMobilePaintQueue } from './mobile-render.js';
+import { quoteTone } from './mobile-detail.js';
 
 const empty = text => '<div class="mobile-empty">' + esc(text) + '</div>';
 const money = value => value == null ? '—' : fmtMoney(value);
@@ -15,7 +16,7 @@ const price = value => num(value) > 0 ? Number(value).toFixed(2) : '—';
 const choice = (value, label) => '<option value="' + value + '">' + label + '</option>';
 const search = (id, text) => '<label class="mobile-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="' + id + '" type="search" autocomplete="off" placeholder="' + text + '" aria-label="' + text + '"></label>';
 function stockRow(stock, prefix = '', meta = '') {
-  return '<article class="mobile-stock-row"><span class="stock-prefix">' + prefix + '</span><div class="mobile-stock-name"><strong>' + esc(stock.name || stock.code) + '</strong><small>' + esc(stock.code) + (meta ? ' · ' + esc(meta) : '') + '</small></div><div class="mobile-stock-price"><b>' + price(stock.price) + '</b><small class="' + pctClass(stock.changePct ?? stock.gainPct ?? stock.changePercent) + '">' + pctText(stock.changePct ?? stock.gainPct ?? stock.changePercent) + '</small></div><button class="stock-detail" type="button" data-code="' + esc(stock.code) + '" aria-label="查看' + esc(stock.name || stock.code) + '详情和K线">详情<span>K线</span></button></article>';
+  return '<article class="mobile-stock-row"><span class="stock-prefix">' + prefix + '</span><div class="mobile-stock-name"><strong>' + esc(stock.name || stock.code) + '</strong><small>' + esc(stock.code) + (meta ? ' · ' + esc(meta) : '') + '</small></div><div class="mobile-stock-price"><b class="' + quoteTone(stock.price,stock.changePct ?? stock.gainPct ?? stock.changePercent) + '">' + price(stock.price) + '</b><small class="' + pctClass(stock.changePct ?? stock.gainPct ?? stock.changePercent) + '">' + pctText(stock.changePct ?? stock.gainPct ?? stock.changePercent) + '</small></div><button class="stock-detail" type="button" data-code="' + esc(stock.code) + '" aria-label="查看' + esc(stock.name || stock.code) + '详情和K线">详情<span>K线</span></button></article>';
 }
 export function quickRows(stocks, { scope = 'all', query = '' } = {}) {
   return stocks.filter(s => {
@@ -31,8 +32,9 @@ export function decisionBadgeTone(s) {
 }
 function decisionCard(s) {
   const p = s.promo || {}, plan = p.actionPlan || {}, tone = decisionBadgeTone(s);
+  const failurePrice=Number(/价格失效参考 ([\d.]+)/.exec((plan.invalidation||[]).join(' '))?.[1])||null;
   const reason = p.hardFails?.[0] || p.downgrades?.[0] || p.checklist?.find(r => r.status !== 'pass')?.note || p.checklist?.[0]?.note || '判断数据待补齐';
-  return '<article class="decision-card"><div class="decision-heading"><div><strong>' + esc(s.name) + '</strong><small>' + esc(s.code) + ' · ' + (s.boards || 1) + '板 · ' + esc(s.industry || '未分类') + '</small></div><span class="decision-verdict ' + tone + '">' + esc(p.verdict || '待确认') + '</span></div><p class="decision-reason">' + esc(reason) + '</p><div class="decision-next"><span>下一步</span><p>' + esc(plan.entry || s.signal?.next || '等待市场、价格与承接证据') + '</p></div><div class="decision-footer"><span>失效参考 <b>' + price(Number(/价格失效参考 ([\d.]+)/.exec((plan.invalidation || []).join(' '))?.[1]) || null) + '</b></span><span>现价 <b class="' + pctClass(s.changePct) + '">' + price(s.price) + '</b></span><button type="button" class="stock-detail" data-code="' + s.code + '">详情 / K线</button></div></article>';
+  return '<article class="decision-card" data-tone="' + tone + '"><div class="decision-heading"><div><strong>' + esc(s.name) + '</strong><small>' + esc(s.code) + ' · ' + (s.boards || 1) + '板 · ' + esc(s.industry || '未分类') + '</small></div><span class="decision-verdict ' + tone + '">' + esc(p.verdict || '待确认') + '</span></div><p class="decision-reason">' + esc(reason) + '</p><div class="decision-next"><span>下一步</span><p>' + esc(plan.entry || s.signal?.next || '等待市场、价格与承接证据') + '</p></div><div class="decision-footer"><span data-available="' + (failurePrice>0) + '">失效参考 <b>' + price(failurePrice) + '</b></span><span>现价 <b class="' + quoteTone(s.price,s.changePct) + '">' + price(s.price) + '</b></span><button type="button" class="stock-detail" data-code="' + s.code + '">详情 / K线</button></div></article>';
 }
 export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNotify, onDate, onToken, onRefreshInterval, interactions = null, onManualRefresh = null, onViewRender = () => {}, doc = document, win = window }) {
   const $ = id => doc.getElementById(id);
@@ -62,7 +64,7 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
       finally { pending.delete(key); }
     })(); pending.set(key, task); return task;
   }
-  function meta(el, data) { if (!el) return; el.textContent = data?.loading ? '正在更新…' : data?.error ? '更新失败' + (data.rows ? '，保留上次快照' : '') + ' · 点击重试' : snapshotMetaText(data); }
+  function meta(el, data) { if (!el) return; el.dataset.status=data?.error?'error':data?.loading?'loading':'info'; el.textContent = data?.loading ? '正在更新…' : data?.error ? '更新失败' + (data.rows ? '，保留上次快照' : '') + ' · 点击重试' : snapshotMetaText(data); }
   function navigate(next, { history = true, force = false } = {}) {
     if (!['market', 'intraday', 'rank', 'tools'].includes(next)) next = 'market';
     if (initialized && next === page && !force) return;
@@ -78,6 +80,8 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     paints.request({afterPaint:true});
   }
   function renderActive() {
+    // Quote observations and detail fields still update; repaint the covered page on close.
+    if(doc.querySelector('.sheet.show'))return;
     const key = page === 'rank' ? 'rank:' + rank : page;
     const changed = rendered.get(key) !== revision;
     if (changed) {
@@ -100,7 +104,7 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   function renderMarket() {
     const phase=state.emotion?.phase; $('marketHero').dataset.phaseTone=['退潮','退潮初期','冰点'].includes(phase)?'risk':phase==='主升期'?'positive':phase?'caution':'unknown';
     const p = state.pools, e = state.emotion || {}, themes = state.themes || [], leaders = state.leaders || [];
-    setHTML($('marketHero'), '<div class="market-phase"><span>市场情绪</span><span class="mobile-tag">' + esc(state.fromSnapshot ? '缓存快照' : state.marketClosed || state.manualDate || shanghaiNow().getHours() >= 15 ? '收盘快照' : '盘面观察') + '</span></div><div class="market-hero-value"><strong>' + esc(e.phase || '等待行情') + '</strong><div><b>' + (e.emotionIndex ?? '—') + '</b><small>情绪指数</small></div></div><p>' + esc(e.advice || state.plan?.summary || '先看情绪、主线与核心，再看个股确认') + '</p><div class="market-kpis">' + [['涨停', p?.upCount], ['跌停', p?.downCount], ['最高板', p?.sources?.up ? Math.max(0, ...(p.up || []).map(s => s.boards || 1)) : null], ['炸板率', state.breakRate?.rate != null ? state.breakRate.rate.toFixed(1) + '%' : null]].map(([label, v]) => '<div><b>' + (v ?? '—') + '</b><span>' + label + '</span></div>').join('') + '</div>');
+    setHTML($('marketHero'), '<div class="market-phase"><span>市场情绪</span><span class="mobile-tag" data-status="' + (state.fromSnapshot?'cached':p?.partial?'partial':'live') + '">' + esc(state.fromSnapshot ? '缓存快照' : state.marketClosed || state.manualDate || shanghaiNow().getHours() >= 15 ? '收盘快照' : '盘面观察') + '</span></div><div class="market-hero-value"><strong>' + esc(e.phase || '等待行情') + '</strong><div><b>' + (e.emotionIndex ?? '—') + '</b><small>情绪指数</small></div></div><p>' + esc(e.advice || state.plan?.summary || '先看情绪、主线与核心，再看个股确认') + '</p><div class="market-kpis">' + [['涨停', p?.upCount], ['跌停', p?.downCount], ['最高板', p?.sources?.up ? Math.max(0, ...(p.up || []).map(s => s.boards || 1)) : null], ['炸板率', state.breakRate?.rate != null ? state.breakRate.rate.toFixed(1) + '%' : null]].map(([label, v]) => '<div data-metric="' + label + '" data-available="' + (v != null) + '" data-alert="' + (label==='炸板率'&&state.breakRate?.alert===true) + '"><b>' + (v ?? '—') + '</b><span>' + label + '</span></div>').join('') + '</div>');
     const max = Math.max(1, ...themes.slice(0, 6).map(t => t.limitUpCount || t.count || t.stocks?.length || 0));
     setHTML($('marketThemes'), themes.length ? themes.slice(0, 6).map((t, i) => '<button class="theme-rank-row" type="button" data-theme-choice="' + esc(t.name || t.industry) + '"><span class="theme-rank-num">' + String(i + 1).padStart(2, '0') + '</span><div><strong>' + esc(t.name || t.industry) + '</strong><small>涨停 ' + (t.limitUpCount ?? t.count ?? t.stocks?.length ?? '—') + '只 · 连板 ' + (t.multiBoardCount ?? '—') + '只</small><i class="theme-track"><i style="width:' + Math.max(3, (t.limitUpCount || t.count || t.stocks?.length || 0) / max * 100) + '%"></i></i></div><b data-score-available="' + (num(t.score) != null) + '">' + (num(t.score) != null ? Number(t.score).toFixed(0) : '—') + '<small>强度</small></b></button>').join('') : empty('等待主线数据'));
     register(leaders);
@@ -113,7 +117,7 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   }
   function paintIndices(data) {
     if(page!=='market')return;
-    if(page==='market')updateFreshness(); if (!data?.rows) { setHTML($('marketIndices'), '<span class="mobile-meta">' + esc(data?.error || '指数加载中…') + '</span>'); return; } setHTML($('marketIndices'), data.rows.map(r => '<div><span>' + esc(r.name) + '</span><b>' + price(r.price) + '</b><small class="' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</small></div>').join('')); }
+    if(page==='market')updateFreshness(); if (!data?.rows) { setHTML($('marketIndices'), '<span class="mobile-meta">' + esc(data?.error || '指数加载中…') + '</span>'); return; } setHTML($('marketIndices'), data.rows.map(r => '<div><span>' + esc(r.name) + '</span><b class="' + quoteTone(r.price,r.changePct) + '">' + price(r.price) + '</b><small class="' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</small></div>').join('')); }
   function marketKey() { return ['market', marketPage, marketMarket, marketSort, marketQuery].join(':'); }
   function loadMarket(force = false) {
     const key = marketKey(), args = { page: marketPage, market: marketMarket, sort: marketSort, query: marketQuery };
@@ -291,8 +295,8 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('membersToHeat').addEventListener('click', () => { if (!memberData?.complete) return; heat.codes = memberData.rows.map(s => s.code); heat.concept = ''; heatBoard = null; $('membersDialog').close(); rank = 'heat'; rendered.delete('rank:heat'); navigate('rank', {force:true}); });
     $('advisorChoose').addEventListener('click', () => openSearch('advisor')); $('advisorRun').addEventListener('click', () => void runAdvisor()); $('advisorMode').addEventListener('change', () => { advisorSeq++; $('advisorResult').innerHTML = ''; $('advisorHoldInputs').hidden = $('advisorMode').value !== 'hold'; $('advisorRun').disabled = false; });
     $('toolTheme').addEventListener('click', onTheme); $('toolNotify').addEventListener('click', onNotify); $('toolDate').addEventListener('click', onDate); $('toolExport').addEventListener('click', () => exportData().catch(e => { $('toolExportStatus').textContent = e.message; }));
-    $('toolSave').addEventListener('click', async () => { try { await onToken($('toolToken').value); await onRefreshInterval(Number($('toolRefresh').value)); $('toolSaveStatus').textContent = '已保存到当前设备'; } catch (e) { $('toolSaveStatus').textContent = '保存失败：' + e.message; } });
-    $('reviewSave').addEventListener('click',async()=>{const date=$('reviewDate').value,note=$('reviewNote').value.trim();if(!date||!note){$('reviewStatus').textContent='请填写日期与复盘内容';return;}try{await putReview({date,note,phase:state.phase,updatedAt:new Date().toISOString()});$('reviewStatus').textContent='复盘已保存到当前设备';journalRevision++;journalDirty=true;renderTools();}catch(e){$('reviewStatus').textContent='保存失败：'+e.message;}});
+    $('toolSave').addEventListener('click', async () => { $('toolSaveStatus').dataset.status='loading'; try { await onToken($('toolToken').value); await onRefreshInterval(Number($('toolRefresh').value)); $('toolSaveStatus').dataset.status='success'; $('toolSaveStatus').textContent = '已保存到当前设备'; } catch (e) { $('toolSaveStatus').dataset.status='error'; $('toolSaveStatus').textContent = '保存失败：' + e.message; } });
+    $('reviewSave').addEventListener('click',async()=>{const date=$('reviewDate').value,note=$('reviewNote').value.trim();if(!date||!note){$('reviewStatus').dataset.status='warning'; $('reviewStatus').textContent='请填写日期与复盘内容';return;}try{await putReview({date,note,phase:state.phase,updatedAt:new Date().toISOString()});$('reviewStatus').dataset.status='success'; $('reviewStatus').textContent='复盘已保存到当前设备';journalRevision++;journalDirty=true;renderTools();}catch(e){$('reviewStatus').dataset.status='error'; $('reviewStatus').textContent='保存失败：'+e.message;}});
     $('copilotAsk').addEventListener('click',()=>{const text=$('copilotInput').value.trim(),key=text?routeCopilotQuery(text):$('copilotQuestion').value;if(!key){$('copilotAnswer').textContent='当前离线助手没有匹配到这个问题，请选择上方盘面问题。';return;}try{const html=buildCopilotAnswer(key,{...state.lastPayload,positionAdvice:state.positionAdvice,mentalNotes:state.mentalNotes});const template=doc.createElement('template');template.innerHTML=html.replace(/<\/(?:div|p|li|h[1-6])>/g,'\n');$('copilotAnswer').textContent=template.content.textContent;}catch{$('copilotAnswer').textContent='需要有效盘面数据，请稍后再试';}});
     win.addEventListener('popstate', () => navigate(win.location.hash.slice(1), { history: false }));
     navigate(win.location.hash.slice(1) || 'market', { history: false });
@@ -307,7 +311,7 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     const clock=stamp&&Number.isFinite(stamp.getTime())?stamp.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'';
     if(data){$('freshAt').textContent=(failed?' · 更新失败':data.loading?' · 正在更新':' · 快照')+(clock?' '+clock:'');$('freshAt').className='fresh-at'+(failed?' bad':'');}
     const warning=data?failed:failed||state.fromSnapshot||state.pools?.partial;
-    $('mobileDataStatus').hidden=!warning;
+    $('mobileDataStatus').hidden=!warning; $('mobileDataStatus').dataset.status=failed?'error':warning?'warning':'info';
     $('mobileDataStatus').classList.toggle('is-warning',Boolean(warning));
     $('mobileDataStatus').textContent=failed?'最新请求失败，保留上次成功数据。':state.fromSnapshot?'正在使用本地缓存快照，联网后更新。':state.pools?.partial?'缺失来源：'+state.pools.partialMissing.join('、')+'；判断暂按缺失数据处理。':'';
   }
@@ -323,5 +327,5 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     }else result=await onRefresh(true);
     interactions?.refresh();updateFreshness();return {...result,targetLabel:label};
   }
-  return {bind,refresh,navigate,openSearch,refreshActive,stock:code=>state.workspaceStocks.get(code),showHeat(){rank='heat';rendered.delete('rank:heat');navigate('rank',{force:true});}};
+  return {bind,refresh,resume:()=>paints.request(),navigate,openSearch,refreshActive,stock:code=>state.workspaceStocks.get(code),showHeat(){rank='heat';rendered.delete('rank:heat');navigate('rank',{force:true});}};
 }

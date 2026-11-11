@@ -1,0 +1,55 @@
+/* Arrow-free disclosure headings retain a clear text affordance. */
+body details > summary { list-style:none; }
+body details > summary::marker { content:''; }
+body details > summary::-webkit-details-marker { display:none; }
+body details > summary::before { content:none !important; display:none !important; border:0; }
+body details > summary::after { content:'展开' !important; flex:none; color:var(--muted); font:12px var(--font-stack); transform:none !important; rotate:none; margin-left:8px; }
+body details[open] > summary::after { content:'收起' !important; transform:none !important; rotate:none; }
+/* Long pool folds open once, without animating their full height on every frame. */
+body details::details-content { transition:none !important; animation:none !important; }
+body details[open] > :not(summary) { animation:none; }
+
+.scrim { backdrop-filter:none; -webkit-backdrop-filter:none; transition:opacity 180ms ease-out; }
+.sheet { box-shadow:0 -8px 28px rgba(0,0,0,.24); backface-visibility:hidden; height:92dvh; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; }
+.sheet .grip { flex:none; }
+#sheetBody { flex:1; min-height:0; display:flex; flex-direction:column; }
+#sheet .s-head,#sheet .mobile-sheet-tabs { flex:none; position:static; }
+#sheet .sheet-section { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding-right:2px; }
+#sheet .s-actions { flex:none; position:static; margin-top:0; padding:12px 0 calc(12px + var(--safe-b)); }
+.mobile-drawer-layer { will-change:transform; }
+
+/* Quote prices and percentage changes always share the A-share direction. */
+:is(.market-indices,.mobile-stock-price,.decision-footer,.sheet .s-price,.chart-readout) .up-c { color:var(--up-ink); }
+:is(.market-indices,.mobile-stock-price,.decision-footer,.sheet .s-price,.chart-readout) .down-c { color:var(--down-ink); }
+:is(.market-indices,.mobile-stock-price,.decision-footer,.sheet .s-price,.chart-readout) .flat-c { color:var(--muted); }
+.market-indices b { font-weight:700; }
+.market-kpis >div[data-metric="涨停"] b { color:var(--up-ink); }
+.market-kpis >div[data-metric="跌停"] b { color:var(--down-ink); }
+.market-kpis >div[data-metric="炸板率"] b { color:var(--amber-ink); }
+.market-kpis >div[data-alert="true"] b { color:var(--danger); }
+.market-kpis >div[data-available="false"] b { color:var(--muted); }
+.mobile-tag[data-status="cached"],.mobile-tag[data-status="partial"] { color:var(--amber-ink); background:var(--amber-soft); }
+.decision-footer >span:first-child b { color:var(--amber-ink); }
+.decision-card[data-tone="ready"] .decision-next p { color:var(--pos-ink); }
+.decision-card[data-tone="waiting"] .decision-next p { color:var(--amber-ink); }
+.decision-card[data-tone="avoid"] .decision-next p { color:var(--danger); }
+
+/* Capital is data, turnover/activity is copper, time is neutral, broken seals are caution. */
+#sheet .kv[data-value-role="turnover"] strong { color:var(--attention-ink); }
+#sheet .kv[data-value-role="time"] strong { color:var(--ink); }
+#sheet .kv[data-value-role="break"] strong { color:var(--ink); }
+#sheet .kv[data-value-role="break"][data-alert="true"] strong { color:var(--amber-ink); }
+#sheet .kv[data-available="false"] strong { color:var(--muted); }
+.chart-readout b { font-weight:600; }
+.promo-row.status-pass em { color:var(--pos-ink); }
+.promo-row.status-warn em { color:var(--amber-ink); }
+.promo-row.status-fail em { color:var(--danger); }
+.promo-row.status-na em { color:var(--muted); }
+.mobile-empty,.empty { color:var(--muted); }
+.refresh-status[data-status="loading"],.mobile-refresh-control.is-loading { color:var(--refresh-ink); }
+.mobile-refresh-control.is-loading { background:color-mix(in srgb,var(--refresh-ink) 9%,var(--surface)); }
+:is(.chart-state,.mobile-meta,.data-status-message)[data-status="error"] { color:var(--danger); }
+:is(.chart-state,.mobile-meta)[data-status="loading"] { color:var(--refresh-ink); }
+.mobile-meta[data-status="success"] { color:var(--pos-ink); }
+.mobile-meta[data-status="warning"] { color:var(--amber-ink); }
+.decision-footer >span[data-available="false"] b { color:var(--muted); }

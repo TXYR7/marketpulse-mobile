@@ -1,5 +1,6 @@
 import { loadChartBars } from './mobile-data.js';
 import { createRefreshFeedback } from './refresh-feedback.js';
+import {quoteTone} from './mobile-detail.js';
 
 
 export function chartGeometry(bars, { range = 60, averages = [5, 10, 20], selected = null } = {}) {
@@ -25,6 +26,9 @@ export function chartSVG(bars, prefs = {}) {
   return '<svg class="mobile-kline" viewBox="0 0 360 276" role="img" aria-label="日K与成交量，拖动查看每日数据">' + grid + candles + lines + '<path class="chart-cross" d="M' + x(g.selected) + ' 18V250M8 ' + y(b.close) + 'H312"/><text x="8" y="272">' + dateLabel(data[0].date) + '</text><text x="312" y="272" text-anchor="end">' + dateLabel(data.at(-1).date) + '</text></svg>';
 }
 function dateLabel(date) { return date.slice(0, 4) + '-' + date.slice(4, 6) + '-' + date.slice(6, 8); }
+export function chartReadoutHTML(b) {
+  return '<span>'+dateLabel(b.date)+'</span>  开 '+b.open.toFixed(2)+'  高 '+b.high.toFixed(2)+'  低 '+b.low.toFixed(2)+'  收 <b class="'+quoteTone(b.close,b.close-b.open)+'">'+b.close.toFixed(2)+'</b>';
+}
 export function createMobileChart({ onBars = () => {}, doc = document } = {}) {
   let currentCode = null, seq = 0, bars = [], source = '', selected = null, root = null, observer = null;
   const currentButton=()=>root?.querySelector('[data-chart-refresh]');
@@ -42,20 +46,21 @@ export function createMobileChart({ onBars = () => {}, doc = document } = {}) {
     if (!bars.length) return;
     const data = bars.slice(-prefs.range); selected = selected == null ? data.length - 1 : Math.min(selected, data.length - 1);
     root.querySelector('.chart-surface').innerHTML = chartSVG(bars, { ...prefs, selected });
-    const b = data[selected]; root.querySelector('.chart-readout').textContent = dateLabel(b.date) + '  开 ' + b.open.toFixed(2) + '  高 ' + b.high.toFixed(2) + '  低 ' + b.low.toFixed(2) + '  收 ' + b.close.toFixed(2);
+    const b = data[selected]; root.querySelector('.chart-readout').innerHTML = chartReadoutHTML(b);
     root.querySelector('.chart-meta').textContent = source + ' · ' + data.length + '根 · ' + dateLabel(data[0].date) + ' 至 ' + dateLabel(data.at(-1).date);
   }
   async function load(refresh = false) {
     const run = ++seq, code = currentCode, el = root;
     if (!el) return;
     el.querySelector('.chart-state').textContent = refresh ? '正在更新日K…' : '正在加载日K…';
+    el.querySelector('.chart-state').dataset.status='loading';
     el.querySelector('[data-chart-refresh]').disabled = true;
     feedback.set('loading');
     try {
       const data = await loadChartBars(code, { refresh });
       if (seq !== run || currentCode !== code || root !== el || !el.isConnected) return;
-      bars = data.bars; source = data.source; selected = null; el.querySelector('.chart-state').textContent = ''; feedback.set('success'); paint(); onBars(code, bars);
-    } catch (error) { if (seq === run && root === el) {feedback.set('error');el.querySelector('.chart-state').textContent = bars.length ? '更新失败，保留上次日K；可重试' : '日K加载失败，请点击重试';} }
+      bars = data.bars; source = data.source; selected = null; el.querySelector('.chart-state').textContent = ''; el.querySelector('.chart-state').dataset.status='success'; feedback.set('success'); paint(); onBars(code, bars);
+    } catch (error) { if (seq === run && root === el) {feedback.set('error');el.querySelector('.chart-state').dataset.status='error';el.querySelector('.chart-state').textContent = bars.length ? '更新失败，保留上次日K；可重试' : '日K加载失败，请点击重试';} }
     finally { if (seq === run && root === el) el.querySelector('[data-chart-refresh]').disabled = false; }
   }
   function mount(code, container) {

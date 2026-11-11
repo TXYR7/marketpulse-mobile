@@ -1,6 +1,7 @@
 import { createMobileInteractions, createMobileRefresh } from './mobile-interactions.js';
 import { createSnapshotBackfill } from './mobile-render.js';
 import { createMobileDetail, riskPresentation } from './mobile-detail.js';
+import { createMobileDrawerMotion } from './mobile-drawer-motion.js';
 import { createMobileWorkspace, decisionBadgeTone } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
@@ -37,6 +38,8 @@ const state = {
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const interactions=createMobileInteractions();
+const drawerMotion=createMobileDrawerMotion();
+let sheetStock=null,sheetOpenTask=Promise.resolve();
 const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, onStock: openSheet, onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
   onTheme: () => $('#themeBtn').click(), onNotify: () => openNotificationSettings().catch(e => toast(e.message)),
   onDate: openHistoryDate, onToken: async value => { const token = String(value || '').trim(); if (token) localStorage.setItem('mp_ema_token', token); else localStorage.removeItem('mp_ema_token'); setEmaToken(token); },
@@ -45,7 +48,10 @@ const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, on
 const manualRefresh=createMobileRefresh({button:$('#refreshBtn'),status:$('#refreshStatus'),perform:()=>workspace.refreshActive(),motion:interactions.motion});
 const queueDecisionBackfill=createSnapshotBackfill(()=>({pools:state.pools,at:state.lastSuccessAt||state.lastGoodAt}),()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();});
 const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; queueDecisionBackfill(); } });
-const sheetReader=createMobileDetail({sheet:$('#sheet'),onChart:()=>{if(detailChart.currentCode()!==state.sheetCode)detailChart.mount(state.sheetCode,$('#sheetKline'));}});
+const sheetReader=createMobileDetail({sheet:$('#sheet'),onChart:()=>{if(detailChart.currentCode()!==state.sheetCode){detailChart.mount(state.sheetCode,$('#sheetKline'));interactions.refresh();}},onEvidence:()=>{
+  const stock=sheetStock,run=sheetSequence;
+  void sheetOpenTask.then(()=>{if(!stock||state.sheetCode!==stock.code||run!==sheetSequence)return;renderBoardReference(stock);return loadSimilarCases(stock.code,run);}).catch(()=>{});
+}});
 let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
 function syncDetailJudgement() {
   if (!state.sheetCode) return;
@@ -565,6 +571,28 @@ function renderRadar() {
 
 // 2026-09-15 明日参考批(用户拍板,桌面做涨跌率/手机做算得了的晋级率):同板位历史晋级率——
 // 跨全历史所有相邻交易日累计(非只昨日),n=分母只数;三纪律同桌面:样本量必显示/Wilson 下界/「参考」措辞
+let boardReferenceCache={history:null,date:null,result:{}};
+function renderBoardReference(stock) {
+  const code=stock.code;
+    const el2 = $('#boardPromoRef');
+    const h = state.history || [];
+    if(boardReferenceCache.history!==h||boardReferenceCache.date!==state.pools?.date)boardReferenceCache={history:h,date:state.pools?.date,result:h.length>=2?boardPromoRef(h,state.pools?.date):{}};
+    const ref=boardReferenceCache.result;
+    const b = Math.max(1, Number(stock.boards) || 1);
+    const cell = ref[b >= 4 ? '4+' : String(b)] || null;
+    if (el2) {
+      if (cell && cell.n >= 20) {
+        const w = wilsonLower(cell.up, cell.n);
+        el2.innerHTML = '<div class="sim-outcome"><span>明日参考 · 同板位晋级</span><b class="up-c">晋 ' + w + '%<small>(下界)</small></b><b>n=' + cell.n + '</b></div>';
+        el2.title = '历史全部 ' + cell.n + ' 只 ' + (b >= 4 ? '4板及以上' : b + '板') + '的次日晋级率(Wilson 95% 下界) · 参考,非预测';
+      } else if (cell) {
+        el2.innerHTML = '<div class="muted">明日参考:样本积累中(n=' + cell.n + ',达 20 后显示)</div>';
+      } else {
+        el2.innerHTML = '<div class="muted">明日参考:需历史数据积累</div>';
+      }
+    }
+
+}
 function boardPromoRef(hist, today) {
   const buckets = {};
   for (let i = 1; i < hist.length; i += 1) {
@@ -793,7 +821,7 @@ async function openSheet(code) {
   const sheetRun = ++sheetSequence;
   if (state.sheetCode === null) sheetOrigin = document.activeElement;
   if ($('#membersDialog').open) { sheetReturnDialog = $('#membersDialog'); sheetReturnDialog.close(); }
-  detailChart.close(); state.sheetCode = code;
+  detailChart.close(); state.sheetCode = code; sheetStock=stock;
   sheet.hidden=false;sheet.classList.remove('is-closing');sheet.scrollTop = 0; sheet.inert = false; sheet.setAttribute('aria-hidden', 'false');
   document.querySelector('main').inert = true; document.querySelector('.topbar').inert = true; document.querySelector('.mobile-bottom-nav').inert = true;
   // 先渲染后补数：本地数据（池内价 + 缓存报价）立即弹抽屉，网络往返不再挡在渲染之前
@@ -846,11 +874,11 @@ async function openSheet(code) {
     '<div class="s-similar" id="boardPromoRef"></div>' +
     '</section><div class="s-actions"><button class="btn" type="button" data-sheet-edge="top">到顶部</button><button class="btn" type="button" data-sheet-edge="bottom">到末尾</button><button class="btn" type="button" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
-  interactions.motion.inspector(sheet,{opening:true,docked:false});
+  sheetOpenTask=drawerMotion.animate(sheet,{opening:true});
   sheetReader.reset();
   syncDetailJudgement();
   $('#sheetClose').focus({preventScroll:true});
-  loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
+  // Historical references wait until the evidence section is opened and the slide finishes.
   fetchHotConcepts(code).then((list) => { // 2026-09-15 概念命中(东财 CORS 开,失败静默)
     if (state.sheetCode !== code || sheetRun !== sheetSequence) return;
     const box = $('#sheetConcepts');
@@ -858,25 +886,6 @@ async function openSheet(code) {
     box.hidden = !list.length;
     if (list.length) $('#sheetConceptTags').innerHTML = list.slice(0, 8).map((c) => '<span class="con-tag">' + esc(c.concept) + '</span>').join('');
   }).catch(() => {});
-  // 2026-09-15 明日参考:同板位历史晋级率(本地可算,纯展示)——同步渲染无网络
-  {
-    const el2 = $('#boardPromoRef');
-    const h = state.history || [];
-    const ref = h.length >= 2 ? boardPromoRef(h, state.pools?.date) : {};
-    const b = Math.max(1, Number(stock.boards) || 1);
-    const cell = ref[b >= 4 ? '4+' : String(b)] || null;
-    if (el2) {
-      if (cell && cell.n >= 20) {
-        const w = wilsonLower(cell.up, cell.n);
-        el2.innerHTML = '<div class="sim-outcome"><span>明日参考 · 同板位晋级</span><b class="up-c">晋 ' + w + '%<small>(下界)</small></b><b>n=' + cell.n + '</b></div>';
-        el2.title = '历史全部 ' + cell.n + ' 只 ' + (b >= 4 ? '4板及以上' : b + '板') + '的次日晋级率(Wilson 95% 下界) · 参考,非预测';
-      } else if (cell) {
-        el2.innerHTML = '<div class="muted">明日参考:样本积累中(n=' + cell.n + ',达 20 后显示)</div>';
-      } else {
-        el2.innerHTML = '<div class="muted">明日参考:需历史数据积累</div>';
-      }
-    }
-  }
   // 2026-09-13 操作参考卡:先渲染(红档缺席),出场形态后台算完原地补——抽屉零等待弹出
   const initialPlanHtml=buildPlanHtml(stock);
   setHTML($('#sheetPlan'),initialPlanHtml); setHTML($('#sheetFullPlan'),initialPlanHtml);
@@ -904,22 +913,22 @@ function patchSheetQuote(stock, d) {
 // 2026-09-12 折叠版批:kv 拆两层——四格决策关键数常驻(10秒层),五格研究明细进折叠组
 function kvEss(s) {
   const rows = [
-    ['封单资金', s.seal != null ? fmtMoney(s.seal) : '--'],
-    ['换手率', s.turnover != null ? s.turnover.toFixed(1) + '%' : '--'],
-    ['首封', fmtTime(s.firstSeal)],
-    ['炸板次数', s.breaks != null ? s.breaks : '--'],
+    ['封单资金', s.seal != null ? fmtMoney(s.seal) : '--','capital',s.seal!=null],
+    ['换手率', s.turnover != null ? s.turnover.toFixed(1) + '%' : '--','turnover',s.turnover!=null],
+    ['首封', fmtTime(s.firstSeal),'time',s.firstSeal!=null],
+    ['炸板次数', s.breaks != null ? s.breaks : '--','break',s.breaks!=null,s.breaks>0],
   ];
-  return '<div class="kv-grid">' + rows.map((r) => '<div class="kv"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
+  return '<div class="kv-grid">' + rows.map((r) => '<div class="kv" data-value-role="'+r[2]+'" data-available="'+r[3]+'" data-alert="'+(r[4]===true)+'"><span>' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('') + '</div>';
 }
 // 2026-09-13 精简批:kvDet 已随「行情明细」折叠组砍(用户拍板)
 function closeSheet() {
   const run=++sheetSequence,origin=sheetOrigin,returnDialog=sheetReturnDialog,sheet=$('#sheet');
   const returnFocus=sheet.contains(document.activeElement),viewAtClose=state.view;
-  state.sheetCode=null;detailChart.close();sheetOrigin=null;sheetReturnDialog=null;
+  state.sheetCode=null;sheetStock=null;detailChart.close();sheetOrigin=null;sheetReturnDialog=null;
   sheet.inert=true;sheet.setAttribute('aria-hidden','true');sheet.classList.add('is-closing');$('#scrim').classList.remove('show');
   document.querySelector('main').inert=false;document.querySelector('.topbar').inert=false;document.querySelector('.mobile-bottom-nav').inert=false;
   if(returnFocus&&!returnDialog&&origin?.isConnected&&origin.getClientRects().length)origin.focus({preventScroll:true});
-  interactions.motion.inspector(sheet,{opening:false,docked:false}).then(()=>{if(run!==sheetSequence)return;sheet.classList.remove('show','is-closing');sheet.hidden=true;if(returnDialog&&state.view===viewAtClose&&!document.querySelector('dialog[open]')){returnDialog.showModal();if(origin?.isConnected&&returnDialog.contains(origin))origin.focus({preventScroll:true});}});
+  drawerMotion.animate(sheet,{opening:false}).then(()=>{if(run!==sheetSequence)return;sheet.classList.remove('show','is-closing');sheet.hidden=true;workspace.resume();if(returnDialog&&state.view===viewAtClose&&!document.querySelector('dialog[open]')){returnDialog.showModal();if(origin?.isConnected&&returnDialog.contains(origin))origin.focus({preventScroll:true});}});
 }
 
 // 2026-09-11 拆解融合批:情绪 chip 点开分指标明细(驾驶舱移入横幅的归宿)——复用 scrim+sheet,不动 sheetCode
@@ -955,7 +964,7 @@ function buildPlanHtml(stock) {
   if(!p)return '<p class="mobile-note">池外股票不使用涨停池判决；可在工具中查看独立买卖参考。</p>';
   return '<div class="s-plan"><div class="mobile-section-head"><h3>操作参考</h3><span>统一判决</span></div>'+[['下一步',p.entry],['待确认',(p.conditions||[]).join('；')],['失效参考',(p.invalidation||[]).join('；')],['持有',p.hold],['风险预算',p.position],['成交',p.execution]].filter(row=>row[1]).map(row=>'<div class="pl-row" data-plan-role="'+(({下一步:'entry',待确认:'wait',失效参考:'invalidation'})[row[0]] || 'reference')+'"><span>'+esc(row[0])+'</span><b>'+esc(row[1])+'</b></div>').join('')+'</div>';
 }
-async function loadSimilarCases(code) {
+async function loadSimilarCases(code,run=sheetSequence) {
   const el = $('#detailSimilarCases');
   if (!el) return;
   let bars = simBarsCache.get(code) || null;
@@ -970,6 +979,7 @@ async function loadSimilarCases(code) {
     if (bars && bars.length && bars[bars.length - 1].date === todayStr() && mins >= 9 * 60 && mins < 15 * 60 + 5) bars = bars.slice(0, -1);
     if (bars && bars.length) simBarsCache.set(code, bars);
   }
+  if(state.sheetCode!==code||run!==sheetSequence||!el.isConnected)return;
   if (!bars || bars.length < 86) { el.innerHTML = '<div class="muted">相似日表现：暂无足够历史日K</div>'; return; }
   const r = stockSimilarCases(bars, { window: 20, horizon: 5, limit: 3 });
   if (!r.available || !r.similar.length || !r.outcome || (r.outcome.up == null && r.outcome.flat == null && r.outcome.down == null)) { el.innerHTML = '<div class="muted">相似日表现：暂未匹配到可比形态</div>'; return; }
@@ -1406,7 +1416,7 @@ function bind() {
   $('#gapFold').addEventListener('toggle',()=>{if(state.gap)renderGap(state.gap);else loadGap();});
   ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
   const structFold = $('#structFold');
-  if (structFold) structFold.addEventListener('toggle', () => { renderStructFold(); if (structFold.open) revealList(structFold.querySelector('.body') || structFold); });
+  if (structFold) structFold.addEventListener('toggle', renderStructFold);
   // 2026-09-11 一屏到底批:设置页四绑定(refresh/date/token/notify)已随视图整删;
   // 历史日期回看改顶栏日期长按(极隐蔽入口,常驻零成本)
   let lpTimer = null;
@@ -1472,37 +1482,31 @@ function setupPTR() {
 // getBoundingClientRect(强制布局读)+写 transform,读写交错每秒 60 次是卡顿主因;
 // grip/头部 CSS touch-action:none 让原生滚动不与拖拽抢(治双位移)。
 function setupSheetDrag() {
-  const sheet = $('#sheet');
-  if (!sheet) return;
-  let startY = null, dy = 0, dragging = false, eligible = false;
-  sheet.addEventListener('touchstart', (e) => {
-    const t = e.touches[0];
-    const inHotzone = t.clientY - sheet.getBoundingClientRect().top < 60; // 只读这一次
-    eligible = inHotzone || sheet.scrollTop <= 0;
-    if (!eligible) { startY = null; return; }
-    startY = t.clientY; dy = 0; dragging = false;
-  }, { passive: true });
-  sheet.addEventListener('touchmove', (e) => {
-    if (startY == null || !eligible) return;
-    dy = e.touches[0].clientY - startY;
-    if (dy <= 0) dy = 0;
-    if (!dragging && dy > 8) {
-      dragging = true;
-      sheet.style.transition = 'none';
-      sheet.style.willChange = 'transform'; // 提示合成器建层,后续 transform 不再触发布局/绘制
-    }
-    if (dragging) sheet.style.transform = 'translateY(' + dy + 'px)';
-  }, { passive: true });
-  sheet.addEventListener('touchend', () => {
-    if (startY == null) return;
-    if (dragging) {
-      sheet.style.transition = '';
-      sheet.style.willChange = '';
-      sheet.style.transform = '';
-      if (dy > 80) closeSheet(); // inline transform 清掉后 .show 摘除,从拖拽位滑出到 100%
-    }
-    startY = null; dragging = false; eligible = false;
-  });
+  const sheet=$('#sheet');if(!sheet)return;
+  let startY=null,dy=0,offset=0,frame=null,dragging=false;
+  const cancelFrame=()=>{if(frame!==null)cancelAnimationFrame(frame);frame=null;};
+  sheet.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1||e.target.closest('button,input,select,textarea,.chart-surface'))return;
+    const t=e.touches[0],hot=t.clientY-sheet.getBoundingClientRect().top<60;
+    if(!hot&&sheetReader.scrollElement().scrollTop>0)return;
+    startY=t.clientY;dy=0;dragging=false;offset=drawerMotion.pause(sheet);
+  },{passive:true});
+  sheet.addEventListener('touchmove',e=>{
+    if(startY===null||e.touches.length!==1)return;
+    dy=Math.max(0,e.touches[0].clientY-startY);
+    if(dy>8)dragging=true;
+    if(!dragging||frame!==null)return;
+    sheet.classList.add('mobile-drawer-layer');
+    frame=requestAnimationFrame(()=>{frame=null;sheet.style.transform='translate3d(0,'+(offset+dy)+'px,0)';});
+  },{passive:true});
+  const finish=cancelled=>{
+    if(startY===null)return;cancelFrame();
+    if(dragging)sheet.style.transform='translate3d(0,'+(offset+dy)+'px,0)';
+    if(!cancelled&&dy>80)closeSheet();else if(dragging||offset>0)void drawerMotion.animate(sheet,{opening:true});
+    else{sheet.style.transform='';sheet.classList.remove('mobile-drawer-layer');}
+    startY=null;dragging=false;
+  };
+  sheet.addEventListener('touchend',()=>finish(false));sheet.addEventListener('touchcancel',()=>finish(true));
 }
 
 // 边跳按钮：滚动离顶/离底超 500px 才现身，直达顶部/底部（reduced-motion 时瞬时跳）。

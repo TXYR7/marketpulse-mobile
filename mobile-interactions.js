@@ -37,8 +37,8 @@ export function createMobileInteractions({doc=document,win=window}={}) {
   const aliases={themeButton:'themeBtn',refreshButton:'refreshBtn'};
   const adaptedDoc=new Proxy(doc,{get(target,key){
     if(key==='getElementById')return id=>target.getElementById(aliases[id]||id);
-    if(key==='querySelector')return selector=>{const node=target.querySelector(selector==='.app-shell'?'#mobileMain':selector);return node?.closest('[hidden]')?null:node;};
-    if(key==='querySelectorAll')return selector=>Array.from(target.querySelectorAll('.topbar,.view.active,dialog[open],.sheet.show')).flatMap(root=>Array.from(root.querySelectorAll(selector)));
+    if(key==='querySelector')return selector=>{const node=target.querySelector(selector==='.app-shell'?'#mobileMain':selector);return node?.closest('[hidden],[inert]')?null:node;};
+    if(key==='querySelectorAll')return selector=>Array.from(target.querySelectorAll('.topbar,.view.active,dialog[open],.sheet.show')).filter(root=>!root.closest('[inert]')).flatMap(root=>Array.from(root.querySelectorAll(selector)));
     const value=target[key];return typeof value==='function'?value.bind(target):value;
   }});
   const motion=createInteractionMotion({doc:adaptedDoc,win});
@@ -61,7 +61,7 @@ export function createMobileInteractions({doc=document,win=window}={}) {
   const prepared=new WeakSet();
   function prepareControls() {
     const roots=doc.querySelectorAll('.topbar,.mobile-bottom-nav,.view.active,dialog[open],.sheet.show');
-    for(const root of roots)for(const element of root.querySelectorAll('button,details,.mobile-search-result')) {
+    for(const root of roots)if(!root.closest('[inert]'))for(const element of root.querySelectorAll('button,details,.mobile-search-result')) {
       if(prepared.has(element))continue; prepared.add(element);
       if(element.tagName==='BUTTON'&&element.id!=='themeBtn'&&!element.classList.contains('nav-link'))element.classList.add('outline-button');
       if(element.tagName==='DETAILS')element.classList.add('board-full-data');

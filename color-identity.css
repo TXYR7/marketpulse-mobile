@@ -284,7 +284,7 @@ html[data-theme="light"] :is(#heatView, #sectorsView, #hotrankView) { --explorer
 #boardView .rank-card-score[data-score-available="false"] { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
 #boardView .theme-card::after { height: 3px; background: var(--ranking-ink); opacity: .8; }
 .aw-tier-B { color: var(--tier-b); background: var(--tier-b-soft); }
-.panel-head::before, .theme-card::after, .vt-dim-fill, .tier-l2 .heat-rank-tier-head::before,
+.panel-head::before, .theme-card::after, .tier-l2 .heat-rank-tier-head::before,
 .ladder-bar i b, .similar-row i b, .detail-bars em, .vt-tier-track i { background: var(--data-tone); }
 .tier-l3 .heat-rank-tier-head::before { background: var(--muted); }
 .ladder-bar progress::-webkit-progress-value, .similar-row progress::-webkit-progress-value,
@@ -298,4 +298,13 @@ html[data-theme="light"] :is(#heatView, #sectorsView, #hotrankView) { --explorer
 .heat-mainline-tilt.balanced { color: var(--data-ink); background: var(--data-soft); }
 .fact-badge { background: var(--data-soft); }
 .sig-badge.go, .promo-badge.pass { color: var(--pos-ink); background: var(--pos-soft); }
-.live-dot { background: var(--pos-ink); box-shadow: 0 0 0 4px var(--pos-soft); }
+
+/* 市场结构、实用监控、涨停梯队及连板高度仅将紫色数据改为蓝色。 */
+#vitalsView :is(.vt-card:has(> #vtStructTop), .vt-ladder-card), #statusMaxBoard.sv-warm {
+  --data-tone: #60a5fa;
+  --data-ink: #93c5fd;
+}
+html[data-theme="light"] #vitalsView :is(.vt-card:has(> #vtStructTop), .vt-ladder-card), html[data-theme="light"] #statusMaxBoard.sv-warm {
+  --data-tone: #2563eb;
+  --data-ink: #1d4ed8;
+}

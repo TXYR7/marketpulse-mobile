@@ -1,5 +1,6 @@
 import { createMobileInteractions, createMobileRefresh } from './mobile-interactions.js';
 import { createSnapshotBackfill } from './mobile-render.js';
+import { createMobileDetail, riskPresentation } from './mobile-detail.js';
 import { createMobileWorkspace, decisionBadgeTone } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
@@ -44,6 +45,7 @@ const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, on
 const manualRefresh=createMobileRefresh({button:$('#refreshBtn'),status:$('#refreshStatus'),perform:()=>workspace.refreshActive(),motion:interactions.motion});
 const queueDecisionBackfill=createSnapshotBackfill(()=>({pools:state.pools,at:state.lastSuccessAt||state.lastGoodAt}),()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();});
 const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; queueDecisionBackfill(); } });
+const sheetReader=createMobileDetail({sheet:$('#sheet'),onChart:()=>{if(detailChart.currentCode()!==state.sheetCode)detailChart.mount(state.sheetCode,$('#sheetKline'));}});
 let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
 function syncDetailJudgement() {
   if (!state.sheetCode) return;
@@ -51,7 +53,9 @@ function syncDetailJudgement() {
   const p=stock.promo, icons={pass:'✓',warn:'!',fail:'✕',na:'–'};
   const verdict=$('#sheetDecisionVerdict'); if(verdict) verdict.innerHTML='<div class="s-verdict" data-tone="'+decisionBadgeTone(stock)+'"><strong>'+esc(p.verdict)+'</strong><span class="mobile-meta">一致度 '+p.score+' · 证据 '+p.coverage.percent+'%</span></div>';
   const evidence=$('#sheetPromoEvidence'); if(evidence) evidence.innerHTML='<div class="s-promo">'+p.checklist.map(row=>'<div class="promo-row status-'+row.status+'"><i>'+icons[row.status]+'</i><span class="k">'+esc(row.label)+'</span><em>'+esc(row.note)+'</em></div>').join('')+'</div>';
-  const plan=$('#sheetPlan'); if(plan) plan.innerHTML=buildPlanHtml(stock);
+  const planHtml=buildPlanHtml(stock);
+  setHTML($('#sheetPlan'),planHtml);
+  setHTML($('#sheetFullPlan'),planHtml);
 }
 function openHistoryDate() {
   const date=state.manualDate || String(state.pools?.date || todayStr());
@@ -542,9 +546,8 @@ function renderRadar() {
   if (!r || !r.available) { setHTML(el, '<div class="muted">暂无风险数据</div>'); return; }
   const items = r.items.map((it) => {
     const lvCls = it.level === 'red' ? 'red' : it.level === 'orange' ? 'orange' : it.level === 'yellow' ? 'yellow' : it.level === 'green' ? 'green' : 'gray';
-    const density=it.key==='first';
-    const levelText=density?'密度':({red:'高风险',orange:'谨慎',yellow:'关注',green:'平稳',gray:'待核'})[lvCls];
-    return '<div class="risk-item" data-risk-kind="' + (density?'density':'risk') + '" data-risk-level="' + lvCls + '"><div class="top"><span class="lab">' + esc(it.label) + '</span><span class="lv ' + lvCls + '">' + it.score + '<small class="risk-level-mark">' + levelText + '</small></span></div>' +
+    const display=riskPresentation(it);
+    return '<div class="risk-item" data-risk-kind="' + (display.density?'density':'risk') + '" data-risk-level="' + lvCls + '" data-risk-tone="' + display.tone + '"><div class="top"><span class="lab">' + esc(display.label) + '</span><span class="lv ' + lvCls + '">' + esc(display.number) + '<small class="risk-level-mark">' + display.text + '</small></span></div>' +
       '<div class="action">' + esc(it.action) + '</div>' +
       (it.reasons && it.reasons.length ? '<div class="reasons">' + it.reasons.map((x) => esc(x)).join(' · ') + '</div>' : '') + '</div>';
   }).join('');
@@ -553,7 +556,7 @@ function renderRadar() {
   const em = state.emotion || {};
   const advice = em.advice ? '<div class="radar-style"><span>今日操作风格</span><b>' + esc(em.advice) + '</b></div>' : '';
   // 2026-09-11 修下拉卡顿:签名守卫(星级+各项分+操作风格),不变跳过重建
-  const sig = [r.riskStars, advice, ...r.items.map((it) => it.label + it.score + it.action)].join('|');
+  const sig = [r.riskStars, advice, ...r.items.map((it) => [it.key,it.label,it.score,it.level,it.action,(it.reasons||[]).join('|')].join(':'))].join('|');
   if (el.__radarSig === sig) return;
   if (setHTML(el, advice + items + '<div style="margin-top:8px;font-size:13px">风险星级 <span class="stars">' + '★'.repeat(r.riskStars) + '☆'.repeat(5 - r.riskStars) + '</span></div>' +
     (cannot ? '<div class="cannot-do">禁止：' + cannot + '</div>' : ''))) el.__radarSig = sig;
@@ -804,9 +807,7 @@ async function openSheet(code) {
     '<div class="s-price" id="sheetPrice"><b class="' + pctClass(pct) + '">' + (d.price != null ? d.price.toFixed(2) : (stock.price ? stock.price.toFixed(2) : '--')) + '</b>' +
     '<small class="' + pctClass(pct) + '">' + pctText(pct) + '</small></div></div>';
 
-  // 2026-09-13 精简批(用户拍板):抽屉最终形态——10秒层 + 晋级检查表(唯一深挖区,默认展开)
-  // + 相似日后续表现单行(后台静默加载)。集合竞价/行情明细/相似形态卡三组砍
-  // (竞价信息仍活在卡片竞价行与八维「竞价承接」维度,只是抽屉无深挖区)。
+  // Mobile reader: overview first, Kline loads on demand, evidence remains available in its section.
   const pv = stock.promo && (stock.promo.modelVersion || stock.promo.available !== false);
   let verdictHtml = '<div class="s-verdict" data-tone="' + decisionBadgeTone(stock) + '">';
   if (stock.tier) verdictHtml += '<span class="sv-line">' + tierBadge(stock.tier) + ' <b>评分 ' + (stock.score ?? '--') + '</b></span>';
@@ -826,7 +827,7 @@ async function openSheet(code) {
       (sg.triggers && sg.triggers.length ? '<div class="muted">触发条件：' + sg.triggers.join(' / ') + '</div>' : '') +
       (sg.risks && sg.risks.length ? '<div class="muted" style="color:var(--red)">风险：' + sg.risks.join(' / ') + '</div>' : '') + '</div>';
   }
-  // 晋级八维检查表:唯一深挖区,默认展开(其余深挖组已砍,不再需要折叠挡路)
+  // Preserve the complete checklist inside the evidence section.
   let promoHtml = '';
   if (pv && Array.isArray(stock.promo.checklist)) {
     const icons = { pass: '✓', warn: '!', fail: '✕', na: '–' };
@@ -835,19 +836,18 @@ async function openSheet(code) {
       '<div class="muted" style="margin-top:6px">体系规则参考，非投资建议</div></div>';
   }
   const mon = (state.monitorPool || []).find((m) => m.code === code);
-  body.innerHTML = head + '<div id="sheetDecisionVerdict">' + verdictHtml + '</div>' + signalHtml + '<div class="mobile-chart-panel" id="sheetKline"></div>' +
+  body.innerHTML = head + '<div class="mobile-sheet-tabs" role="tablist" aria-label="股票详情分区">' + [['overview','速览'],['chart','K线'],['evidence','依据']].map(([key,label])=>'<button type="button" role="tab" id="sheet-tab-'+key+'" data-sheet-section="'+key+'" aria-controls="sheet-'+key+'">'+label+'</button>').join('') + '</div><section class="sheet-section" id="sheet-overview" role="tabpanel" aria-labelledby="sheet-tab-overview"><div id="sheetDecisionVerdict">' + verdictHtml + '</div><div id="sheetPlan"></div>' +
     (mon ? '<div class="s-risk">⚠ 交易所重点监控中 · 至' + esc(mon.end) + '</div>' : '') +
     '<div class="s-concepts" id="sheetConcepts" hidden><span class="muted">概念命中</span><div class="con-tags" id="sheetConceptTags"></div></div>' +
     '<div id="sheetKvEss">' + kvEss(stock) + '</div>' +
     '<div class="muted" id="sheetQuoteErr" style="margin-top:6px"></div>' +
-    '<div id="sheetPromoEvidence">' + promoHtml + '</div>' +
-    '<div id="sheetPlan"></div>' +
+    '</section><section class="sheet-section" id="sheet-chart" role="tabpanel" aria-labelledby="sheet-tab-chart" hidden><div class="mobile-chart-panel" id="sheetKline"></div></section><section class="sheet-section" id="sheet-evidence" role="tabpanel" aria-labelledby="sheet-tab-evidence" hidden>' + signalHtml + '<div id="sheetFullPlan"></div><h3>晋级证据</h3><div id="sheetPromoEvidence">' + promoHtml + '</div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似日表现计算中…</div></div>' +
     '<div class="s-similar" id="boardPromoRef"></div>' +
-    '<div class="s-actions"><button class="btn primary" id="sheetClose">关闭</button></div>';
+    '</section><div class="s-actions"><button class="btn" type="button" data-sheet-edge="top">到顶部</button><button class="btn" type="button" data-sheet-edge="bottom">到末尾</button><button class="btn" type="button" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   interactions.motion.inspector(sheet,{opening:true,docked:false});
-  detailChart.mount(code, $('#sheetKline'));
+  sheetReader.reset();
   syncDetailJudgement();
   $('#sheetClose').focus({preventScroll:true});
   loadSimilarCases(code); // 后台静默算,只渲染「后续表现」一行(见 loadSimilarCases 精简版)
@@ -878,7 +878,8 @@ async function openSheet(code) {
     }
   }
   // 2026-09-13 操作参考卡:先渲染(红档缺席),出场形态后台算完原地补——抽屉零等待弹出
-  $('#sheetPlan').innerHTML = buildPlanHtml(stock);
+  const initialPlanHtml=buildPlanHtml(stock);
+  setHTML($('#sheetPlan'),initialPlanHtml); setHTML($('#sheetFullPlan'),initialPlanHtml);
 
   $('#sheetClose').addEventListener('click', closeSheet);
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
@@ -952,7 +953,7 @@ const planBarsCache = new Map();
 function buildPlanHtml(stock) {
   const p=stock.promo?.actionPlan;
   if(!p)return '<p class="mobile-note">池外股票不使用涨停池判决；可在工具中查看独立买卖参考。</p>';
-  return '<div class="s-plan"><div class="mobile-section-head"><h3>操作参考</h3><span>统一判决</span></div>'+[['下一步',p.entry],['待确认',(p.conditions||[]).join('；')],['失效参考',(p.invalidation||[]).join('；')],['持有',p.hold],['风险预算',p.position],['成交',p.execution]].filter(row=>row[1]).map(row=>'<div class="pl-row"><span>'+esc(row[0])+'</span><b>'+esc(row[1])+'</b></div>').join('')+'</div>';
+  return '<div class="s-plan"><div class="mobile-section-head"><h3>操作参考</h3><span>统一判决</span></div>'+[['下一步',p.entry],['待确认',(p.conditions||[]).join('；')],['失效参考',(p.invalidation||[]).join('；')],['持有',p.hold],['风险预算',p.position],['成交',p.execution]].filter(row=>row[1]).map(row=>'<div class="pl-row" data-plan-role="'+(({下一步:'entry',待确认:'wait',失效参考:'invalidation'})[row[0]] || 'reference')+'"><span>'+esc(row[0])+'</span><b>'+esc(row[1])+'</b></div>').join('')+'</div>';
 }
 async function loadSimilarCases(code) {
   const el = $('#detailSimilarCases');

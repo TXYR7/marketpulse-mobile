@@ -26,13 +26,14 @@ test('首屏恢复明暗主题时，状态栏与原生控件同步到实际灰�
  }
 });
 
-test('手机评分、风险密度和热度使用各自颜色，橙黄风险不再共用一色',()=>{
+test('手机评分与热度保持各自颜色，风险和密度使用明确状态标签',()=>{
  const css=read('mobile-identity.css');
  assert.match(css,/\.theme-rank-row > b\s*\{[^}]*color:var\(--ranking-ink\)/);
  for(const tier of ['S','A','B','C','D'])assert.ok(css.includes('.tier-badge.'+tier+' { color:var(--tier-'+tier.toLowerCase()+')'));
  assert.ok(css.includes('--risk-ink:var(--risk-orange-ink)'));
  assert.ok(css.includes('--risk-ink:var(--risk-yellow-ink)'));
- assert.match(css,/\[data-risk-kind="density"\]\s*\{[^}]*--risk-ink:var\(--data-ink\)/);
+ const update=read('mobile-desktop-update.css');
+ for(const [tone,ink]of [['low','pos-ink'],['medium','risk-orange-ink'],['high','danger'],['unknown','muted']])assert.ok(update.includes('[data-risk-tone="'+tone+'"] { --risk-ink:var(--'+ink+')'));
  assert.match(read('app.js'),/data-risk-kind=/);
  assert.match(read('views.js'),/data-grade=/);
 });

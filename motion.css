@@ -61,25 +61,29 @@ button, summary, .nav-link, .rank-card, .data-row { -webkit-tap-highlight-color:
 .topbar-nav.motion-track > .nav-more > .nav-more-toggle.is-active::after { content: none; }
 .topbar-nav .motion-selection::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 1px; height: 2px; border-radius: 2px; background: var(--fill-accent); }
 .inspector-chart-controls button[aria-pressed="true"] { transition-duration: var(--motion-normal); }
-#refreshBtn { --refresh-tone: var(--accent-ink); isolation: isolate; }
+:root { --refresh-aqua: #22d3ee; --refresh-blue: #3b82f6; --refresh-ink: #67e8f9; }
+html[data-theme="light"] { --refresh-aqua: #0891b2; --refresh-blue: #2563eb; --refresh-ink: #0e7490; }
+#refreshBtn { --refresh-tone: var(--refresh-ink); isolation: isolate; color: var(--refresh-ink); }
+#refreshBtn:focus-visible { outline: 2px solid var(--refresh-tone); outline-offset: 2px; }
 #refreshBtn > .ic { position: relative; z-index: 2; }
 #refreshBtn .alert-badge { z-index: 3; }
 #refreshBtn:is(.is-loading,.is-done,.is-degraded,.is-fail) { color: var(--refresh-tone); background: color-mix(in srgb,var(--refresh-tone) 12%,var(--surface)); border-color: color-mix(in srgb,var(--refresh-tone) 42%,var(--line)); box-shadow: 0 0 18px color-mix(in srgb,var(--refresh-tone) 22%,transparent); }
+#refreshBtn:hover:not(.is-done):not(.is-degraded):not(.is-fail), #refreshBtn.is-loading { background: linear-gradient(135deg, color-mix(in srgb,var(--refresh-aqua) 13%,var(--surface)), color-mix(in srgb,var(--refresh-blue) 13%,var(--surface))); box-shadow: -4px 0 16px color-mix(in srgb,var(--refresh-aqua) 20%,transparent), 4px 0 16px color-mix(in srgb,var(--refresh-blue) 20%,transparent); }
 #refreshBtn.is-done { --refresh-tone: var(--pos-ink); }
 #refreshBtn.is-degraded { --refresh-tone: var(--amber); }
 #refreshBtn.is-fail { --refresh-tone: var(--danger); animation: refresh-error-nudge 300ms ease-out; }
 #refreshBtn::before,#refreshBtn::after { content: ''; position: absolute; pointer-events: none; border-radius: 50%; opacity: 0; }
-#refreshBtn::before { inset: -5px; z-index: -1; padding: 2px; background: conic-gradient(from 0deg, transparent 8%, color-mix(in srgb,var(--refresh-tone) 28%,transparent) 35%, var(--refresh-tone) 70%, transparent 86%); -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+#refreshBtn::before { inset: -5px; z-index: -1; padding: 2px; background: conic-gradient(from 0deg, transparent 8%, var(--refresh-aqua) 35%, var(--refresh-blue) 65%, var(--refresh-aqua) 78%, transparent 92%); -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
 #refreshBtn::after { inset: -12px; z-index: -2; background: radial-gradient(circle,color-mix(in srgb,var(--refresh-tone) 25%,transparent),transparent 70%); }
 #refreshBtn.is-loading::before { opacity: 1; animation: refresh-orbit 900ms linear infinite; }
-#refreshBtn.is-loading::after { animation: refresh-charge 1000ms ease-in-out infinite; }
+#refreshBtn.is-loading::after { background: radial-gradient(circle,color-mix(in srgb,var(--refresh-aqua) 30%,transparent),color-mix(in srgb,var(--refresh-blue) 18%,transparent) 42%,transparent 70%); animation: refresh-charge 1000ms ease-in-out infinite; }
 #refreshBtn.is-loading .ic-refresh { animation: refresh-rotor 900ms linear infinite; }
 #refreshBtn:is(.is-done,.is-degraded,.is-fail)::before { padding: 0; background: none; -webkit-mask: none; mask: none; border: 2px solid var(--refresh-tone); animation: refresh-release 820ms var(--motion-ease) both; }
 #refreshBtn:is(.is-done,.is-degraded,.is-fail)::after { animation: refresh-bloom 900ms var(--motion-ease) both; }
 #refreshBtn.is-done .ic-check-circle,#refreshBtn.is-fail .ic-x-circle,#refreshBtn.is-degraded .ic-refresh { animation: motion-feedback-in 420ms var(--motion-ease); }
 #refreshBtn.is-done .ic-check-circle path { stroke-dasharray: 14; stroke-dashoffset: 14; animation: refresh-check-draw 300ms ease-out 100ms both; }
 .refresh-scanline { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; z-index: 1; overflow: clip; pointer-events: none; opacity: 0; }
-.refresh-scanline::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg,transparent,var(--accent),transparent); }
+.refresh-scanline::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg,transparent,var(--refresh-aqua) 30%,var(--refresh-blue) 50%,var(--refresh-aqua) 70%,transparent); }
 .topbar:has(#refreshBtn.is-loading) .refresh-scanline { opacity: .85; }
 .topbar:has(#refreshBtn.is-loading) .refresh-scanline::before { animation: refresh-scan 1100ms ease-in-out infinite; }
 .topbar:has(#refreshBtn:is(.is-done,.is-degraded,.is-fail)) .refresh-scanline { animation: refresh-scan-fade 950ms ease-out both; }
@@ -168,7 +172,7 @@ html.motion-refresh-reveal #refreshBtn::after,
 html.motion-refresh-reveal .refresh-scanline,
 html.motion-refresh-reveal .refresh-scanline::before { animation: none !important; }
 html.motion-refresh-reveal #refreshBtn .ic-check-circle path { stroke-dashoffset: 0; }
-body:has(#refreshBtn.is-loading) #mobileMain::after { content: ''; position: fixed; z-index: 55; left: 0; right: 0; top: -35vh; height: 30vh; pointer-events: none; background: linear-gradient(180deg,transparent,color-mix(in srgb,var(--accent) 12%,transparent) 44%,color-mix(in srgb,var(--accent) 42%,transparent) 50%,color-mix(in srgb,var(--accent) 12%,transparent) 56%,transparent); animation: refresh-page-scan 1500ms ease-in-out infinite; }
+body:has(#refreshBtn.is-loading) #mobileMain::after { content: ''; position: fixed; z-index: 55; left: 0; right: 0; top: -35vh; height: 30vh; pointer-events: none; background: linear-gradient(110deg,color-mix(in srgb,var(--refresh-aqua) 24%,transparent),color-mix(in srgb,var(--refresh-blue) 30%,transparent)); mask-image: linear-gradient(180deg,transparent,rgba(0,0,0,.28) 44%,#000 50%,rgba(0,0,0,.28) 56%,transparent); animation: refresh-page-scan 1500ms ease-in-out infinite; }
 @keyframes refresh-page-scan { from { translate: 0 0; } to { translate: 0 170vh; } }
 html.motion-refresh-reveal #mobileMain::after,html.motion-theme-reveal #mobileMain::after,body:has(#refreshBtn.refresh-motion-muted) #mobileMain::after { display: none; }
 

@@ -1035,6 +1035,7 @@ async function performRefresh(force = false) {
     computeDerived(pools);
     state.pools = pools;
     saveCurrentHistory(pools);
+    void import('./mobile-research.js').then(m=>m.captureResearchSignals(state)).then(()=>{state.researchSaveError=null;}).catch(e=>{state.researchSaveError=e.message;});
     if (!state.monitorPool) refreshMonitorPool(); // 2026-09-15 避雷批:首次池成功后拉一次(30 分钟 TTL 内不重拉;失败静默)
     renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
     // 2026-11-04: 历史里缺「真正的前一交易日」时后台补一天（通常已存在，直接返回）。

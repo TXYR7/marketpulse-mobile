@@ -1,7 +1,8 @@
 // store.js — 本地持久化（IndexedDB，仅存本机）：自选 / 设置 / 交易流水 / 复盘日记 / 历史涨停池缓存
 
+import { mergeSignalObservation } from './signal-core.js';
 const DB = 'mp-mobile';
-const VER = 3;
+const VER = 4;
 let _db = null;
 
 function open() {
@@ -15,6 +16,7 @@ function open() {
       if (!db.objectStoreNames.contains('trades')) db.createObjectStore('trades', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('reviews')) db.createObjectStore('reviews', { keyPath: 'date' });
       if (!db.objectStoreNames.contains('history')) db.createObjectStore('history'); // key = YYYYMMDD -> {date, stocks:[{code,boards,industry,name}]}
+      if (!db.objectStoreNames.contains('signals')) db.createObjectStore('signals', {keyPath:'id'});
     };
     req.onsuccess = () => { _db = req.result; _db.onversionchange=()=>{_db.close();_db=null;}; res(_db); };
     req.onerror = () => rej(req.error);
@@ -95,6 +97,33 @@ export async function atomicKV(keys, update) {
 }
 export async function updateKV(key, update, fallback) {
   return atomicKV([key],values=>{const next=update(values[key] ?? fallback);return {values:{[key]:next},result:next};});
+}
+
+export async function recordResearchSignals(observations) {
+  if(!observations.length)return;
+  const db=await open();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('signals','readwrite'),store=tx.objectStore('signals');
+    for(const observation of observations){const request=store.get(observation.id);request.onsuccess=()=>{
+      const next=mergeSignalObservation(request.result,observation);
+      if(next!==request.result)store.put(next);
+    };}
+    tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('信号保存已取消'));
+  });
+}
+export async function getResearchSignals() {
+  const db=await open();
+  return new Promise((resolve,reject)=>{const tx=db.transaction('signals','readonly'),request=tx.objectStore('signals').getAll();
+    request.onsuccess=()=>resolve((request.result||[]).sort((a,b)=>a.date.localeCompare(b.date)||a.code.localeCompare(b.code)));
+    request.onerror=()=>reject(request.error);});
+}
+export async function settleResearchSignals(results) {
+  if(!results.length)return;
+  const db=await open();
+  return new Promise((resolve,reject)=>{const tx=db.transaction('signals','readwrite'),store=tx.objectStore('signals');
+    for(const value of results){const request=store.get(value.id);request.onsuccess=()=>{const row=request.result;if(row&&!row.result)store.put({...row,result:value.result});};}
+    tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('信号结算已取消'));
+  });
 }
 
 /* ---------- 交易流水 ---------- */

@@ -223,25 +223,24 @@ function wilsonLow(k, n, z = 1.96) {
 function historyStats(bars, series, composite, currentScore) {
   const samples = series.map((row, idx) => ({ i: row.i, score: composite[idx] })).filter((s) => s.score !== null);
   const horizons = [1, 3, 5];
+  const summarize = (picked, days) => {
+    let lastEnd = -1;
+    const windows = [];
+    for (const sample of picked) {
+      const end = sample.i + days;
+      if (end >= bars.length || sample.i <= lastEnd || bars[sample.i].close <= 0) continue;
+      windows.push({ from: bars[sample.i].date, to: bars[end].date, fromIndex: sample.i, toIndex: end,
+        ret: (bars[end].close / bars[sample.i].close - 1) * 100 });
+      lastEnd = end;
+    }
+    const n = windows.length, up = windows.filter(w => w.ret > 0).length;
+    return { days, n, windows, winRate: n ? round(up / n * 100, 0) : null,
+      winRateLow: n ? round(wilsonLow(up, n), 0) : null,
+      mean: n ? round(windows.reduce((s, w) => s + w.ret, 0) / n, 2) : null };
+  };
   const collect = (band) => {
     const picked = samples.filter((s) => Math.abs(s.score - currentScore) <= band);
-    const byHorizon = horizons.map((days) => {
-      const rows = picked.map((s) => {
-        if (s.i + days >= bars.length) return null;
-        const from = bars[s.i].close;
-        const to = bars[s.i + days].close;
-        return from > 0 ? ((to / from - 1) * 100) : null;
-      }).filter((v) => v !== null);
-      const n = rows.length;
-      const up = rows.filter((v) => v > 0).length;
-      return {
-        days,
-        n,
-        winRate: n ? round((up / n) * 100, 0) : null,
-        winRateLow: n ? round(wilsonLow(up, n), 0) : null,
-        mean: n ? round(rows.reduce((a, b) => a + b, 0) / n, 2) : null,
-      };
-    });
+    const byHorizon = horizons.map(days => summarize(picked, days));
     return { band, samples: picked.length, horizons: byHorizon };
   };
   // 先 ±10 分；样本不足逐步放宽到 ±15 / ±20
@@ -251,18 +250,8 @@ function historyStats(bars, series, composite, currentScore) {
   const fiveDay = chosen.horizons.find((h) => h.days === 5);
   chosen.insufficient = !fiveDay || fiveDay.n < MIN_HISTORY_SAMPLES;
   // 基准：全部历史样本（同口径）
-  const base = horizons.map((days) => {
-    const rows = samples.map((s) => {
-      if (s.i + days >= bars.length) return null;
-      const from = bars[s.i].close;
-      const to = bars[s.i + days].close;
-      return from > 0 ? ((to / from - 1) * 100) : null;
-    }).filter((v) => v !== null);
-    const n = rows.length;
-    const up = rows.filter((v) => v > 0).length;
-    return { days, n, winRate: n ? round((up / n) * 100, 0) : null, mean: n ? round(rows.reduce((a, b) => a + b, 0) / n, 2) : null };
-  });
-  return { ...chosen, base, scorePercentile: round(percentileOf(currentScore, composite), 0) };
+  const base = horizons.map(days => summarize(samples, days));
+  return { ...chosen, base, sampling: 'non-overlapping-return-windows-v1', scorePercentile: round(percentileOf(currentScore, composite), 0) };
 }
 
 // 价格结构位：均线 / 60-120 日高低 / ATR

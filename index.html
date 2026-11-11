@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0c0c0d" />
-    <script src="boot-theme.js?v=mp-mobile-20261111-4"></script>
-    <script src="mobile-viewport.js?v=mp-mobile-20261111-4"></script>
+    <script src="boot-theme.js?v=mp-mobile-20261111-5"></script>
+    <script src="mobile-viewport.js?v=mp-mobile-20261111-5"></script>
     <script>
       // 更新检查独立于应用模块，旧模块缓存出错时仍能升级外壳。
       if ('serviceWorker' in navigator) {
@@ -26,12 +26,12 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="icon" href="icons/icon-192.png" />
-    <link rel="stylesheet" href="styles.css?v=mp-mobile-20261111-4" /><link rel="stylesheet" href="mobile-workspace.css?v=mp-mobile-20261111-4" />
-    <link rel="stylesheet" href="desktop-tokens.css?v=mp-mobile-20261111-4" />
-    <link rel="stylesheet" href="color-identity.css?v=mp-mobile-20261111-4" />
-    <link rel="stylesheet" href="navigation-icons.css?v=mp-mobile-20261111-4" />
-    <link rel="stylesheet" href="motion.css?v=mp-mobile-20261111-4" />
-    <link rel="stylesheet" href="mobile-identity.css?v=mp-mobile-20261111-4" /><link rel="stylesheet" href="mobile-desktop-update.css?v=mp-mobile-20261111-4" /><link rel="stylesheet" href="mobile-drawer-polish.css?v=mp-mobile-20261111-4" />
+    <link rel="stylesheet" href="styles.css?v=mp-mobile-20261111-5" /><link rel="stylesheet" href="mobile-workspace.css?v=mp-mobile-20261111-5" />
+    <link rel="stylesheet" href="desktop-tokens.css?v=mp-mobile-20261111-5" />
+    <link rel="stylesheet" href="color-identity.css?v=mp-mobile-20261111-5" />
+    <link rel="stylesheet" href="navigation-icons.css?v=mp-mobile-20261111-5" />
+    <link rel="stylesheet" href="motion.css?v=mp-mobile-20261111-5" />
+    <link rel="stylesheet" href="mobile-identity.css?v=mp-mobile-20261111-5" /><link rel="stylesheet" href="mobile-desktop-update.css?v=mp-mobile-20261111-5" /><link rel="stylesheet" href="mobile-drawer-polish.css?v=mp-mobile-20261111-5" />
     <link rel="preconnect" href="https://push2ex.eastmoney.com" />
     <link rel="preconnect" href="https://push2.eastmoney.com" />
     <link rel="preconnect" href="https://push2his.eastmoney.com" />
@@ -41,6 +41,7 @@
     <link rel="modulepreload" href="views.js" />
     <link rel="modulepreload" href="views-extra.js" />
     <link rel="modulepreload" href="version.js" />
+    <link rel="stylesheet" href="mobile-research.css?v=mp-mobile-20261111-5" />
   </head>
 <body>
   <header class="topbar">
@@ -85,6 +86,12 @@
       <div id="rank-hot" role="tabpanel" hidden><label class="mobile-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input type="search" id="hotSearch" placeholder="搜索热榜名称或代码" aria-label="搜索热榜名称或代码" autocomplete="off"></label><div class="mobile-filter-grid"><label class="filter-field"><span>范围</span><select id="hotScope" aria-label="范围"><option value="all">全部</option><option value="top20">前20名</option><option value="limit">涨停</option><option value="rising">名次上升</option></select></label><label class="filter-field"><span>排序</span><select id="hotSort" aria-label="排序"><option value="rank">原始名次</option><option value="gain">涨幅</option><option value="change">名次变化</option><option value="heat">热度</option></select></label><label class="filter-field"><span>展示</span><select id="hotLayout" aria-label="展示"><option value="list">列表</option><option value="ladder">名次天梯</option></select></label><button class="mobile-action" type="button" data-refresh-trigger id="hotRefresh">重试 / 更新</button></div><p class="mobile-meta" id="hotMeta"></p><div id="hotRows"></div></div>
     </section>
     <section class="view" id="view-tools" hidden>
+      <details class="mobile-panel" id="researchFold"><summary>信号统计与回测<span>本机观察 · 持仓风险 · 日期隔离</span></summary>
+        <p class="mobile-note">记录同一次行情的评级和价格；升级前收益不归入后来的评级。结果不替代实际成交记录。</p>
+        <h3>信号观察</h3><button type="button" class="mobile-action" id="signalRead">更新统计</button><div id="signalResults"></div>
+        <h3>策略回测</h3><div class="research-controls"><label>市场交易日<select id="researchDays"><option value="10">最近10日</option><option value="20" selected>最近20日</option><option value="30">最近30日</option></select></label><label>本金（元）<input type="number" min="1" step="100" id="researchCapital" value="100000" inputmode="decimal"></label><label>买入情景<select id="researchEntry"><option value="close">候选日收盘买入</option><option value="nextOpen">下一交易日开盘买入</option></select></label></div>
+        <div class="tool-actions"><button type="button" class="mobile-action" id="backtestRun">回测 / 继续补齐K线</button><button type="button" id="researchCancel" hidden>停止补录</button></div><p class="mobile-meta" id="researchStatus" role="status" aria-live="polite"></p><div id="backtestResults"></div>
+      </details>
       <details class="mobile-panel" id="advisorFold" open><summary>买卖参考<span>个股历史与风险预算</span></summary>
         <div class="mobile-section-head"><span id="advisorSelected">先选择股票</span><button type="button" id="advisorChoose">搜索股票</button></div>
         <label class="filter-field"><span>当前状态</span><select id="advisorMode" aria-label="当前状态"><option value="buy">准备买入</option><option value="hold">已经持有</option></select></label><div class="mobile-filter-grid"><label class="filter-field"><span>账户资金</span><input type="number" min="0" step="any" inputmode="decimal" id="advisor-capital" placeholder="100000"></label><label class="filter-field"><span>单笔风险 %</span><input type="number" min="0" step="any" inputmode="decimal" id="advisor-riskPct" placeholder="1"></label><label class="filter-field"><span>投入金额上限</span><input type="number" min="0" step="any" inputmode="decimal" id="advisor-amount" placeholder="10000"></label></div><div id="advisorHoldInputs" class="mobile-filter-grid" hidden><label class="filter-field"><span>持仓成本</span><input type="number" min="0" step="any" inputmode="decimal" id="advisor-cost"></label><label class="filter-field"><span>持仓股数</span><input type="number" min="0" step="any" inputmode="decimal" id="advisor-shares"></label></div><button type="button" class="mobile-primary" id="advisorRun">计算买卖参考</button><div id="advisorResult"></div>
@@ -124,6 +131,6 @@
       <div class="notify-actions"><button id="notifySave" type="button" class="notify-primary">保存</button><button id="notifyTest" type="button">发送测试</button><button id="notifyPermission" type="button">浏览器通知授权</button></div>
       <p id="notifyResult" class="notify-note" role="status" aria-live="polite"></p><p id="notifyStatus" class="notify-note" role="status" aria-live="polite"></p>
     </dialog>
-  <script type="module" src="app.js?v=mp-mobile-20261111-4"></script>
+  <script type="module" src="app.js?v=mp-mobile-20261111-5"></script>
 </body>
 </html>

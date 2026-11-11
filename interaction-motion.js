@@ -5,7 +5,7 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
   const selections = new WeakMap();
   const visibility = new WeakMap();
   const pressLayers = new WeakMap();
-  const pressSelector = '.nav-link,.icon-button:not(#themeButton),.profile-button,.quick-filter button,.quick-detail,.inspector-chart-controls button,.segment,.outline-button,.primary-button,.adv-btn,.adv-tab,.board-full-data > summary,.detail-extra-section > summary';
+  const pressSelector = '.nav-link,.icon-button:not(#themeButton),.profile-button,.quick-filter button,.quick-detail,.inspector-chart-controls button,.inspector-reader-tabs button,.inspector-reader-tools button,.inspector-research-fold > summary,#detailDrawer .detail-drawer-body button,.segment,.outline-button,.primary-button,.adv-btn,.adv-tab,.board-full-data > summary,.detail-extra-section > summary';
   const reduced = win.matchMedia?.('(prefers-reduced-motion: reduce)');
   const ease = 'cubic-bezier(.25,.8,.25,1)';
   let currentPage = null;
@@ -15,7 +15,11 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
 
   function stop(element) {
     const record = active.get(element);
-    if (record) { active.delete(element); record.animation.cancel(); }
+    if (record) {
+      active.delete(element); record.animation.cancel();
+      if (record.clip) element.style.overflow = record.overflow;
+      element.classList?.remove?.('motion-layer');
+    }
   }
 
   function capture(element) {
@@ -48,12 +52,15 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
     }
     stop(element);
     if (doc.hidden || reduced?.matches || typeof element.animate !== 'function') return Promise.resolve();
-    const { sample, ...timing } = options;
+    const { sample, clip = false, ...timing } = options;
+    const overflow = element.style?.overflow || '';
+    if (clip && element.style) element.style.overflow = 'clip';
+    if (frames.some(frame => 'translate' in frame || 'opacity' in frame)) element.classList?.add?.('motion-layer');
     const animation = element.animate(frames, { duration, easing: ease, fill: 'both', ...timing });
-    const record = { animation, sample, duration, delay: Number(timing.delay) || 0 };
+    const record = { animation, sample, clip, overflow, duration, delay: Number(timing.delay) || 0 };
     active.set(element, record);
     return animation.finished.catch(() => {}).then(() => {
-      if (active.get(element) === record) { active.delete(element); animation.cancel(); }
+      if (active.get(element) === record) stop(element);
     });
   }
 
@@ -80,7 +87,7 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
         const speed = (initialVelocity[key] || 0) * duration;
         let value, derivative;
         if (surface || key === 'opacity' || lengths.includes(key)) {
-          const omega = 8;
+          const omega = 6.5;
           const decay = Math.exp(-omega * t);
           value = to[key] + (delta + (speed + omega * delta) * t) * decay;
           derivative = (speed - omega * (speed + omega * delta) * t) * decay;
@@ -103,10 +110,9 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
       if ('scale' in to) frame.scale = values.scale;
       if ('opacity' in to) frame.opacity = values.opacity;
       for (const key of lengths) frame[key] = values[key] + 'px';
-      if (clip) frame.overflow = 'clip';
       return frame;
     });
-    return play(element, frames, duration, { ...timing, sample, easing: 'linear' });
+    return play(element, frames, duration, { ...timing, sample, clip, easing: 'linear' });
   }
 
   function stagger(elements, { distance = 6, delay = 0, duration = 300 } = {}) {
@@ -122,33 +128,33 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
     if (doc.hidden || reduced?.matches || typeof element.animate !== 'function') return Promise.resolve();
     // 单个合成层入场，不叠加子区块动画，也不逐个测量长页面。
     element.classList.add?.('motion-page');
-    return spring(element, { x: 18 * direction, y: 0, opacity: .72 }, { x: 0, y: 0, opacity: 1 }, 320, { surface: true })
+    return spring(element, { x: 12 * direction, y: 0, opacity: .88 }, { x: 0, y: 0, opacity: 1 }, 260, { surface: true })
       .then(() => { if (currentPage === element) element.classList.remove?.('motion-page'); });
   }
 
   function inspector(element, { opening, docked, replacement = false } = {}) {
     if (replacement) return spring(element?.querySelector('.detail-drawer-body'),
-      { x: 0, y: 6, opacity: .7 }, { x: 0, y: 0, opacity: 1 }, 280, { surface: true });
+      { x: 0, y: 4, opacity: .92 }, { x: 0, y: 0, opacity: 1 }, 200, { surface: true });
     const rect = element?.getBoundingClientRect?.();
     const sheet = !docked && win.innerWidth <= 680;
     const resting = { x: 0, y: 0, scale: 1, opacity: 1 };
     const away = { x: docked ? (rect?.width || 480) : 0, y: sheet ? (rect?.height || 640) : docked ? 0 : 40, scale: docked || sheet ? 1 : .98, opacity: docked || sheet ? 1 : .5 };
-    return opening ? spring(element, away, resting, 500, { surface: true })
-      : spring(element, resting, { ...away, opacity: docked || sheet ? 1 : 0 }, 340, { surface: true });
+    return opening ? spring(element, away, resting, 420, { surface: true })
+      : spring(element, resting, { ...away, opacity: docked || sheet ? 1 : 0 }, 300, { surface: true });
   }
 
   function search(element, opening = true) {
-    return opening ? spring(element, { x: 0, y: -8, scale: .985, opacity: .35 }, { x: 0, y: 0, scale: 1, opacity: 1 }, 320, { surface: true })
-      : spring(element, { x: 0, y: 0, scale: 1, opacity: 1 }, { x: 0, y: -6, scale: .99, opacity: 0 }, 240, { surface: true });
+    return opening ? spring(element, { x: 0, y: -5, scale: .995, opacity: .8 }, { x: 0, y: 0, scale: 1, opacity: 1 }, 220, { surface: true })
+      : spring(element, { x: 0, y: 0, scale: 1, opacity: 1 }, { x: 0, y: -3, scale: .995, opacity: 0 }, 160, { surface: true });
   }
 
   function searchResults(element) {
     return stagger([...(element?.querySelectorAll('.stock-search-option, .adv-suggest-item') || [])].slice(0, 8), { distance: 4, duration: 240 });
   }
 
-  function content(element, { distance = 6, duration = 280, direction = 0, fromHeight } = {}) {
+  function content(element, { distance = 4, duration = 220, direction = 0, fromHeight } = {}) {
     if (!element || element.hidden || element.closest?.('[hidden]')) return Promise.resolve();
-    const from = { x: direction * 16, y: distance, opacity: .72 }, to = { x:0, y:0, opacity:1 };
+    const from = { x: direction * 10, y: distance, opacity: .9 }, to = { x:0, y:0, opacity:1 };
     let snapshot, clip = false;
     if (Number.isFinite(fromHeight)) {
       snapshot = capture(element); stop(element);
@@ -221,7 +227,7 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
       if (commitError) return Promise.reject(commitError);
       if (doc.hidden || reduced?.matches) return Promise.resolve();
       if (kind === 'refresh') return play(doc.querySelector?.('.app-shell') || doc.body,
-        [{ filter:'blur(1px)', opacity:.6 }, { filter:'blur(0px)', opacity:1 }], 520);
+        [{ opacity:.92 }, { opacity:1 }], 220);
       root?.classList.add('motion-theme');
       themeTimer = setTimeout(() => { if (themeSequence === sequence) root?.classList.remove('motion-theme'); }, 340);
       return play(button, [{ rotate: '-90deg', scale: .7, opacity: .45 }, { rotate: '0deg', scale: 1, opacity: 1 }], 420);
@@ -240,18 +246,18 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
     catch { pendingThemeCommit = null; root.classList.remove(revealClass); return fallback(); }
     themeTransition = transition;
     const animate = (frames, options) => {
-      const animation = root.animate(frames, { duration: kind === 'refresh' ? 880 : 720, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both', ...options });
+      const animation = root.animate(frames, { duration: kind === 'refresh' ? 600 : 520, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both', ...options });
       themeAnimations.push(animation);
       animation.finished.catch(() => {});
     };
     transition.ready.then(() => {
       if (sequence !== themeSequence) return;
-      animate([{ clipPath: `circle(0px at ${x}px ${y}px)` }, { clipPath: `circle(${radius}px at ${x}px ${y}px)` }], { easing: 'cubic-bezier(.65,0,.35,1)', pseudoElement: '::view-transition-new(root)' });
+      animate([{ clipPath: `circle(0px at ${x}px ${y}px)` }, { clipPath: `circle(${radius}px at ${x}px ${y}px)` }], { easing: 'cubic-bezier(.22,.8,.25,1)', pseudoElement: '::view-transition-new(root)' });
       if (button && kind === 'theme') animate([
-        { rotate: '-90deg', scale: .5, opacity: .2, filter: 'drop-shadow(0 0 12px var(--brand-star))' },
-        { rotate: '8deg', scale: 1.12, opacity: 1, filter: 'drop-shadow(0 0 6px var(--brand-star))', offset: .65 },
-        { rotate: '0deg', scale: 1, opacity: 1, filter: 'drop-shadow(0 0 0px transparent)' }
-      ], { duration: 600, pseudoElement: '::view-transition-new(theme-toggle)' });
+        { rotate: '-60deg', scale: .85, opacity: .8 },
+        { rotate: '4deg', scale: 1.04, opacity: 1, offset: .7 },
+        { rotate: '0deg', scale: 1, opacity: 1 }
+      ], { duration: 420, pseudoElement: '::view-transition-new(theme-toggle)' });
     }).catch(() => {
       if (sequence !== themeSequence) return;
       commit(); transition.skipTransition();
@@ -273,7 +279,7 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
   function block(element, opening, { fade = false, axis = 'height' } = {}) {
     if (!element) return Promise.resolve();
     const snapshot = capture(element), current = snapshot?.values;
-    const from = { x: current?.x || 0, y: current?.y || 0, opacity: current?.opacity ?? .2 };
+    const from = { x: current?.x || 0, y: current?.y || 0, opacity: current?.opacity ?? .85 };
     stop(element);
     const dimension = axis === 'width' ? 'width' : 'height';
     const size = element.getBoundingClientRect?.()[dimension];
@@ -286,19 +292,19 @@ export function createInteractionMotion({ doc = document, win = window } = {}) {
       for (const key of [dimension, ...padding]) from[key] = current?.[key] || 0;
     }
     const timing = { clip: !fade, surface: true, velocity: snapshot?.velocity };
-    if (opening) return spring(element, from, to, 400, timing);
+    if (opening) return spring(element, from, to, 320, timing);
     const start = { ...to, ...current }, end = { x: 0, y: 0, opacity: 0 };
     // 只传递当前区块参与动画的属性，避免把旧层的缩放或尺寸带入。
     for (const key of Object.keys(to)) { start[key] = current?.[key] ?? to[key]; if (!(key in end)) end[key] = 0; }
-    return spring(element, start, end, 320, timing);
+    return spring(element, start, end, 240, timing);
   }
 
   function syncSelections() {
-    for (const selector of ['.topbar-nav', '#themeModeTabs', '#workspaceSections', '#heatSectorTabs', '.adv-tabs', '#inspectorKlineControls', '.quick-filter']) {
+    for (const selector of ['.topbar-nav', '#themeModeTabs', '#workspaceSections', '#heatSectorTabs', '.adv-tabs', '#inspectorKlineControls', '.inspector-reader-tabs', '.quick-filter']) {
       const track = doc.querySelector?.(selector);
       const target = track?.querySelector(selector === '.topbar-nav'
         ? ':scope > .nav-link.is-active, :scope > .nav-more > .nav-more-toggle.is-active'
-        : selector === '#inspectorKlineControls' ? '[data-kline-days][aria-pressed="true"]' : selector === '.quick-filter' ? 'button[aria-pressed="true"]' : 'button.is-active');
+        : selector === '#inspectorKlineControls' ? '[data-kline-days][aria-pressed="true"]' : selector === '.inspector-reader-tabs' ? '[data-inspector-view][aria-selected="true"]' : selector === '.quick-filter' ? 'button[aria-pressed="true"]' : 'button.is-active');
       if (!track || !target || track.hidden || !target.getClientRects?.().length) continue;
       let selection = selections.get(track);
       // 先建立定位容器，再读取 offset；否则首次测量会带入祖先的页面坐标。

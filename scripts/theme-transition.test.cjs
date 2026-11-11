@@ -102,7 +102,7 @@ test('整页刷新从刷新按钮铺开新画面，更新只提交一次并清�
   env.transitions[0].update();await flush();
   assert.equal(updates,1);
   assert.equal(env.animations[0].frames[0].clipPath,'circle(0px at 815px 25px)');
-  assert.equal(env.animations[0].options.duration,880);
+  assert.equal(env.animations[0].options.duration,600);
   env.transitions[0].finish();await done;
   assert.equal(updates,1);assert(!env.classes.has('motion-refresh-reveal'));
 });

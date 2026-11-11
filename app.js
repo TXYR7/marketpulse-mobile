@@ -1,5 +1,5 @@
 import { createMobileInteractions, createMobileRefresh } from './mobile-interactions.js';
-import { createMobileWorkspace } from './mobile-workspace.js';
+import { createMobileWorkspace, decisionBadgeTone } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
 import { createMobileAlerts, formatMobileNotice, mobileDay, mobileSession } from './mobile-alerts.js';
@@ -47,7 +47,7 @@ function syncDetailJudgement() {
   if (!state.sheetCode) return;
   const stock = state.pools?.up?.find(s => s.code === state.sheetCode); if (!stock?.promo?.modelVersion) return;
   const p=stock.promo, icons={pass:'✓',warn:'!',fail:'✕',na:'–'};
-  const verdict=$('#sheetDecisionVerdict'); if(verdict) verdict.innerHTML='<div class="s-verdict"><strong>'+esc(p.verdict)+'</strong><span class="mobile-meta">一致度 '+p.score+' · 证据 '+p.coverage.percent+'%</span></div>';
+  const verdict=$('#sheetDecisionVerdict'); if(verdict) verdict.innerHTML='<div class="s-verdict" data-tone="'+decisionBadgeTone(stock)+'"><strong>'+esc(p.verdict)+'</strong><span class="mobile-meta">一致度 '+p.score+' · 证据 '+p.coverage.percent+'%</span></div>';
   const evidence=$('#sheetPromoEvidence'); if(evidence) evidence.innerHTML='<div class="s-promo">'+p.checklist.map(row=>'<div class="promo-row status-'+row.status+'"><i>'+icons[row.status]+'</i><span class="k">'+esc(row.label)+'</span><em>'+esc(row.note)+'</em></div>').join('')+'</div>';
   const plan=$('#sheetPlan'); if(plan) plan.innerHTML=buildPlanHtml(stock);
 }
@@ -535,7 +535,9 @@ function renderRadar() {
   if (!r || !r.available) { setHTML(el, '<div class="muted">暂无风险数据</div>'); return; }
   const items = r.items.map((it) => {
     const lvCls = it.level === 'red' ? 'red' : it.level === 'orange' ? 'orange' : it.level === 'yellow' ? 'yellow' : it.level === 'green' ? 'green' : 'gray';
-    return '<div class="risk-item"><div class="top"><span class="lab">' + esc(it.label) + '</span><span class="lv ' + lvCls + '">' + it.score + '</span><span class="score"></span></div>' +
+    const density=it.key==='first';
+    const levelText=density?'密度':({red:'高风险',orange:'谨慎',yellow:'关注',green:'平稳',gray:'待核'})[lvCls];
+    return '<div class="risk-item" data-risk-kind="' + (density?'density':'risk') + '" data-risk-level="' + lvCls + '"><div class="top"><span class="lab">' + esc(it.label) + '</span><span class="lv ' + lvCls + '">' + it.score + '<small class="risk-level-mark">' + levelText + '</small></span></div>' +
       '<div class="action">' + esc(it.action) + '</div>' +
       (it.reasons && it.reasons.length ? '<div class="reasons">' + it.reasons.map((x) => esc(x)).join(' · ') + '</div>' : '') + '</div>';
   }).join('');
@@ -797,7 +799,7 @@ async function openSheet(code) {
   // + 相似日后续表现单行(后台静默加载)。集合竞价/行情明细/相似形态卡三组砍
   // (竞价信息仍活在卡片竞价行与八维「竞价承接」维度,只是抽屉无深挖区)。
   const pv = stock.promo && (stock.promo.modelVersion || stock.promo.available !== false);
-  let verdictHtml = '<div class="s-verdict">';
+  let verdictHtml = '<div class="s-verdict" data-tone="' + decisionBadgeTone(stock) + '">';
   if (stock.tier) verdictHtml += '<span class="sv-line">' + tierBadge(stock.tier) + ' <b>评分 ' + (stock.score ?? '--') + '</b></span>';
   if (pv) {
     const vcls = stock.promo.verdict === '可接力' ? 'pass' : stock.promo.verdict === '观望' ? 'warn' : 'fail';

@@ -1,2 +1,5 @@
-// 首屏主题与状态栏颜色由网页品牌皮肤生成。
-try { const theme=localStorage.getItem('mp-theme')==='light'?'light':'dark';document.documentElement.dataset.theme=theme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='light'?'#f5f2ec':'#11100e'); } catch {document.documentElement.dataset.theme='dark';}
+// 首屏主题与状态栏颜色由共享主题生成。
+let initialTheme='dark';try{if(localStorage.getItem('mp-theme')==='light')initialTheme='light';}catch{}
+document.documentElement.dataset.theme=initialTheme;
+document.querySelector('meta[name="theme-color"]')?.setAttribute('content',initialTheme==='light'?'#fafafa':'#0c0c0d');
+document.querySelector('meta[name="color-scheme"]')?.setAttribute('content',initialTheme);

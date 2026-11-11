@@ -1,20 +1,20 @@
-/* 星脉导航：矿物色、金色星点与金属亮面组成一套专属符号。 */
+/* 星脉导航：图标、激活态与选中底色分别使用当前主题的中性灰阶。 */
 .mobile-bottom-nav {
-  --nav-market: var(--brand-gold);
-  --nav-breakout: var(--brand-copper);
-  --nav-ascent: var(--brand-amber);
-  --nav-cluster: var(--brand-jade);
-  --nav-flare: var(--brand-rose);
-  --nav-compass: var(--brand-plum);
-  --nav-constellation: var(--brand-constellation);
-  --nav-exchange: var(--brand-olive);
-  --nav-replay: var(--brand-mauve);
-  --nav-simulation: var(--brand-clay);
-  --nav-data: var(--brand-slate);
-  --nav-calibrate: var(--brand-stone);
-  --nav-emblem-star: var(--brand-star);
-  --nav-metal-light: var(--brand-metal-light);
-  --nav-metal-dark: var(--brand-metal-dark);
+  --nav-market: var(--accent);
+  --nav-breakout: var(--nav-market);
+  --nav-ascent: var(--nav-market);
+  --nav-cluster: var(--nav-market);
+  --nav-flare: var(--nav-market);
+  --nav-compass: var(--nav-market);
+  --nav-constellation: var(--muted-2);
+  --nav-exchange: var(--nav-market);
+  --nav-replay: var(--nav-market);
+  --nav-simulation: var(--nav-market);
+  --nav-data: var(--nav-market);
+  --nav-calibrate: var(--nav-market);
+  --nav-emblem-star: var(--nav-market);
+  --nav-metal-light: var(--ink-strong);
+  --nav-metal-dark: var(--muted-2);
   --nav-track-accent: var(--nav-market);
   --fill-accent: var(--nav-track-accent);
 }
@@ -59,14 +59,14 @@
 .mobile-bottom-nav:has([data-nav="datacenter"].is-active) { --nav-track-accent: var(--nav-data); }
 .mobile-bottom-nav:has([data-nav="rules"].is-active) { --nav-track-accent: var(--nav-calibrate); }
 .mobile-bottom-nav .motion-selection {
-  background: linear-gradient(145deg, color-mix(in srgb, var(--nav-track-accent) 8%, var(--surface-2)), var(--surface-2));
+  background: var(--surface-2);
 }
 .mobile-bottom-nav .nav-link.is-active::after { background: var(--nav-emblem-accent); }
 .mobile-bottom-nav .nav-emblem stop:first-child {
-  stop-color: color-mix(in srgb, var(--nav-emblem-accent) 78%, var(--nav-metal-light));
+  stop-color: currentColor;
 }
 .mobile-bottom-nav .nav-emblem stop:last-child {
-  stop-color: color-mix(in srgb, var(--nav-emblem-accent) 78%, var(--nav-metal-dark));
+  stop-color: currentColor;
 }
 .nav-icon-shell {
   display: grid;
@@ -74,9 +74,9 @@
   flex: none;
   width: 28px;
   height: 28px;
-  border: 1px solid color-mix(in srgb, var(--nav-emblem-accent) 12%, transparent);
+  border: 1px solid var(--line-soft);
   border-radius: 9px;
-  background: radial-gradient(ellipse at 25% 10%, color-mix(in srgb, var(--nav-emblem-accent) 8%, transparent), transparent 80%);
+  background: var(--surface-2);
   transition: background var(--motion-fast, 160ms), border-color var(--motion-fast, 160ms);
 }
 .mobile-bottom-nav .nav-emblem {
@@ -84,21 +84,21 @@
   width: 23px;
   height: 23px;
   overflow: visible;
-  color: color-mix(in srgb, var(--nav-emblem-accent) 66%, var(--muted));
+  color: var(--muted-2);
   stroke-width: 1.55;
 }
-.nav-emblem .glyph-accent { color: var(--nav-emblem-accent); }
-.nav-emblem .glyph-accent:not([stroke="none"]) { stroke: var(--nav-emblem-paint, currentColor); }
-.nav-emblem .glyph-accent[fill="currentColor"] { fill: var(--nav-emblem-paint, currentColor); }
-.nav-emblem .glyph-star { color: var(--nav-emblem-star); }
+.nav-emblem .glyph-accent { color: inherit; }
+.nav-emblem .glyph-accent:not([stroke="none"]) { stroke: currentColor; }
+.nav-emblem .glyph-accent[fill="currentColor"] { fill: currentColor; }
+.nav-emblem .glyph-star { color: inherit; }
 .nav-emblem .glyph-orbit { opacity: .68; }
 .nav-emblem .glyph-soft { opacity: .2; }
 .nav-link:hover .nav-emblem,
-.nav-link.is-active .nav-emblem { color: color-mix(in srgb, var(--nav-emblem-accent) 82%, var(--ink-strong)); }
+.nav-link.is-active .nav-emblem { color: var(--nav-emblem-accent); }
 .nav-link:hover .nav-icon-shell { border-color: color-mix(in srgb, var(--nav-emblem-accent) 28%, transparent); }
 .nav-link.is-active .nav-icon-shell {
   border-color: color-mix(in srgb, var(--nav-emblem-accent) 38%, transparent);
-  background: linear-gradient(145deg, color-mix(in srgb, var(--nav-emblem-accent) 20%, transparent), color-mix(in srgb, var(--nav-emblem-star) 5%, transparent));
+  background: var(--accent-soft);
 }
 .nav-more-panel .nav-icon-shell { width: 26px; height: 26px; }
 .nav-more-panel .nav-emblem { width: 21px; height: 21px; }

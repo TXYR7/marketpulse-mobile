@@ -137,7 +137,7 @@ export function renderOpportunity(ctx) {
         const elim = (x.reasons?.elim || []).map((r) => '<span class="minus">' + esc(r) + '</span>').join('');
         return '<div class="opp-card" data-code="' + x.code + '">' +
           '<div class="row1"><div class="nm">' + esc(x.name) + boardTag(x.code) + ' <span class="pill">' + (x.boards || 1) + '板</span></div>' +
-          '<div class="right">' + tierBadge(x.tier) + '<div class="score" title="' + esc(oppScoreTitle(x)) + '">' + esc(oppScoreText(x)) + '</div>' + (x.signal ? signalTag(x.signal.state) : '') + '</div></div>' +
+          '<div class="right">' + tierBadge(x.tier) + '<div class="score" data-grade="' + esc(x.tier || '淘汰') + '" data-score-available="' + (oppScoreValue(x) !== null) + '" title="' + esc(oppScoreTitle(x)) + '">' + esc(oppScoreText(x)) + '</div>' + (x.signal ? signalTag(x.signal.state) : '') + '</div></div>' +
           '<div class="sub">' + esc(x.industry || '—') + (x.role ? ' · ' + x.role : '') + '</div>' +
           (plus || minus || elim ? '<div class="reasons">' + plus + minus + elim + '</div>' : '') +
           '</div>';

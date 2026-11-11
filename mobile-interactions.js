@@ -42,8 +42,10 @@ export function createMobileInteractions({doc=document,win=window}={}) {
   function commitTheme(next) {
     theme=next;doc.documentElement.dataset.theme=next;
     try{localStorage.setItem('mp-theme',next);}catch{}
-    const canvas=win.getComputedStyle(doc.documentElement).getPropertyValue('--canvas').trim();
+    const style=win.getComputedStyle(doc.documentElement);
+    const canvas=style.backgroundColor || style.getPropertyValue('--canvas').trim();
     doc.querySelector('meta[name="theme-color"]')?.setAttribute('content',canvas);
+    doc.querySelector('meta[name="color-scheme"]')?.setAttribute('content',next);
     const button=doc.getElementById('themeBtn');button?.setAttribute('aria-label',next==='light'?'切换到深色主题':'切换到浅色主题');button?.setAttribute('aria-pressed',String(next==='light'));
     button?.setAttribute('title',next==='light'?'切换到深色主题':'切换到浅色主题');
   }

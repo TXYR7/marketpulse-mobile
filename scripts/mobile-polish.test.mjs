@@ -11,7 +11,8 @@ function environment(){
 test('手机基础主题、品牌和动效直接使用当前网页源码',()=>{
  for(const [local,desktop]of [['desktop-tokens.css','ui/tokens.css'],['color-identity.css','ui/color-identity.css'],['interaction-motion.js','ui/motion.js'],['refresh-feedback.js','ui/refresh-feedback.js']])if(existsSync('D:/codex/'+desktop))assert.equal(read(local).replaceAll('\r\n','\n'),readFileSync('D:/codex/'+desktop,'utf8').replaceAll('\r\n','\n'));
  const css=read('mobile-workspace.css');assert.doesNotMatch(css,/--(?:canvas|surface|chart-ma5|chart-ma10|chart-ma20):\s*#/);
- const identity=read('mobile-identity.css');for(const tone of ['gold','copper','amber','jade','rose','plum','slate','stone'])assert.ok(identity.includes('var(--brand-'+tone));
+ const identity=read('mobile-identity.css');for(const role of ['ui-accent','selection-ink','data-tone-ink','attention-ink','ranking-ink','risk-orange-ink','risk-yellow-ink'])assert.ok(identity.includes('var(--'+role+')'));
+ assert.doesNotMatch(identity,/--view-accent\s*:|--data-ink\s*:\s*var\(--accent-ink\)/);
 });
 test('所有新皮肤资源版本一致，并且离线外壳覆盖主题与动画',()=>{
  const html=read('index.html'),sw=read('sw.js'),version=read('version.js').match(/mp-mobile-[\d-]+/)[0];

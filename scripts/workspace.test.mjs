@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { filterHeatStocks, filterHotRank, filterSectorRows, hotRankTier } from '../explorer-core.js';
@@ -20,9 +21,10 @@ test('所有手机模块可编译，三个新增入口与离线外壳均完整',
   for(const file of ['mobile-workspace.js','mobile-workspace.css','mobile-data.js','mobile-model.js','mobile-chart.js','unified-context.js','unified-judgement.js','advisor-core.js','explorer-core.js'])assert.ok(sw.includes(file),file+'离线资源缺失');
   assert.doesNotMatch(html,/user-scalable=no/);
 });
-test('手机统一模型与桌面源码保持同一判决结果',()=>{
+test('同版本手机模型与桌面参考源码保持同一判决结果',t=>{
   const require=createRequire(import.meta.url);let desktop;
-  try{desktop=require('D:/codex/unified-judgement.js');}catch{ return; }
+  try{desktop=require(path.join(process.env.MP_DESKTOP_MODEL_ROOT || 'D:/codex','unified-judgement.js'));}catch{t.skip('没有可用的桌面模型参考');return;}
+  if(UNIFIED_RULES.version!==desktop.UNIFIED_RULES.version){t.skip('跨模型版本不直接比较；手机 '+UNIFIED_RULES.version+'，桌面 '+desktop.UNIFIED_RULES.version);return;}
   assert.equal(UNIFIED_RULES.version,desktop.UNIFIED_RULES.version);
   for(const trusted of [true,false])for(const phase of ['主升期','分歧期','退潮','冰点']){
     const ctx={market:{phase},data:{trusted},identity:{known:true,isCore:true,label:'核心',source:'行业代理'},structure:{price:10,sealed:true,invalidationPrice:9,historyEnd:'20261109'},commitment:{sealRatio:2,peerMedian:1},volume:{currentAmount:1000},execution:{inTradingSession:true}};

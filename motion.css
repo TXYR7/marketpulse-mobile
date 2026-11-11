@@ -1,8 +1,8 @@
 /* iOS 风格：即时按压、连续选中背景、带轻微回弹的层级切换。 */
 :root {
-  --motion-fast: 160ms;
-  --motion-normal: 300ms;
-  --motion-slow: 500ms;
+  --motion-fast: 140ms;
+  --motion-normal: 240ms;
+  --motion-slow: 420ms;
   --motion-ease: cubic-bezier(.25,.8,.25,1);
   --motion-layout: cubic-bezier(.3,.65,.25,1);
   --motion-spring: cubic-bezier(.25,.85,.25,1.005);
@@ -15,6 +15,7 @@
 }
 button, summary, .nav-link, .rank-card, .data-row { -webkit-tap-highlight-color: transparent; }
 .motion-page { will-change: translate, opacity; }
+.motion-layer { will-change: translate, opacity; }
 .motion-press-surface { position: relative; }
 .motion-tap-layer { position: absolute; inset: 0; z-index: 1; overflow: clip; border-radius: inherit; pointer-events: none; }
 .motion-tap-wave { position: absolute; opacity: 0; border-radius: 50%; pointer-events: none; background: radial-gradient(circle, color-mix(in srgb,var(--accent) 32%,transparent), color-mix(in srgb,var(--accent) 14%,transparent) 45%, transparent 72%); }
@@ -102,14 +103,13 @@ button, summary, .nav-link, .rank-card, .data-row { -webkit-tap-highlight-color:
 
 .stock-search-field { transition: border-color var(--motion-fast), box-shadow var(--motion-normal); }
 .stock-search-field:focus-within { box-shadow: 0 0 0 3px var(--teal-soft); }
-.stock-search-results { max-height: min(460px,60dvh); overflow-y: auto; overscroll-behavior: contain; transform-origin: top center; }
+.stock-search-results { max-height: var(--search-max-height, min(460px,60dvh)); overflow-y: auto; overscroll-behavior: contain; transform-origin: top center; }
 .stock-search-results[inert] { pointer-events: none; }
 .stock-search input[aria-busy="true"] { cursor: progress; }
 .theme-card::after { transition: width 520ms var(--motion-ease); }
-.content-col { transition: margin-right 340ms var(--motion-layout); }
-.has-inspector .content-col { transition-duration: 500ms; }
+.content-col { transition: none; }
 body { overflow-x: clip; }
-.drawer-scrim { transition: opacity 340ms var(--motion-ease); backdrop-filter: blur(3px); }
+.drawer-scrim { transition: opacity 260ms var(--motion-ease); }
 @starting-style { .drawer-scrim.is-open { opacity: 0; } }
 .detail-drawer { transition: none; transform-origin: center center; }
 .detail-drawer[inert] { pointer-events: none; }
@@ -133,7 +133,7 @@ input[type="range"]::-webkit-slider-thumb { transition: box-shadow var(--motion-
 @keyframes motion-hud-in { from { opacity: .35; } to { opacity: 1; } }
 .adv-input, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { transition: border-color var(--motion-fast), box-shadow var(--motion-normal), background-color var(--motion-fast); }
 html.motion-theme :is(body,#mobileMain,.topbar,.top-status,.content-col,.view-panel,.ranking-panel,.rank-card,.vt-card,.vt-kpi,.vt-index,.detail-drawer,.quote-facts > div,.settings-columns,.adv-card,.adv-status,button,input,select,textarea) {
-  transition: background-color 280ms var(--motion-ease), color 280ms var(--motion-ease), border-color 280ms var(--motion-ease), box-shadow 280ms var(--motion-ease), scale 300ms var(--motion-spring), translate 300ms var(--motion-ease), margin-right 340ms var(--motion-layout);
+  transition: background-color 240ms var(--motion-ease), color 240ms var(--motion-ease), border-color 240ms var(--motion-ease), box-shadow 240ms var(--motion-ease), scale 240ms var(--motion-spring), translate 240ms var(--motion-ease);
 }
 html.motion-theme .chart-candle :is(path,rect,line,text), html.motion-theme svg.vt-radar-svg :is(path,polygon,line,text) { transition: fill 280ms var(--motion-ease), stroke 280ms var(--motion-ease); }
 
@@ -158,7 +158,7 @@ html.motion-refresh-reveal::view-transition { pointer-events: none; }
 html.motion-refresh-reveal::view-transition-group(root),
 html.motion-refresh-reveal::view-transition-old(root),
 html.motion-refresh-reveal::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-html.motion-refresh-reveal::view-transition-old(root) { z-index: 1; filter: brightness(.68) saturate(.72) blur(1.5px); }
+html.motion-refresh-reveal::view-transition-old(root) { z-index: 1; opacity: .78; }
 html.motion-refresh-reveal::view-transition-new(root) { z-index: 2; }
 html.motion-refresh-reveal #refreshBtn,
 html.motion-refresh-reveal #refreshBtn .ic,
@@ -206,8 +206,6 @@ html.motion-refresh-reveal #mobileMain::after,html.motion-theme-reveal #mobileMa
 .reveal-fade { animation: revealFade 320ms var(--motion-ease) both; }
 .reveal-out { transition: opacity 220ms var(--motion-ease); }
 @keyframes motion-block-in { from { opacity: .2; translate: 0 6px; } }
-.toast { transition: opacity 240ms var(--motion-ease), transform 360ms var(--motion-layout), scale 360ms var(--motion-layout); scale: .985; }
-.toast.show { scale: 1; }
 :where(button,input,select,textarea,a,[tabindex]):focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .data-row:focus-visible { outline-offset: -2px; }
 .section-heading h2, .ranking-heading h3 { text-wrap: balance; }
@@ -225,7 +223,7 @@ html.motion-refresh-reveal #mobileMain::after,html.motion-theme-reveal #mobileMa
   html { scroll-behavior: auto !important; }
   *, *::before, *::after, details::details-content { animation: none !important; transition: none !important; }
   :is(button,summary,.rank-card):active:not(:disabled),
-  :is(.data-row,.ladder-stock-row,.aw-row):active:not(:disabled), .data-row :is(button,.rank-card):active:not(:disabled), .nav-link.is-active .ic, .toast { scale: 1; }
+  :is(.data-row,.ladder-stock-row,.aw-row):active:not(:disabled), .data-row :is(button,.rank-card):active:not(:disabled), .nav-link.is-active .ic { scale: 1; }
   :is(.rank-card,.icon-button,.profile-button):hover { translate: 0 0; }
   .reverse-head:active, .reverse-bucket b:active, .ladder-item:active, .adv-back:active,
   input:is([type="checkbox"],[type="radio"]):active:not(:disabled) { scale: 1; }

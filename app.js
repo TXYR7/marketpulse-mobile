@@ -1,4 +1,5 @@
 import { createMobileInteractions, createMobileRefresh } from './mobile-interactions.js';
+import { createSnapshotBackfill } from './mobile-render.js';
 import { createMobileWorkspace, decisionBadgeTone } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
@@ -35,13 +36,14 @@ const state = {
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const interactions=createMobileInteractions();
-const workspace = createMobileWorkspace({ state, onStock: openSheet, onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
+const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, onStock: openSheet, onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
   onTheme: () => $('#themeBtn').click(), onNotify: () => openNotificationSettings().catch(e => toast(e.message)),
   onDate: openHistoryDate, onToken: async value => { const token = String(value || '').trim(); if (token) localStorage.setItem('mp_ema_token', token); else localStorage.removeItem('mp_ema_token'); setEmaToken(token); },
   onRefreshInterval: async value => { if (![8000,15000,30000].includes(value)) throw new Error('无效更新间隔'); state.refreshMs=value; await setKV('mobileRefreshMs',value); applyRefreshTimer(); }
 });
 const manualRefresh=createMobileRefresh({button:$('#refreshBtn'),status:$('#refreshStatus'),perform:()=>workspace.refreshActive(),motion:interactions.motion});
-const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; applyMobileJudgements(state); syncDetailJudgement(); workspace.refresh(); } });
+const queueDecisionBackfill=createSnapshotBackfill(()=>({pools:state.pools,at:state.lastSuccessAt||state.lastGoodAt}),()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();});
+const detailChart = createMobileChart({ onBars: (code, bars) => { rememberDecisionBars(code, bars); if (state.sheetCode !== code) return; queueDecisionBackfill(); } });
 let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
 function syncDetailJudgement() {
   if (!state.sheetCode) return;
@@ -445,10 +447,12 @@ function showOfflineEmpty(err) {
 function renderZt() {
   const list = $('#ztList');
   if (!state.pools) return; // 首屏骨架由 index.html 提供，数据到达前不覆盖
-  const rows = filterZt();
   // 2026-09-11 拆解融合批:最高板并入此 hint(梯队 section 已删);updateBanner 与此处同写,口径一致
   const maxB = state.pools.up.reduce((m, x) => Math.max(m, x.boards || 1), 0);
   $('#ztHint').textContent = '最高 ' + maxB + ' 板 · ' + (state.pools.upCount != null ? '共 ' + state.pools.upCount + ' 只' : '--');
+  if(state.view !== 'intraday' || !$('#fullPoolFold').open)return;
+  const rows = filterZt();
+  renderLadder({state,toast});
   patchCardList(list, rows, ztCard, ztStructSig, pctFieldSig, patchZtCard);
 }
 function downCard(x) {
@@ -463,6 +467,7 @@ function renderDowns() {
   const p = state.pools; if (!p) return;
   $('#dtCount').textContent = p.downCount != null ? p.downCount : '--';
   $('#zbCount').textContent = p.brokenCount != null ? p.brokenCount : '--';
+  if(state.view !== 'intraday')return;
   // 折叠时不构建内部 DOM（炸板池常 50~150 行），首次展开才渲染
   if ($('#dtFold').open) patchCardList($('#dtList'), p.down, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无跌停</div>');
   if ($('#zbFold').open) patchCardList($('#zbList'), p.broken, downCard, (x) => (x.boards || 1), downFieldSig, patchDownCard, '<div class="empty">今日无炸板</div>');
@@ -480,6 +485,7 @@ function renderGap(gap) {
   const sum = $('#gapSummary');
   const c = gap.counts || { beat: 0, meet: 0, miss: 0 };
   sum.textContent = `超 ${c.beat} / 符 ${c.meet} / 不及 ${c.miss}` + (state.auction?.phase === 'live' ? ' · 竞价进行中' : '');
+  if(state.view !== 'intraday' || !$('#gapFold').open)return;
   setHTML($('#gapRows'), gap.candidates.length ? gap.candidates.map((g) => {
     const cls = g.status === '超预期' ? 'up-c' : g.status === '不及预期' ? 'down-c' : '';
     return '<div class="ledger-row"><div><div class="nm">' + esc(g.name) + ' <span class="pill">' + g.buyType + '</span></div>' +
@@ -530,6 +536,7 @@ async function loadGap(force = false) {
 
 /* ---------------- 风险雷达 ---------------- */
 function renderRadar() {
+  if(state.view !== 'intraday' || !$('#radarFold').open)return;
   const el = $('#radar');
   const r = state.riskRadar;
   if (!r || !r.available) { setHTML(el, '<div class="muted">暂无风险数据</div>'); return; }
@@ -730,22 +737,24 @@ function renderAuctionWatchlist() {
 }
 
 function renderIntraday() {
-  if (state.pools) applyMobileJudgements(state);
+  if (!state.pools || state.view !== 'intraday') return;
   // 2026-09-11 拆解融合批:renderStructure 改为 structFold 展开时惰性渲染;梯队→涨停池头部(批②)
   const ctx = { state, toast };
-  renderOpportunity(ctx);
-  renderLadder(ctx);
+  if (!$('#legacyOpportunity').hidden && $('#legacyOpportunity').open) renderOpportunity(ctx);
   renderStructFold();
   renderZt(); renderDowns(); renderRadar();
+  if(state.gap) renderGap(state.gap);
+  updateBanner();
+  renderAuctionWatchlist();
+}
+function updateMarketDate() {
   // 2026-09-10:日期紧凑格式 09-10 周四;2026-09-13 休市批:显示数据的日期而非今天
   // (休市日回拉上一交易日,标签必须跟着数据走,否则周六显示"09-13 周六"配周五数据)
   const d = String(state.pools?.date || '') || state.manualDate || todayStr(); // String():旧 IDB 快照的 date 是数字(qdate 原样),拔类型雷
   const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(d.slice(0, 4), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8))).getDay()];
   $('#dateLabel').textContent = d.slice(4, 6) + '-' + d.slice(6, 8) + ' 周' + wd;
   $('#dateLabel').title = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8);
-  updateBanner();
   loadGap();
-  renderAuctionWatchlist(); // 抢时间批:9:25 竞价打板候选名单(本地算,竞价有数据才显示)
 }
 
 /* ---------------- 渲染:自选已删(2026-09-10 全盘对齐桌面) ----------------
@@ -980,7 +989,11 @@ async function loadSimilarCases(code) {
 /* ---------------- 导航(2026-09-11 一屏到底批:复盘/设置已删,单视图无需切换) ----------------
    switchView/renderView 简化为 renderCurrentView 直渲染盘中;视图切换的痕迹
    (state.view==='intraday' 判断)保留——省得全文件改判空 */
-function renderCurrentView() { state.previousTradingDate = previousTradingDayKey(String(state.pools?.date || '')); applyMobileJudgements(state); renderIntraday(); workspace.refresh(); }
+function renderCurrentView() {
+  state.previousTradingDate = previousTradingDayKey(String(state.pools?.date || ''));
+  // A real quote is observed immediately, even when presentation is merged into one frame.
+  applyMobileJudgements(state); renderStatus(); updateMarketDate(); workspace.refresh(); syncDetailJudgement();
+}
 
 /* ---------------- 侧滑菜单已删(2026-09-11 减法批) ---------------- */
 
@@ -999,7 +1012,8 @@ async function performRefresh(force = false) {
     const today = todayStr();
     state.marketClosed = !state.manualDate && !isTradingDay(today);
     const date = state.manualDate || (state.marketClosed ? lastTradingDate(today) : today);
-    if (state.pools) renderCurrentView(); // SWR：先即时渲染上一份数据，后台拉取成功后再增量 patch，避免空白/loading 闪
+    // Existing content stays visible while fetching. Only refresh its trust/staleness judgement.
+    if (state.pools) { applyMobileJudgements(state); workspace.refresh(); syncDetailJudgement(); }
     // 冷启动（无本地数据垫底）用 fail-fast 配置：挂起/离线时最坏 ~13s 落到离线态（此前 3×9s≈28s）；
     // 热刷新保持完整重试韧性（有 SWR 旧数据在屏，慢点无妨）
     const pools = await fetchPools(date, state.pools ? {} : { tries: 2, timeoutMs: 6000 });
@@ -1011,8 +1025,6 @@ async function performRefresh(force = false) {
     state.pools = pools;
     saveCurrentHistory(pools);
     if (!state.monitorPool) refreshMonitorPool(); // 2026-09-15 避雷批:首次池成功后拉一次(30 分钟 TTL 内不重拉;失败静默)
-    applyMobileJudgements(state);
-    renderStatus();
     renderCurrentView(); // 2026-09-11 一屏到底:单视图直渲染
     // 2026-11-04: 历史里缺「真正的前一交易日」时后台补一天（通常已存在，直接返回）。
     // 补到后清掉按旧历史算出的预期差缓存并重算/重渲染，保证「昨日」口径正确。
@@ -1021,13 +1033,12 @@ async function performRefresh(force = false) {
       state.gap = null; state.gapDate = null;
       state.prevPremium = null;
       computeDerived(pools);
-      renderStatus();
       renderCurrentView();
     }).catch(() => {});
     // M2 竞价抓取与梯队晋级评估并发（K线尾巴与竞价抓取重叠，墙钟取 max 而非相加）；两者 settle 后把当日预热持久化到 IDB，SW 重载即命中免重抓
     const openPctP = fetchOpenPct(pools);
     openPctP.catch(() => {});
-    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); return warmMobileJudgements(state,()=>{applyMobileJudgements(state);workspace.refresh();syncDetailJudgement();}); }).catch(() => {});
+    Promise.allSettled([openPctP, enrichPromo(pools, openPctP)]).then(() => { persistWarmCache(); if(state.pools!==pools)return; return warmMobileJudgements(state,queueDecisionBackfill); }).catch(() => {});
     return {ok:true,partial:pools.partial,fromSnapshot:state.fromSnapshot};
   } catch (e) {
     state.lastErrorAt = Date.now();
@@ -1280,12 +1291,8 @@ async function enrichPromo(pools, openPctReady = Promise.resolve()) {
         });
       }
       applyMobileJudgements(state); workspace.refresh();
-      renderZt(); // 徽标随行级 diff 原地更新
-      // 抽屉正开着池内涨停股时同步重渲染：promo 刚定稿立即回填检查表
-      //（此前只刷 renderZt，开着抽屉点开的股检查表永不出现）。
-      // 此时报价已被 fetchOpenPct 回流、K线在缓存 → 重渲染零网络、瞬时完成。
-      // 2026-09-13 精简批:抽屉已无折叠组(检查表常开/相似单行),promo 回填直接重渲染
-      if (state.sheetCode && byCode[state.sheetCode]) openSheet(state.sheetCode);
+      renderZt(); syncDetailJudgement(); // Only visible detail fields and expanded cards update.
+      // The open sheet keeps its chart selection, scroll position and focus.
     }
   } finally { state.promoInFlight = false; }
 }
@@ -1393,6 +1400,9 @@ function bind() {
   // 折叠池首次展开才渲染(structFold 题材/龙头同口径——2026-09-11 拆解融合批)
   // 2026-10-07 卡片打开动画批:dtFold/zbFold 走 patchCardList(成员变化时已自带 .list-reveal 入场),
   // 这里不再对 .body 挂(否则两层叠加);structFold 走 setHTML 无列表入场,由这里给 .body 挂一次。
+  $('#fullPoolFold').addEventListener('toggle',renderZt);
+  $('#radarFold').addEventListener('toggle',renderRadar);
+  $('#gapFold').addEventListener('toggle',()=>{if(state.gap)renderGap(state.gap);else loadGap();});
   ['#dtFold', '#zbFold'].forEach((sel) => $(sel).addEventListener('toggle', () => renderDowns()));
   const structFold = $('#structFold');
   if (structFold) structFold.addEventListener('toggle', () => { renderStructFold(); if (structFold.open) revealList(structFold.querySelector('.body') || structFold); });
@@ -1511,7 +1521,7 @@ function setupEdgeJump() {
   const schedule = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
   main.addEventListener('scroll', schedule, { passive: true });
   // 视图切换只改 class/hidden（静态设置页无 childList 变更）——补 attributes 观察，否则切视图后按钮显隐滞留
-  new MutationObserver(schedule).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+  new MutationObserver(schedule).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'open'] });
   // 2026-09-11 中途可停:原生 smooth scrollTo 一旦启动无法中止(浏览器无此 API),
   // 改 rAF 分步驱动——每帧滚一步,任何 touchstart/wheel 立即停;content-visibility 卡片
   // 随滚动渐进渲染,一步到位的原生 smooth 在长列表上本来就顿,分步+固定步长反而顺
@@ -1576,7 +1586,6 @@ async function init() {
       state.lastGoodAt = snap.savedAt || 0;
       state.marketClosed = !state.manualDate && !isTradingDay(todayStr()); // 2026-09-13 检查批:水合渲染先于首次 refresh,此处不设会闪「非交易时段」错横幅
       computeDerived(snap.pools);
-      renderStatus();
       renderCurrentView();
     }
     await refresh();

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-vm-modules scripts/smoke.mjs && node --test --experimental-vm-modules scripts/mobile-alerts.test.mjs scripts/workspace.test.mjs scripts/mobile-polish.test.mjs scripts/mobile-color-roles.test.mjs scripts/theme-transition.test.cjs",
+    "test": "node --experimental-vm-modules scripts/smoke.mjs && node --test --experimental-vm-modules scripts/mobile-alerts.test.mjs scripts/workspace.test.mjs scripts/mobile-polish.test.mjs scripts/mobile-color-roles.test.mjs scripts/theme-transition.test.cjs scripts/mobile-performance.test.mjs",
     "build:worker": "node scripts/build-worker.mjs",
     "sync:workspace": "node scripts/sync-workspace.mjs"
   }

@@ -35,10 +35,13 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --font-mono: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", Consolas, ui-monospace, monospace;
   --safe-t: env(safe-area-inset-top, 0px);
-  /* Android Chrome(standalone PWA 手势导航)下 env() 常报 0,12px 下限兜底:
-     底部导航文字/抽屉按钮不再贴着手势条(误触发上滑回家/返回) */
-  --safe-b: max(env(safe-area-inset-bottom, 0px), 12px);
+  --safe-b: max(env(safe-area-inset-bottom, 0px), 16px);
+  --mobile-nav-height: calc(65px + var(--safe-b));
   --fs: 14px;
+}
+
+html[data-mobile-platform="android"][data-mobile-display="installed"] {
+  --safe-b: max(env(safe-area-inset-bottom, 0px), 56px);
 }
 
 /* ===== 浅色变体（TSP §6.0 亮色板：同一设计语言仅翻转色板；数据色沿用经典浅色的对比度调优值） ===== */

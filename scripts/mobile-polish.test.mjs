@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,existsSync} from 'node:fs';
+import path from 'node:path';
 import {createMobileRefresh,mobileRefreshResult} from '../mobile-interactions.js';
 import {createRefreshFeedback} from '../refresh-feedback.js';
 const read=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8');
@@ -9,7 +10,8 @@ function environment(){
  const media={matches:false,addEventListener(_n,fn){this.change=fn;}};const doc={hidden:false,addEventListener(){},querySelectorAll:()=>[]};const win={matchMedia:()=>media};const status={dataset:{},textContent:'',hidden:true};return {button,classes,attrs,media,doc,win,status};
 }
 test('手机基础主题、品牌和动效直接使用当前网页源码',()=>{
- for(const [local,desktop]of [['desktop-tokens.css','ui/tokens.css'],['color-identity.css','ui/color-identity.css'],['interaction-motion.js','ui/motion.js'],['refresh-feedback.js','ui/refresh-feedback.js']])if(existsSync('D:/codex/'+desktop))assert.equal(read(local).replaceAll('\r\n','\n'),readFileSync('D:/codex/'+desktop,'utf8').replaceAll('\r\n','\n'));
+ const reference=process.env.MP_DESKTOP_APPEARANCE_ROOT || 'D:/codex';
+ for(const [local,desktop]of [['desktop-tokens.css','ui/tokens.css'],['color-identity.css','ui/color-identity.css'],['interaction-motion.js','ui/motion.js'],['refresh-feedback.js','ui/refresh-feedback.js']])if(existsSync(path.join(reference,desktop)))assert.equal(read(local).replaceAll('\r\n','\n'),readFileSync(path.join(reference,desktop),'utf8').replaceAll('\r\n','\n'));
  const css=read('mobile-workspace.css');assert.doesNotMatch(css,/--(?:canvas|surface|chart-ma5|chart-ma10|chart-ma20):\s*#/);
  const identity=read('mobile-identity.css');for(const role of ['ui-accent','selection-ink','data-tone-ink','attention-ink','ranking-ink','risk-orange-ink','risk-yellow-ink'])assert.ok(identity.includes('var(--'+role+')'));
  assert.doesNotMatch(identity,/--view-accent\s*:|--data-ink\s*:\s*var\(--accent-ink\)/);

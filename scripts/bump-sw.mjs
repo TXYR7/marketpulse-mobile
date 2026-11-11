@@ -27,6 +27,6 @@ if (current === today) {
 }
 writeFileSync(p, t.replace(/const CACHE = ['"]mp-mobile-[\w.-]+['"]/, `const CACHE = 'mp-mobile-${next}'`));
 writeFileSync(vp, `// version.js — 应用版本单一事实源：由 scripts/bump-sw.mjs 与 sw.js CACHE 同一事务写入，勿手改。\nexport const APP_VERSION = 'mp-mobile-${next}';\n`);
-const html=readFileSync(hp,'utf8').replace(/(href|src)="([\w-]+\.css|app\.js|boot-theme\.js)(?:\?v=[^"]*)?"/g,(_,attribute,file)=>`${attribute}="${file}?v=mp-mobile-${next}"`);
+const html=readFileSync(hp,'utf8').replace(/(href|src)="([\w-]+\.css|app\.js|boot-theme\.js|mobile-viewport\.js)(?:\?v=[^"]*)?"/g,(_,attribute,file)=>`${attribute}="${file}?v=mp-mobile-${next}"`);
 writeFileSync(hp,html);
 console.log(`sw.js CACHE -> mp-mobile-${next}（version.js 已同步）`);

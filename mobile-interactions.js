@@ -35,7 +35,12 @@ export function createMobileRefresh({ button, status, perform, motion, doc=docum
 
 export function createMobileInteractions({doc=document,win=window}={}) {
   const aliases={themeButton:'themeBtn',refreshButton:'refreshBtn'};
-  const adaptedDoc=new Proxy(doc,{get(target,key){if(key==='getElementById')return id=>target.getElementById(aliases[id]||id);if(key==='querySelector')return selector=>target.querySelector(selector==='.app-shell'?'#mobileMain':selector);const value=target[key];return typeof value==='function'?value.bind(target):value;}});
+  const adaptedDoc=new Proxy(doc,{get(target,key){
+    if(key==='getElementById')return id=>target.getElementById(aliases[id]||id);
+    if(key==='querySelector')return selector=>{const node=target.querySelector(selector==='.app-shell'?'#mobileMain':selector);return node?.closest('[hidden]')?null:node;};
+    if(key==='querySelectorAll')return selector=>Array.from(target.querySelectorAll('.topbar,.view.active,dialog[open],.sheet.show')).flatMap(root=>Array.from(root.querySelectorAll(selector)));
+    const value=target[key];return typeof value==='function'?value.bind(target):value;
+  }});
   const motion=createInteractionMotion({doc:adaptedDoc,win});
   let theme='dark';
   try{theme=doc.documentElement.dataset.theme==='light'?'light':'dark';}catch{}
@@ -53,16 +58,23 @@ export function createMobileInteractions({doc=document,win=window}={}) {
     const next=theme==='light'?'dark':'light';theme=next;
     return motion.theme(()=>commitTheme(next),event && event.detail!==0?{x:event.clientX,y:event.clientY}:undefined);
   }
+  const prepared=new WeakSet();
   function prepareControls() {
-    for(const button of doc.querySelectorAll('button'))if(button.id!=='themeBtn'&&!button.classList.contains('nav-link'))button.classList.add('outline-button');
-    for(const details of doc.querySelectorAll('details'))details.classList.add('board-full-data');
-    for(const result of doc.querySelectorAll('.mobile-search-result'))result.classList.add('stock-search-option');
+    const roots=doc.querySelectorAll('.topbar,.mobile-bottom-nav,.view.active,dialog[open],.sheet.show');
+    for(const root of roots)for(const element of root.querySelectorAll('button,details,.mobile-search-result')) {
+      if(prepared.has(element))continue; prepared.add(element);
+      if(element.tagName==='BUTTON'&&element.id!=='themeBtn'&&!element.classList.contains('nav-link'))element.classList.add('outline-button');
+      if(element.tagName==='DETAILS')element.classList.add('board-full-data');
+      if(element.classList.contains('mobile-search-result'))element.classList.add('stock-search-option');
+    }
     motion.refresh();
   }
   let queued=false;
   const refresh=()=>{if(queued)return;queued=true;win.requestAnimationFrame(()=>{queued=false;prepareControls();});};
   commitTheme(theme);prepareControls();
-  doc.addEventListener('click',refresh);
+  doc.addEventListener('click',event=>{
+    if(event.target.closest?.('[data-mobile-nav],[data-rank-tab],[data-candidate-scope],[data-heat-board],[data-chart-range],[data-chart-ma],summary,[data-code],[data-search-code],[data-sector],#openStockSearch'))refresh();
+  });
   // 原生揭幕快照有时把点击目标报告为 HTML。只对位置固定的操作补交付，避免按新数据行猜旧画面的标的。
   doc.addEventListener('click',event=>{
     if(!event.detail || (event.target!==doc.documentElement&&event.target!==doc.body) || !doc.documentElement.classList.contains('motion-theme-reveal')&&!doc.documentElement.classList.contains('motion-refresh-reveal'))return;
@@ -74,6 +86,7 @@ export function createMobileInteractions({doc=document,win=window}={}) {
     }
   },true);
   doc.addEventListener('change',refresh);
+  doc.addEventListener('input',event=>{if(event.target.closest?.('#candidateSearch,#heatSearch,#hotSearch,#sectorSearch,#membersSearch'))refresh();});
   win.addEventListener('resize',refresh);
   return {motion,toggleTheme,refresh,theme:()=>theme};
 }

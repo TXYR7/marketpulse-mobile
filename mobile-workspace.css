@@ -23,6 +23,10 @@ button { touch-action:manipulation; }
 .topbar .status-strip { display:none; }
 main { flex:1; min-height:0; width:100%; overflow-y:auto; overflow-x:hidden; padding:12px 14px 22px; position:relative; scroll-padding-top:12px; }
 .view { max-width:680px; width:100%; margin:0 auto; }
+.view.active { animation:none; }
+/* Long lists only lay out cards as they approach the viewport. */
+.mobile-stock-row, .sector-row { content-visibility:auto; contain-intrinsic-size:auto 74px; }
+.decision-card { content-visibility:auto; contain-intrinsic-size:auto 214px; }
 .mobile-bottom-nav { flex:0 0 auto; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:6px max(10px,env(safe-area-inset-left)) var(--safe-b); background:var(--surface); border-top:1px solid var(--line-soft); z-index:20; }
 .mobile-bottom-nav button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:6px; min-height:52px; border:0; background:transparent; color:var(--muted); font-size:12px; border-radius:10px; }
 .mobile-bottom-nav svg { width:22px; height:22px; }
@@ -147,7 +151,9 @@ main { flex:1; min-height:0; width:100%; overflow-y:auto; overflow-x:hidden; pad
 .mobile-search-result { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:56px; padding:14px 8px; border:0; border-bottom:1px solid var(--line-soft); background:transparent; text-align:left; }
 .mobile-search-result span { color:var(--muted); font-size:12px; }
 .search-dialog { margin-top:calc(var(--safe-t) + 20px); }
-.edge-jump { bottom:calc(90px + var(--safe-b)); right:8px; }
+.edge-jump { bottom:calc(var(--mobile-nav-height) + 14px); right:8px; }
+.toast { bottom:calc(var(--mobile-nav-height) + 16px); }
+.mobile-panel, .card, .fold, .risk-item, .edge-btn { backdrop-filter:none; }
 .sheet { background:var(--surface); backdrop-filter:none; max-height:92dvh; border-radius:20px 20px 0 0; padding:8px 14px calc(16px + var(--safe-b)); }
 .sheet .s-head { align-items:flex-start; margin:12px 0; }
 .sheet .s-name { font-size:22px; }

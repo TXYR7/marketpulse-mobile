@@ -7,6 +7,7 @@ import { analyze } from './advisor-core.js';
 import { limitThresholdOf, COPILOT_QUESTIONS, buildCopilotAnswer, routeCopilotQuery, buildModeMonitor } from './analytics.js';
 import { getKV, setKV, getTrades, getReviews, putReview } from './store.js';
 import { APP_VERSION } from './version.js';
+import { createMobilePaintQueue } from './mobile-render.js';
 
 const empty = text => '<div class="mobile-empty">' + esc(text) + '</div>';
 const money = value => value == null ? '—' : fmtMoney(value);
@@ -33,7 +34,7 @@ function decisionCard(s) {
   const reason = p.hardFails?.[0] || p.downgrades?.[0] || p.checklist?.find(r => r.status !== 'pass')?.note || p.checklist?.[0]?.note || '判断数据待补齐';
   return '<article class="decision-card"><div class="decision-heading"><div><strong>' + esc(s.name) + '</strong><small>' + esc(s.code) + ' · ' + (s.boards || 1) + '板 · ' + esc(s.industry || '未分类') + '</small></div><span class="decision-verdict ' + tone + '">' + esc(p.verdict || '待确认') + '</span></div><p class="decision-reason">' + esc(reason) + '</p><div class="decision-next"><span>下一步</span><p>' + esc(plan.entry || s.signal?.next || '等待市场、价格与承接证据') + '</p></div><div class="decision-footer"><span>失效参考 <b>' + price(Number(/价格失效参考 ([\d.]+)/.exec((plan.invalidation || []).join(' '))?.[1]) || null) + '</b></span><span>现价 <b class="' + pctClass(s.changePct) + '">' + price(s.price) + '</b></span><button type="button" class="stock-detail" data-code="' + s.code + '">详情 / K线</button></div></article>';
 }
-export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNotify, onDate, onToken, onRefreshInterval, interactions = null, onManualRefresh = null, doc = document }) {
+export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNotify, onDate, onToken, onRefreshInterval, interactions = null, onManualRefresh = null, onViewRender = () => {}, doc = document, win = window }) {
   const $ = id => doc.getElementById(id);
   const memberFeedback=createRefreshFeedback($('membersRefresh'),{doc});
   const cache = new Map(), pending = new Map();
@@ -42,7 +43,10 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   let sectorType = 'concept', sectorSort = 'gain', sectorQuery = '', hotSort = 'rank', hotScope = 'all', hotQuery = '', hotLayout = 'list';
   let heat = { query: '', level: 'all', market: 'all', sort: 'seal', concept: '', time: null }, heatBoard = null;
   let memberSequence = 0, currentSector = null, memberData = null, advisorStock = null, advisorSeq = 0;
-  const scroll = new Map();
+  const scroll = new Map(), rendered = new Map();
+  let revision = 0, initialized = false, monitorHistory = null, monitorDate = null, monitorValue = null;
+  let journalAt = 0, journalPending = null, journalDirty = true, journals = null, journalRevision = 0;
+  const paints = createMobilePaintQueue(renderActive, {win});
   state.workspaceStocks = new Map();
   const register = rows => { for (const s of rows || []) state.workspaceStocks.set(s.code, s); };
   async function load(key, fetcher, force = false, paint = () => {}) {
@@ -59,21 +63,39 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     })(); pending.set(key, task); return task;
   }
   function meta(el, data) { if (!el) return; el.textContent = data?.loading ? '正在更新…' : data?.error ? '更新失败' + (data.rows ? '，保留上次快照' : '') + ' · 点击重试' : snapshotMetaText(data); }
-  function navigate(next, { history = true } = {}) {
+  function navigate(next, { history = true, force = false } = {}) {
     if (!['market', 'intraday', 'rank', 'tools'].includes(next)) next = 'market';
-    const previousPage=page;
+    if (initialized && next === page && !force) return;
+    const previousPage=page; initialized = true;
     const main = doc.querySelector('main'); scroll.set(page, main.scrollTop); page = next; state.view = next;
     doc.querySelectorAll('.view').forEach(el => { const active = el.id === 'view-' + next; el.hidden = !active; el.classList.toggle('active', active); });
     doc.querySelectorAll('[data-mobile-nav]').forEach(button => { const active = button.dataset.mobileNav === next; button.classList.toggle('active', active); button.classList.toggle('is-active',active); button.setAttribute('aria-current', active ? 'page' : 'false'); });
     main.scrollTop = scroll.get(next) || 0;
     doc.title = ({ market: '全市场', intraday: '打板', rank: '排行', tools: '工具' })[next] + ' · 星脉';
-    if (history) window.history.pushState({ mobilePage: next }, '', '#' + next);
-    if (next === 'market') { renderMarket(); void load('indices', loadIndices, false, paintIndices); }
-    if (next === 'intraday') renderBoard();
-    if (next === 'rank') renderRank();
-    if (next === 'tools') renderTools();
-    const view=$('view-'+next),order=['market','intraday','rank','tools'];
-    applyPageColor();interactions?.motion.page(view,{direction:order.indexOf(next)>=order.indexOf(previousPage)?1:-1});interactions?.refresh();updateFreshness();
+    if (history && previousPage !== next) win.history.pushState({ mobilePage: next }, '', '#' + next);
+    applyPageColor(); updateFreshness();
+    // Let the selected navigation state reach the screen before building a long page.
+    paints.request({afterPaint:true});
+  }
+  function renderActive() {
+    const key = page === 'rank' ? 'rank:' + rank : page;
+    const changed = rendered.get(key) !== revision;
+    if (changed) {
+      if (page === 'market') renderMarket();
+      if (page === 'intraday') { renderBoard(); onViewRender(page); }
+      if (page === 'rank') renderRank();
+      if (page === 'tools') renderTools();
+      rendered.set(key, revision);
+    } else if (page === 'rank') {
+      syncRankTabs();
+    }
+    // Revalidate expired auxiliary snapshots on return, even when primary data is unchanged.
+    if (page === 'market') void load('indices', loadIndices, false, paintIndices);
+    if (!changed && page === 'market' && $('marketListFold').open) void loadMarket();
+    if (!changed && page === 'rank' && rank === 'sectors') void load('sectors:' + sectorType, () => loadSectors(sectorType), false, paintSectors);
+    if (!changed && page === 'rank' && rank === 'hot') void load('hot', loadHotRank, false, paintHot);
+    if (!changed && page === 'tools') { paintJournals(); if(Date.now()-journalAt > 30000)renderTools(); }
+    interactions?.refresh();
   }
   function renderMarket() {
     const phase=state.emotion?.phase; $('marketHero').dataset.phaseTone=['退潮','退潮初期','冰点'].includes(phase)?'risk':phase==='主升期'?'positive':phase?'caution':'unknown';
@@ -90,11 +112,12 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     if ($('marketListFold').open) void loadMarket();
   }
   function paintIndices(data) {
+    if(page!=='market')return;
     if(page==='market')updateFreshness(); if (!data?.rows) { setHTML($('marketIndices'), '<span class="mobile-meta">' + esc(data?.error || '指数加载中…') + '</span>'); return; } setHTML($('marketIndices'), data.rows.map(r => '<div><span>' + esc(r.name) + '</span><b>' + price(r.price) + '</b><small class="' + pctClass(r.changePct) + '">' + pctText(r.changePct) + '</small></div>').join('')); }
   function marketKey() { return ['market', marketPage, marketMarket, marketSort, marketQuery].join(':'); }
   function loadMarket(force = false) {
     const key = marketKey(), args = { page: marketPage, market: marketMarket, sort: marketSort, query: marketQuery };
-    return load(key, () => loadMarketPage(args), force, data => { if (key !== marketKey()) return; register(data.rows); setHTML($('marketRows'), data.rows?.length ? data.rows.map(s => stockRow(s, '', s.industry || money(s.amount))).join('') : empty(data.loading ? '加载中…' : data.error || '没有匹配的股票')); meta($('marketListMeta'), data); $('marketPrev').disabled = marketPage <= 1 || data.loading; $('marketNext').disabled = !!marketQuery || data.loading || !data.rows?.length || marketPage * 30 >= data.total; $('marketPageLabel').textContent = '第' + marketPage + '页' + (data.total != null ? ' · 共' + data.total + '只' : ''); });
+    return load(key, () => loadMarketPage(args), force, data => { if (page !== 'market' || key !== marketKey()) return; register(data.rows); setHTML($('marketRows'), data.rows?.length ? data.rows.map(s => stockRow(s, '', s.industry || money(s.amount))).join('') : empty(data.loading ? '加载中…' : data.error || '没有匹配的股票')); meta($('marketListMeta'), data); $('marketPrev').disabled = marketPage <= 1 || data.loading; $('marketNext').disabled = !!marketQuery || data.loading || !data.rows?.length || marketPage * 30 >= data.total; $('marketPageLabel').textContent = '第' + marketPage + '页' + (data.total != null ? ' · 共' + data.total + '只' : ''); });
   }
   function renderBoard() {
     if (!state.pools) { setHTML($('mobileCandidates'), empty('等待行情，成功后显示候选判断')); return; }
@@ -105,15 +128,19 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('decisionModel').textContent = (state.unifiedDecision?.modelVersion || 'unified-2.0.0') + ' · 待前瞻验证 · 分数代表一致度';
     doc.querySelectorAll('[data-candidate-scope]').forEach(b => { b.classList.toggle('active', b.dataset.candidateScope === scope); b.classList.toggle('is-active',b.dataset.candidateScope === scope); b.setAttribute('aria-pressed', String(b.dataset.candidateScope === scope)); });
   }
-  function renderRank() {
+  function syncRankTabs() {
     applyPageColor();
     doc.querySelectorAll('[data-rank-tab]').forEach(b => { b.classList.toggle('active', b.dataset.rankTab === rank); b.setAttribute('aria-selected', String(b.dataset.rankTab === rank)); });
     for (const name of ['heat', 'sectors', 'hot']) $('rank-' + name).hidden = name !== rank;
+  }
+  function renderRank() {
+    syncRankTabs();
     if (rank === 'heat') paintHeat();
     if (rank === 'sectors') void load('sectors:' + sectorType, () => loadSectors(sectorType), false, paintSectors);
     if (rank === 'hot') void load('hot', loadHotRank, false, paintHot);
   }
   function paintHeat() {
+    if(page !== 'rank' || rank !== 'heat') return;
     const stocks = (state.pools?.up || []).map(s => ({ ...s, ztFirstTime: s.firstSealTime, reason: s.industry }));
     let rows = filterHeatStocks(stocks, { ...heat, board: heatBoard });
     const groups = [...new Set(rows.map(s => s.boards || 1))].sort((a, b) => b - a);
@@ -126,14 +153,14 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('heatMeta').textContent = state.pools ? '东方财富涨停池 · ' + state.pools.date + (state.fromSnapshot ? ' · 缓存快照' : ' · ' + new Date(state.lastSuccessAt || Date.now()).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })) + (state.pools.sources?.up === false ? ' · 涨停池缺失' : '') : '等待行情';
   }
   function paintSectors(data = cache.get('sectors:' + sectorType)) {
-    if (rank !== 'sectors') return;
+    if (page !== 'rank' || rank !== 'sectors') return;
     if (data?.type && data.type !== sectorType) return;
     meta($('sectorMeta'), data); updateFreshness(); $('membersToHeat').disabled = !memberData?.complete; $('membersToHeat').disabled = !memberData?.complete;
     const rows = filterSectorRows(data?.rows || [], { query: sectorQuery, sort: sectorSort });
     setHTML($('sectorRows'), rows.length ? rows.map((s, i) => '<button class="sector-row" type="button" data-sector="' + s.code + '"><span class="sector-rank">' + (i + 1) + '</span><div><strong>' + esc(s.name) + '</strong><small>领涨 ' + esc(s.leaderName) + '</small><span class="sector-breadth">上涨 ' + (s.upCount ?? '—') + ' / 下跌 ' + (s.downCount ?? '—') + (s.limitUpCount != null ? ' · 涨停 ' + s.limitUpCount : '') + '</span></div><b class="' + pctClass(s.changePercent) + '">' + pctText(s.changePercent) + '<small>查看成员 ›</small></b></button>').join('') : empty(data?.loading ? '正在加载板块…' : data?.error || '没有匹配板块'));
   }
   function paintHot(data = cache.get('hot')) {
-    if (rank !== 'hot') return; register(data?.rows); meta($('hotMeta'), data); updateFreshness();
+    if (page !== 'rank' || rank !== 'hot') return; register(data?.rows); meta($('hotMeta'), data); updateFreshness();
     const up = new Set((state.pools?.up || []).map(s => s.code));
     const rows = filterHotRank((data?.rows || []).map(s => ({ ...s, isLimitUp: state.pools?.sources?.up ? up.has(s.code) : null })), { query: hotQuery, sort: hotSort, scope: hotScope });
     const list = rows.map(s => stockRow(s, '<b class="hot-rank-number">' + s.rank + '</b>', (s.rankChange != null ? '名次' + (s.rankChange > 0 ? '升' : '降') + Math.abs(s.rankChange) + ' · ' : '') + (s.heat != null ? '热度 ' + money(s.heat) : '人气名次')));
@@ -157,19 +184,38 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     $('toolModel').textContent = state.unifiedDecision?.modelVersion || 'unified-2.0.0';
     $('toolHealth').textContent = !state.pools ? '等待行情' : state.fromSnapshot ? '正在使用本地快照' : state.pools.partial ? '缺失来源：' + state.pools.partialMissing.join('、') : '行情来源正常';
     $('toolHistoryCount').textContent = (state.history?.length || 0) + '个交易日';
-    try { $('toolToken').value = localStorage.getItem('mp_ema_token') || ''; } catch {}
-    $('toolRefresh').value = String(state.refreshMs || 8000);
+    if (!$('toolToken').dataset.initialized) {
+      try { $('toolToken').value = localStorage.getItem('mp_ema_token') || ''; } catch {}
+      $('toolRefresh').value = String(state.refreshMs || 8000);
+      $('toolToken').dataset.initialized = 'true';
+    }
     const prev = state.history?.find(h => String(h.date) === state.previousTradingDate);
     const current = new Set((state.pools?.up || []).map(s => s.code));
     const stats = prev ? [1, 2, 3, 4].map(n => { const rows = prev.stocks.filter(s => n === 4 ? s.boards >= 4 : s.boards === n), promoted = rows.filter(s => current.has(s.code)).length; return '<div><span>' + (n === 4 ? '4板以上' : n + '板') + '</span><b>' + (rows.length && state.pools?.sources?.up ? (promoted / rows.length * 100).toFixed(1) + '%' : '—') + '</b><small>' + promoted + ' / ' + rows.length + '晋级</small></div>'; }).join('') : '';
     setHTML($('reviewPromotion'), stats ? '<div class="factor-grid">' + stats + '</div>' : empty('需要连续两个交易日的历史记录'));
-    const snapshots=Object.fromEntries((state.history||[]).filter(h=>String(h.date)<=String(state.pools?.date||'')).map(h=>[h.date,h]));
-    const monitor=buildModeMonitor(snapshots);
+    if (monitorHistory !== state.history || monitorDate !== state.pools?.date) {
+      monitorHistory = state.history; monitorDate = state.pools?.date;
+      const snapshots=Object.fromEntries((state.history||[]).filter(h=>String(h.date)<=String(state.pools?.date||'')).map(h=>[h.date,h]));
+      monitorValue=buildModeMonitor(snapshots);
+    }
+    const monitor=monitorValue;
     setHTML($('reviewModes'), monitor.available ? monitor.modes.map(m=>'<div class="mode-stat"><strong>'+esc(m.mode)+'</strong><span>近20 '+(m.rateFull??'—')+'% / 近5 '+(m.rateRecent??'—')+'%</span><small>'+esc(m.message||'晋级样本 '+m.samplesRecent)+' · 近期'+m.samplesRecent+'只</small></div>').join('') : empty('模式统计等待历史积累'));
     if(!$('reviewDate').value){const date=String(state.pools?.date||'');if(date)$('reviewDate').value=date.replace(/^(\d{4})(\d{2})(\d{2})$/,'$1-$2-$3');}
     if(!$('copilotQuestion').options.length)$('copilotQuestion').innerHTML=COPILOT_QUESTIONS.map(q=>'<option value="'+q.key+'">'+esc(q.label)+'</option>').join('');
-    void getReviews().then(rows=>setHTML($('reviewEntries'),rows.slice(0,20).map(r=>'<article class="journal-entry"><strong>'+esc(r.date)+'</strong><p>'+esc(r.note||r.summary||r.content||'')+'</p></article>').join('')||empty('暂无复盘记录'))).catch(()=>{});
-    void getTrades().then(rows=>setHTML($('toolTrades'),rows.length?rows.map(r=>'<article class="journal-entry"><strong>'+esc(r.name||r.code)+' · '+esc(r.date||'')+'</strong><p>'+esc(r.buyReason||r.reason||'')+(r.sellReason?' / '+esc(r.sellReason):'')+'</p><span>盈亏 '+pctText(r.pnlPct??r.profitPct)+'</span></article>').join(''):empty('暂无交易记录'))).catch(()=>{});
+    paintJournals();
+    if (!journalPending && (journalDirty || Date.now()-journalAt > 30000)) {
+      journalDirty=false; const loadedRevision=journalRevision;
+      journalPending=Promise.all([getReviews(),getTrades()]).then(rows=>{
+        if(loadedRevision!==journalRevision){journalDirty=true;return;}
+        journals=rows; journalAt=Date.now(); if(page==='tools')paintJournals();
+      }).catch(()=>{journalDirty=true;}).finally(()=>{journalPending=null;if(loadedRevision!==journalRevision&&page==='tools')renderTools();});
+    }
+  }
+  function paintJournals() {
+    if (!journals) return;
+    const [reviews,trades]=journals;
+    setHTML($('reviewEntries'),reviews.slice(0,20).map(r=>'<article class="journal-entry"><strong>'+esc(r.date)+'</strong><p>'+esc(r.note||r.summary||r.content||'')+'</p></article>').join('')||empty('暂无复盘记录'));
+    setHTML($('toolTrades'),trades.length?trades.map(r=>'<article class="journal-entry"><strong>'+esc(r.name||r.code)+' · '+esc(r.date||'')+'</strong><p>'+esc(r.buyReason||r.reason||'')+(r.sellReason?' / '+esc(r.sellReason):'')+'</p><span>盈亏 '+pctText(r.pnlPct??r.profitPct)+'</span></article>').join(''):empty('暂无交易记录'));
   }
   async function runAdvisor(refresh=false) {
     if (!advisorStock) { $('advisorResult').innerHTML = empty('请先搜索并选择股票'); return {ok:false,error:'未选择股票'}; }
@@ -212,10 +258,10 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
   function bind() {
     doc.addEventListener('click', e => {
       const nav = e.target.closest('[data-mobile-nav]'); if (nav) { clearResults(); navigate(nav.dataset.mobileNav); }
-      const tab = e.target.closest('[data-rank-tab]'); if (tab) { rank = tab.dataset.rankTab; renderRank(); }
+      const tab = e.target.closest('[data-rank-tab]'); if (tab && rank !== tab.dataset.rankTab) { rank = tab.dataset.rankTab; navigate('rank', {force:true, history:false}); }
       const candidate = e.target.closest('[data-candidate-scope]'); if (candidate) { scope = candidate.dataset.candidateScope; renderBoard(); }
       const level = e.target.closest('[data-heat-board]'); if (level) { heatBoard = level.dataset.heatBoard ? Number(level.dataset.heatBoard) : null; paintHeat(); }
-      const theme = e.target.closest('[data-theme-choice]'); if (theme) { heat.codes=null; heat.concept = theme.dataset.themeChoice; rank = 'heat'; navigate('rank'); $('heatConcept').value = heat.concept; }
+      const theme = e.target.closest('[data-theme-choice]'); if (theme) { heat.codes=null; heat.concept = theme.dataset.themeChoice; rank = 'heat'; rendered.delete('rank:heat'); navigate('rank', {force:true}); $('heatConcept').value = heat.concept; }
       const sector = e.target.closest('[data-sector]'); if (sector) void openMembers(sector.dataset.sector);
       const result = e.target.closest('[data-search-code]'); if (result && !composing) { const code = result.dataset.searchCode; if ($('searchPurpose').value === 'advisor') { advisorStock = state.workspaceStocks.get(code); advisorSeq++; $('advisorSelected').textContent = advisorStock.name + ' · ' + code; $('advisorResult').innerHTML = ''; $('searchDialog').close(); navigate('tools'); $('advisorFold').open = true; } else { $('searchDialog').close(); onStock(code); } clearResults(); }
     });
@@ -242,18 +288,18 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     for (const [id, fn] of [['hotSort', () => { hotSort = $('hotSort').value; }], ['hotScope', () => { hotScope = $('hotScope').value; }], ['hotLayout', () => { hotLayout = $('hotLayout').value; }]]) $(id).addEventListener('change', () => { fn(); paintHot(); });
     $('hotRefresh').addEventListener('click',()=>onManualRefresh?onManualRefresh():load('hot',loadHotRank,true,paintHot));
     $('membersClose').addEventListener('click', () => $('membersDialog').close()); $('membersDialog').addEventListener('close',()=>{memberSequence++;memberFeedback.set('idle');});$('membersRefresh').addEventListener('click',()=>{if(currentSector)void openMembers(currentSector.code,true);}); $('membersSearch').addEventListener('input', paintMembers);
-    $('membersToHeat').addEventListener('click', () => { if (!memberData?.complete) return; heat.codes = memberData.rows.map(s => s.code); heat.concept = ''; heatBoard = null; $('membersDialog').close(); rank = 'heat'; navigate('rank'); });
+    $('membersToHeat').addEventListener('click', () => { if (!memberData?.complete) return; heat.codes = memberData.rows.map(s => s.code); heat.concept = ''; heatBoard = null; $('membersDialog').close(); rank = 'heat'; rendered.delete('rank:heat'); navigate('rank', {force:true}); });
     $('advisorChoose').addEventListener('click', () => openSearch('advisor')); $('advisorRun').addEventListener('click', () => void runAdvisor()); $('advisorMode').addEventListener('change', () => { advisorSeq++; $('advisorResult').innerHTML = ''; $('advisorHoldInputs').hidden = $('advisorMode').value !== 'hold'; $('advisorRun').disabled = false; });
     $('toolTheme').addEventListener('click', onTheme); $('toolNotify').addEventListener('click', onNotify); $('toolDate').addEventListener('click', onDate); $('toolExport').addEventListener('click', () => exportData().catch(e => { $('toolExportStatus').textContent = e.message; }));
     $('toolSave').addEventListener('click', async () => { try { await onToken($('toolToken').value); await onRefreshInterval(Number($('toolRefresh').value)); $('toolSaveStatus').textContent = '已保存到当前设备'; } catch (e) { $('toolSaveStatus').textContent = '保存失败：' + e.message; } });
-    $('reviewSave').addEventListener('click',async()=>{const date=$('reviewDate').value,note=$('reviewNote').value.trim();if(!date||!note){$('reviewStatus').textContent='请填写日期与复盘内容';return;}try{await putReview({date,note,phase:state.phase,updatedAt:new Date().toISOString()});$('reviewStatus').textContent='复盘已保存到当前设备';renderTools();}catch(e){$('reviewStatus').textContent='保存失败：'+e.message;}});
+    $('reviewSave').addEventListener('click',async()=>{const date=$('reviewDate').value,note=$('reviewNote').value.trim();if(!date||!note){$('reviewStatus').textContent='请填写日期与复盘内容';return;}try{await putReview({date,note,phase:state.phase,updatedAt:new Date().toISOString()});$('reviewStatus').textContent='复盘已保存到当前设备';journalRevision++;journalDirty=true;renderTools();}catch(e){$('reviewStatus').textContent='保存失败：'+e.message;}});
     $('copilotAsk').addEventListener('click',()=>{const text=$('copilotInput').value.trim(),key=text?routeCopilotQuery(text):$('copilotQuestion').value;if(!key){$('copilotAnswer').textContent='当前离线助手没有匹配到这个问题，请选择上方盘面问题。';return;}try{const html=buildCopilotAnswer(key,{...state.lastPayload,positionAdvice:state.positionAdvice,mentalNotes:state.mentalNotes});const template=doc.createElement('template');template.innerHTML=html.replace(/<\/(?:div|p|li|h[1-6])>/g,'\n');$('copilotAnswer').textContent=template.content.textContent;}catch{$('copilotAnswer').textContent='需要有效盘面数据，请稍后再试';}});
-    window.addEventListener('popstate', () => navigate(location.hash.slice(1), { history: false }));
-    navigate(location.hash.slice(1) || 'market', { history: false });
+    win.addEventListener('popstate', () => navigate(win.location.hash.slice(1), { history: false }));
+    navigate(win.location.hash.slice(1) || 'market', { history: false });
   }
   function openSearch(purpose) { clearResults(); $('searchPurpose').value = purpose; $('globalStockSearch').value = ''; $('searchDialog').showModal(); interactions?.motion.search($('searchDialog'),true); $('globalStockSearch').focus(); }
-  function refresh() { updateFreshness();interactions?.refresh(); register(state.pools?.up); if (page === 'market') renderMarket(); if (page === 'intraday') renderBoard(); if (page === 'rank') { if (rank === 'heat') paintHeat(); if (rank === 'hot') paintHot(); } if (page === 'tools') renderTools(); }
-  function applyPageColor(){doc.documentElement.dataset.workspaceColor=page==='rank'?rank:page;interactions?.refresh();}
+  function refresh() { revision++; updateFreshness(); register(state.pools?.up); paints.request(); }
+  function applyPageColor(){doc.documentElement.dataset.workspaceColor=page==='rank'?rank:page;}
   function updateFreshness(){
     const data=page==='rank'&&rank==='sectors'?cache.get('sectors:'+sectorType):page==='rank'&&rank==='hot'?cache.get('hot'):null;
     const failed=data?Boolean(data.error):state.lastErrorAt>state.lastSuccessAt;
@@ -277,5 +323,5 @@ export function createMobileWorkspace({ state, onStock, onRefresh, onTheme, onNo
     }else result=await onRefresh(true);
     interactions?.refresh();updateFreshness();return {...result,targetLabel:label};
   }
-  return {bind,refresh,navigate,openSearch,refreshActive,stock:code=>state.workspaceStocks.get(code),showHeat(){rank='heat';navigate('rank');}};
+  return {bind,refresh,navigate,openSearch,refreshActive,stock:code=>state.workspaceStocks.get(code),showHeat(){rank='heat';rendered.delete('rank:heat');navigate('rank',{force:true});}};
 }

@@ -29,8 +29,8 @@ function dateLabel(date) { return date.slice(0, 4) + '-' + date.slice(4, 6) + '-
 export function chartReadoutHTML(b) {
   return '<span>'+dateLabel(b.date)+'</span>  开 '+b.open.toFixed(2)+'  高 '+b.high.toFixed(2)+'  低 '+b.low.toFixed(2)+'  收 <b class="'+quoteTone(b.close,b.close-b.open)+'">'+b.close.toFixed(2)+'</b>';
 }
-export function createMobileChart({ onBars = () => {}, doc = document } = {}) {
-  let currentCode = null, seq = 0, bars = [], source = '', selected = null, root = null, observer = null;
+export function createMobileChart({ onBars = () => {}, doc = document, controlId = 'inspectorKlineControls' } = {}) {
+  let currentCode = null, seq = 0, bars = [], source = '', selected = null, root = null, observer = null, rootClick = null;
   const currentButton=()=>root?.querySelector('[data-chart-refresh]');
   const proxyButton={classList:{add:(...names)=>currentButton()?.classList.add(...names),remove:(...names)=>currentButton()?.classList.remove(...names),toggle:(name,on)=>currentButton()?.classList.toggle(name,on)},setAttribute:(name,value)=>currentButton()?.setAttribute(name,value),removeAttribute:name=>currentButton()?.removeAttribute(name)};
   const feedback=createRefreshFeedback(proxyButton,{doc});
@@ -65,8 +65,9 @@ export function createMobileChart({ onBars = () => {}, doc = document } = {}) {
   }
   function mount(code, container) {
     close(); currentCode = code; root = container; bars = []; selected = null;
-    container.innerHTML = '<div class="mobile-section-head"><h3>日K</h3><button type="button" class="mobile-refresh-control" data-chart-refresh>刷新 / 重试</button></div><div class="chart-controls"><div class="segments inspector-chart-controls" id="inspectorKlineControls">' + [20, 60, 120].map(n => '<button type="button" data-kline-days="' + n + '" data-chart-range="' + n + '">' + n + '日</button>').join('') + '</div><div class="chart-averages">' + [5, 10, 20].map(n => '<button type="button" class="ma' + n + '" data-chart-ma="' + n + '">MA' + n + '</button>').join('') + '</div></div><div class="chart-state" role="status"></div><div class="chart-readout"></div><div class="chart-surface" tabindex="0" aria-label="日K，左右方向键查看每日数据"></div><p class="chart-meta"></p>';
-    container.addEventListener('click', e => { const range = e.target.closest('[data-chart-range]'), ma = e.target.closest('[data-chart-ma]'); if (range) { prefs.range = Number(range.dataset.chartRange); selected = null; save(); paint(); } if (ma) { const n = Number(ma.dataset.chartMa); prefs.averages = prefs.averages.includes(n) ? prefs.averages.filter(x => x !== n) : [...prefs.averages, n]; save(); paint(); } if (e.target.closest('[data-chart-refresh]')) void load(true); });
+    container.innerHTML = '<div class="mobile-section-head"><h3>日K</h3><button type="button" class="mobile-refresh-control" data-chart-refresh>刷新 / 重试</button></div><div class="chart-controls"><div class="segments inspector-chart-controls" id="' + controlId + '">' + [20, 60, 120].map(n => '<button type="button" data-kline-days="' + n + '" data-chart-range="' + n + '">' + n + '日</button>').join('') + '</div><div class="chart-averages">' + [5, 10, 20].map(n => '<button type="button" class="ma' + n + '" data-chart-ma="' + n + '">MA' + n + '</button>').join('') + '</div></div><div class="chart-state" role="status"></div><div class="chart-readout"></div><div class="chart-surface" tabindex="0" aria-label="日K，左右方向键查看每日数据"></div><p class="chart-meta"></p>';
+    rootClick = e => { const range = e.target.closest('[data-chart-range]'), ma = e.target.closest('[data-chart-ma]'); if (range) { prefs.range = Number(range.dataset.chartRange); selected = null; save(); paint(); } if (ma) { const n = Number(ma.dataset.chartMa); prefs.averages = prefs.averages.includes(n) ? prefs.averages.filter(x => x !== n) : [...prefs.averages, n]; save(); paint(); } if (e.target.closest('[data-chart-refresh]')) void load(true); };
+    container.addEventListener('click', rootClick);
     const surface = container.querySelector('.chart-surface'); let pointer = null;
     const inspect = e => { if (!bars.length) return; const rect = surface.getBoundingClientRect(), xx = (e.clientX - rect.left) / rect.width * 360, n = Math.min(bars.length, prefs.range); selected = Math.min(n - 1, Math.max(0, Math.floor((xx - 8) / 304 * n))); paint(); };
     surface.addEventListener('pointerdown', e => { pointer = e.pointerId; surface.setPointerCapture(e.pointerId); inspect(e); });
@@ -76,6 +77,6 @@ export function createMobileChart({ onBars = () => {}, doc = document } = {}) {
     if (typeof ResizeObserver !== 'undefined') { observer = new ResizeObserver(paint); observer.observe(surface); }
     paint(); void load();
   }
-  function close() { seq++; feedback.set('idle'); currentCode = null; observer?.disconnect(); observer = null; root = null; }
+  function close() { seq++; feedback.set('idle');if(root && rootClick)root.removeEventListener('click',rootClick);rootClick=null; currentCode = null; observer?.disconnect(); observer = null; root = null; }
   return { mount, close, currentCode: () => currentCode };
 }

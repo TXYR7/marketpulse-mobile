@@ -1,0 +1,52 @@
+/* 日常交易流程使用手机自己的排布；行情与计划共用同一个选中标的。 */
+.daily-heading { margin:2px 0 12px; }
+.daily-heading h1 { margin:0; font-size:22px; line-height:1.4; font-weight:650; color:var(--ink); }
+.daily-heading p { margin:5px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
+.daily-stages { margin-bottom:10px; }
+.daily-warning { padding:10px 12px; margin-bottom:12px; border:1px solid var(--line); border-left:3px solid var(--amber-ink); border-radius:8px; background:var(--amber-soft); color:var(--ink); font-size:14px; line-height:1.6; }
+.daily-list { max-height:255px; overflow-y:auto; scrollbar-gutter:stable; overscroll-behavior:contain; }
+.daily-stock { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:11px 8px; width:100%; border:1px solid transparent; border-bottom-color:var(--line-soft); border-radius:6px; background:transparent; color:var(--ink); text-align:left; font:inherit; min-height:66px; }
+.daily-stock[aria-pressed="true"] { background:var(--selection-soft,var(--data-soft)); border-color:var(--line); }
+.daily-stock > span:first-child { min-width:0; flex:1; }
+.daily-stock > span:last-child { text-align:right; }
+.daily-stock strong { display:block; font-size:14px; font-weight:600; }
+.daily-stock b { font-weight:500; font-size:14px; font-variant-numeric:tabular-nums; }
+.daily-stock small { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+.daily-stock .daily-tone.waiting,.daily-tone.waiting { color:var(--amber-ink); }
+.daily-stock .daily-tone.ready,.daily-tone.ready { color:var(--pos-ink); }
+.daily-stock .daily-tone.avoid,.daily-tone.avoid { color:var(--danger); }
+.daily-stock-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.daily-stock-heading h2 { margin:0; font-size:18px; font-weight:600; }
+.daily-stock-heading span { display:block; color:var(--muted); font-size:12px; margin-top:4px; }
+.daily-stock-heading > div:last-child { text-align:right; }
+.daily-stock-heading strong { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+.daily-decision { margin:14px 0; }
+.daily-decision > strong { font-size:16px; }
+.daily-decision p { margin:6px 0; color:var(--muted); font-size:14px; line-height:1.6; }
+.daily-links,.daily-subnav { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 0; }
+.daily-links button,.daily-subnav button { min-height:40px; padding:7px 10px; color:var(--teal); background:var(--data-soft); border:1px solid var(--line); border-radius:6px; font-size:12px; }
+.daily-subnav { margin:0 0 12px; }
+.daily-subnav button.active { background:var(--surface); color:var(--ink); border-color:var(--teal); }
+.daily-facts { display:grid; gap:10px; margin:14px 0; }
+.daily-facts > div { display:grid; grid-template-columns:80px minmax(0,1fr); gap:8px; }
+.daily-facts dt { color:var(--muted); font-size:12px; }
+.daily-facts dd { margin:0; font-size:14px; overflow-wrap:anywhere; }
+#dailyPlanForm fieldset { padding:0; border:0; margin:0; min-width:0; display:grid; gap:12px; }
+#dailyPlanForm label,#dailyTradeForm label { display:grid; gap:5px; font-size:12px; color:var(--muted); min-width:0; }
+#dailyPlanForm input,#dailyPlanForm textarea,#dailyPlanForm select,#dailyTradeForm input,#dailyTradeForm textarea,#dailyTradeForm select { width:100%; min-width:0; padding:9px 10px; min-height:42px; background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-radius:7px; font:inherit; font-size:16px; }
+#dailyPlanForm textarea,#dailyTradeForm textarea { resize:vertical; line-height:1.6; }
+#dailyTradeForm { display:grid; gap:12px; }
+.daily-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.daily-primary { width:100%; background:var(--fill-accent,var(--teal)) !important; color:var(--on-accent,var(--ink)) !important; min-height:44px; border:0; }
+.daily-result { padding:12px 0; border-bottom:1px solid var(--line-soft); display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:14px; }
+.daily-result strong { font-weight:600; }
+.daily-result > span { margin-left:auto; color:var(--muted); font-size:12px; }
+.daily-result p { width:100%; margin:0; font-size:12px; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
+.daily-result button { min-height:36px; border:0; padding:5px 0; background:transparent; color:var(--teal); font:inherit; font-size:14px; }
+.daily-result:last-child { border-bottom:0; }
+.daily-selected .mobile-kline { width:100%; display:block; }
+.daily-selected .chart-surface { min-height:180px; }
+#dailySaveStatus:empty,#dailyTradeMessage:empty { display:none; }
+.mobile-bottom-nav button { min-height:52px; }
+@media(min-width:680px) { #view-today,#view-trading,#view-validation { max-width:900px; } #dailyWorkspace { display:grid; grid-template-columns:300px minmax(0,1fr); gap:12px; } #dailyWorkspace > .daily-heading,#dailyWorkspace > .daily-stages,#dailyWorkspace > .mobile-meta,#dailyWorkspace > .daily-warning,#dailyWorkspace > section:last-child { grid-column:1 / -1; } #dailyWorkspace > .mobile-panel { margin-bottom:0; } .daily-list { max-height:480px; } }
+@media(max-width:350px) { .daily-fields { gap:7px; } .daily-links button,.daily-subnav button { padding:7px 8px; } }

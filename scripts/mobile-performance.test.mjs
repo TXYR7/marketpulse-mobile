@@ -21,7 +21,7 @@ test('安卓安装/全屏预留系统按键区，浏览器和iOS保留原生模�
 
 test('选中导航立即更新，内容在下一次绘制后生成，连续切页只生成最终页面',async()=>{
   const f=await workspaceFixture();f.workspace.navigate('intraday');
-  assert.equal(f.state.view,'intraday');assert.equal(f.nav[1].classList.contains('active'),true);assert.equal(f.counters.board,0);
+  assert.equal(f.state.view,'intraday');assert.equal(f.nav.find(e=>e.dataset.mobileNav==='market').classList.contains('active'),true);assert.equal(f.counters.board,0);
   f.frame();assert.equal(f.counters.board,0);f.workspace.navigate('rank');f.flush();
   assert.equal(f.counters.board,0);assert.equal(f.counters.heat,1);assert.equal(f.elements.get('view-intraday').hidden,true);
 });

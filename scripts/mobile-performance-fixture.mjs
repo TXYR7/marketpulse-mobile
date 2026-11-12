@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 
 // Deliberately small DOM/data fixture: exercises the production workspace and its scheduler.
 export async function workspaceFixture(source=readFileSync(new URL('../mobile-workspace.js',import.meta.url),'utf8')) {
-  const frames=new Map(),listeners=new Map(),elements=new Map(),counters={board:0,market:0,tools:0,heat:0,html:0,monitor:0,reviews:0,trades:0,refresh:0,history:0,view:0};let next=0;
+  const frames=new Map(),listeners=new Map(),elements=new Map(),counters={board:0,market:0,tools:0,heat:0,html:0,monitor:0,reviews:0,trades:0,refresh:0,history:0,view:0,daily:0,tradeView:0,validation:0,dailyLeave:0};let next=0;
   function element(id='') {
     let html='';const classes=new Set();
     return {id,tagName:'DIV',dataset:{},value:'',hidden:false,open:false,disabled:false,textContent:'',options:[],scrollTop:0,
@@ -12,9 +12,10 @@ export async function workspaceFixture(source=readFileSync(new URL('../mobile-wo
       get innerHTML(){return html;},set innerHTML(v){html=v;counters.html++;},replaceChildren(){html='';},scrollIntoView(){},focus(){},showModal(){this.open=true;},close(){this.open=false;}};
   }
   const ids=[...readFileSync(new URL('../index.html',import.meta.url),'utf8').matchAll(/id="([^"]+)"/g)].map(m=>m[1]);ids.forEach(id=>elements.set(id,element(id)));
-  const main=element('main'),nav=['market','intraday','rank','tools'].map(page=>{const e=element();e.dataset.mobileNav=page;return e;});
+  const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+  const main=element('main'),nav=[...html.matchAll(/data-mobile-nav="([^"]+)"/g)].map(([,page])=>{const e=element();e.dataset.mobileNav=page;return e;});
   const doc={documentElement:element('html'),getElementById:id=>elements.get(id),querySelector:s=>s==='main'?main:null,
-    querySelectorAll:s=>s==='.view'?['market','intraday','rank','tools'].map(p=>elements.get('view-'+p)):s==='[data-mobile-nav]'?nav:[],
+    querySelectorAll:s=>s==='.view'?[...elements.values()].filter(e=>e.id.startsWith('view-')):s==='[data-mobile-nav]'?nav:[],
     addEventListener(n,fn){listeners.set('document:'+n,fn);},createElement:()=>element()};
   const win={requestAnimationFrame(fn){frames.set(++next,fn);return next;},cancelAnimationFrame:id=>frames.delete(id),history:{pushState(){counters.history++;}},location:{hash:'#intraday'},addEventListener(){}};
   const state={pools:{date:'20261111',up:[],upCount:0,downCount:0,sources:{up:true}},emotion:{},history:[],themes:[],leaders:[],lastSuccessAt:1,lastErrorAt:0,refreshMs:15000};
@@ -36,7 +37,7 @@ export async function workspaceFixture(source=readFileSync(new URL('../mobile-wo
   const modules=new Map();const link=async spec=>{if(!modules.has(spec)){const m=new vm.SourceTextModule(mocks[spec],{context});modules.set(spec,m);await m.link(link);}return modules.get(spec);};
   for(const [fn,key]of [['renderBoard','board'],['renderMarket','market'],['renderTools','tools'],['paintHeat','heat']])source=source.replace('function '+fn+'() {','function '+fn+'() { fixture.counters.'+key+'++;');
   const module=new vm.SourceTextModule(source,{context});await module.link(link);await module.evaluate();
-  const workspace=module.namespace.createMobileWorkspace({state,doc,win,onViewRender:()=>counters.view++,interactions:{refresh(){counters.refresh++;},motion:{page(){}}}});
+  const workspace=module.namespace.createMobileWorkspace({state,doc,win,onViewRender:()=>counters.view++,onDailyRender:()=>counters.daily++,onTradesRender:()=>counters.tradeView++,onValidationRender:()=>counters.validation++,onDailyLeave:()=>counters.dailyLeave++,interactions:{refresh(){counters.refresh++;},motion:{page(){}}}});
   function frame(){const batch=[...frames.values()];frames.clear();batch.forEach(fn=>fn());}
   function flush(){for(let i=0;i<5&&frames.size;i++)frame();}
   return {workspace,state,doc,win,main,nav,elements,fixture,counters,listeners,frame,flush,frames};

@@ -2,6 +2,7 @@ import { createMobileInteractions, createMobileRefresh } from './mobile-interact
 import { createSnapshotBackfill } from './mobile-render.js';
 import { createMobileDetail, riskPresentation } from './mobile-detail.js';
 import { createMobileDrawerMotion } from './mobile-drawer-motion.js';
+import { createMobileDaily } from './mobile-daily.js';
 import { createMobileWorkspace, decisionBadgeTone } from './mobile-workspace.js';
 import { createMobileChart } from './mobile-chart.js';
 import { applyMobileJudgements, rememberDecisionBars, warmMobileJudgements } from './mobile-model.js';
@@ -20,7 +21,7 @@ import { renderOpportunity, renderLadder, renderStructure, esc, fmtMoney, pctCla
 // 2026-09-11 一屏到底批:renderReview import 已随复盘视图整删(store.js 复盘数据层保留,旧记录不丢)
 
 const state = {
-  pools: null, quotes: {}, watch: [], view: 'intraday',
+  pools: null, quotes: {}, watch: [], view: 'today',
   refreshMs: 15000, manualDate: '', timer: null,
   emotion: null, themes: [], leaders: [], opportunities: null, riskRadar: null, structure: null, plan: null, breakRate: null, phase: null,
   lastPayload: null, history: [], historyLoaded: false,
@@ -40,7 +41,8 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const interactions=createMobileInteractions();
 const drawerMotion=createMobileDrawerMotion();
 let sheetStock=null,sheetOpenTask=Promise.resolve();
-const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, onStock: openSheet, onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
+let dailyWorkspace=null;
+const workspace = createMobileWorkspace({ state, onViewRender:renderIntraday, onDailyRender:()=>dailyWorkspace?.update(), onTradesRender:()=>{void dailyWorkspace?.refreshRecords();}, onValidationRender:()=>dailyWorkspace?.update(), onDailyLeave:()=>dailyWorkspace?.deactivate(), onStock: code=>state.view==='today'?dailyWorkspace?.select(code):openSheet(code), onRefresh: refresh, interactions, onManualRefresh:()=>manualRefresh.run(),
   onTheme: () => $('#themeBtn').click(), onNotify: () => openNotificationSettings().catch(e => toast(e.message)),
   onDate: openHistoryDate, onToken: async value => { const token = String(value || '').trim(); if (token) localStorage.setItem('mp_ema_token', token); else localStorage.removeItem('mp_ema_token'); setEmaToken(token); },
   onRefreshInterval: async value => { if (![8000,15000,30000].includes(value)) throw new Error('无效更新间隔'); state.refreshMs=value; await setKV('mobileRefreshMs',value); applyRefreshTimer(); }
@@ -52,6 +54,7 @@ const sheetReader=createMobileDetail({sheet:$('#sheet'),onChart:()=>{if(detailCh
   const stock=sheetStock,run=sheetSequence;
   void sheetOpenTask.then(()=>{if(!stock||state.sheetCode!==stock.code||run!==sheetSequence)return;renderBoardReference(stock);return loadSimilarCases(stock.code,run);}).catch(()=>{});
 }});
+dailyWorkspace=createMobileDaily({state,onNavigate:page=>page==='search'?workspace.openSearch('today'):workspace.navigate(page),onDetail:openSheet,onAdvisor:(stock,draft)=>workspace.selectAdvisor(stock,draft),onBars:(code,bars)=>{rememberDecisionBars(code,bars);queueDecisionBackfill();},notify:toast});
 let sheetOrigin = null, sheetReturnDialog = null, sheetSequence = 0;
 function syncDetailJudgement() {
   if (!state.sheetCode) return;
@@ -872,7 +875,7 @@ async function openSheet(code) {
     '</section><section class="sheet-section" id="sheet-chart" role="tabpanel" aria-labelledby="sheet-tab-chart" hidden><div class="mobile-chart-panel" id="sheetKline"></div></section><section class="sheet-section" id="sheet-evidence" role="tabpanel" aria-labelledby="sheet-tab-evidence" hidden>' + signalHtml + '<div id="sheetFullPlan"></div><h3>晋级证据</h3><div id="sheetPromoEvidence">' + promoHtml + '</div>' +
     '<div class="s-similar" id="detailSimilarCases"><div class="muted">相似日表现计算中…</div></div>' +
     '<div class="s-similar" id="boardPromoRef"></div>' +
-    '</section><div class="s-actions"><button class="btn" type="button" data-sheet-edge="top">到顶部</button><button class="btn" type="button" data-sheet-edge="bottom">到末尾</button><button class="btn" type="button" id="sheetClose">关闭</button></div>';
+    '</section><div class="s-actions"><button class="btn" type="button" data-sheet-edge="top">到顶部</button><button class="btn" type="button" data-sheet-edge="bottom">到末尾</button><button class="btn" type="button" id="sheetDailyObserve">加入今日观察</button><button class="btn" type="button" id="sheetClose">关闭</button></div>';
   scrim.classList.add('show'); sheet.classList.add('show');
   sheetOpenTask=drawerMotion.animate(sheet,{opening:true});
   sheetReader.reset();
@@ -891,6 +894,7 @@ async function openSheet(code) {
   setHTML($('#sheetPlan'),initialPlanHtml); setHTML($('#sheetFullPlan'),initialPlanHtml);
 
   $('#sheetClose').addEventListener('click', closeSheet);
+  $('#sheetDailyObserve').addEventListener('click',()=>{const code=state.sheetCode;if(!code)return;closeSheet();void dailyWorkspace.observe(code).catch(e=>toast(e.message));});
   // 后台补实时报价：报价不新鲜才拉（15s 刷新周期内已回流则连请求都不发）；
   // fail-fast 快速失败，失败只提示不阻塞——抽屉早已用池内数据弹出
   if (!freshQuote(code)) {
